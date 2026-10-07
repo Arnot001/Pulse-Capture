@@ -30,6 +30,31 @@ class CommandTests(unittest.TestCase):
         self.assertEqual(c[c.index('-crf') + 1], '18')
         self.assertEqual(c[c.index('-framerate') + 1], '60')
 
+    def test_watermark_overlay_is_optional_and_uses_saved_position(self):
+        c = self.command(watermark=True, watermark_position='Bottom right',
+                         watermark_path='C:/Pulse/assets/branding/pulse.png')
+        self.assertEqual(c.count('-i'), 2)
+        self.assertIn('C:/Pulse/assets/branding/pulse.png', c)
+        graph = c[c.index('-filter_complex') + 1]
+        self.assertIn('scale=140:-1', graph)
+        self.assertIn('colorchannelmixer=aa=0.82', graph)
+        self.assertIn('overlay=W-w-24:H-h-24', graph)
+        self.assertIn('[v]', c)
+
+    def test_watermark_all_corner_positions(self):
+        expected = {
+            'Top left': 'overlay=24:24',
+            'Top right': 'overlay=W-w-24:24',
+            'Bottom left': 'overlay=24:H-h-24',
+            'Bottom right': 'overlay=W-w-24:H-h-24',
+        }
+        for position, fragment in expected.items():
+            with self.subTest(position=position):
+                c = self.command(watermark=True, watermark_position=position,
+                                 watermark_path='C:/Pulse/pulse.png')
+                graph = c[c.index('-filter_complex') + 1]
+                self.assertIn(fragment, graph)
+
     def test_mic_is_one_argument_without_shell_quotes(self):
         name = 'Microphone "USB" (Audio) & $(echo hi)'
         c = self.command(audio=(name,))
@@ -48,6 +73,8 @@ class CommandTests(unittest.TestCase):
         for kw in ({'mode': 'other'}, {'fps': 120}, {'quality': 'Ultra'},
                    {'mode': 'window'}, {'mode': 'region'},
                    {'mode': 'region', 'region': Region(0, 0, 0, 2)},
-                   {'audio': ('same', 'same')}):
+                   {'audio': ('same', 'same')},
+                   {'watermark': True},
+                   {'watermark_position': 'Center'}):
             with self.subTest(kw=kw), self.assertRaises(ValueError):
                 self.command(**kw)
