@@ -21,6 +21,9 @@ class CaptureOptions:
     region: Region | None = None
     hwnd: int | None = None
     audio: tuple[str, ...] = ()
+    watermark: bool = False
+    watermark_position: str = 'Bottom right'
+    watermark_path: str = ''
 
     def validate(self):
         if self.mode not in ('screen', 'window', 'region'):
@@ -37,3 +40,7 @@ class CaptureOptions:
             raise ValueError('Choose up to two different audio sources.')
         if any(not name.strip() or '\x00' in name for name in self.audio):
             raise ValueError('Invalid audio device.')
+        if self.watermark_position not in ('Top left', 'Top right', 'Bottom left', 'Bottom right'):
+            raise ValueError('Invalid watermark position.')
+        if self.watermark and (not self.watermark_path.strip() or '\x00' in self.watermark_path):
+            raise ValueError('Watermark asset is unavailable.')
