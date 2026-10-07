@@ -27,8 +27,9 @@ class CaptureApp(tk.Tk):
         self.geometry(f'650x{height}')
         self.minsize(570, 660)
         t.install(self)
-        asset_root = Path(getattr(sys, '_MEIPASS', Path(__file__).resolve().parents[1]))
-        icon = asset_root / 'assets' / 'branding' / 'pulse.ico'
+        self.asset_root = Path(getattr(sys, '_MEIPASS', Path(__file__).resolve().parents[1]))
+        icon = self.asset_root / 'assets' / 'branding' / 'pulse.ico'
+        self.watermark_asset = self.asset_root / 'assets' / 'branding' / 'pulse.png'
         if icon.is_file():
             self.iconbitmap(str(icon))
         self.prefs = settings.load()
@@ -46,6 +47,8 @@ class CaptureApp(tk.Tk):
         self.mic_on = tk.BooleanVar(value=self.prefs.microphone)
         self.system_on = tk.BooleanVar(value=self.prefs.system_audio)
         self.hotkey_on = tk.BooleanVar(value=self.prefs.hotkey)
+        self.watermark_on = tk.BooleanVar(value=self.prefs.watermark)
+        self.watermark_position = tk.StringVar(value=self.prefs.watermark_position)
         self._shell()
         self._screen()
         self.protocol('WM_DELETE_WINDOW', self.close)
@@ -136,6 +139,29 @@ class CaptureApp(tk.Tk):
         self.fps_segments = t.Segments(row, self.fps, [(30, '30 FPS'), (60, '60 FPS')])
         self.fps_segments.pack(side='right')
 
+        branding = t.Card(body, '04', 'BRANDING')
+        branding.pack(fill='x', pady=(0, 10))
+        brand_row = tk.Frame(branding.body, bg=t.PANEL)
+        brand_row.pack(fill='x')
+        t.label(brand_row, 'PULSE WATERMARK', 9, bold=True, anchor='w').pack(side='left')
+        self.watermark_toggle = tk.Checkbutton(
+            brand_row, text='ON', variable=self.watermark_on, command=self.watermark_changed,
+            bg=t.PANEL, fg=t.CYAN, selectcolor=t.CONTROL, activebackground=t.PANEL,
+            activeforeground=t.TEXT, disabledforeground=t.MUTED, bd=0)
+        self.watermark_toggle.pack(side='right', padx=(8, 0))
+        self.watermark_on.trace_add('write', lambda *_: self.watermark_toggle.configure(
+            text='ON' if self.watermark_on.get() else 'OFF'))
+        self.watermark_combo = ttk.Combobox(
+            brand_row, textvariable=self.watermark_position,
+            values=('Bottom right', 'Bottom left', 'Top right', 'Top left'),
+            state='readonly', width=16)
+        self.watermark_combo.pack(side='right', padx=(8, 0))
+        self.watermark_note = t.label(
+            branding.body, 'Optional · subtle Pulse logo burned into the saved MP4.',
+            9, t.MUTED, anchor='w')
+        self.watermark_note.pack(fill='x', pady=(6, 0))
+        self.watermark_changed()
+
         self.record_button = t.button(body, '●   START RECORDING', self.toggle, accent=True,
                                        font=(t.FONT, -17, 'bold'))
         self.record_button.configure(pady=12, state='disabled')
@@ -175,6 +201,16 @@ class CaptureApp(tk.Tk):
         combo.set('Checking…')
         combo.pack(side='left', fill='x', expand=True)
         return toggle, combo
+
+    def watermark_changed(self):
+        enabled = self.watermark_on.get() and self.watermark_asset.is_file()
+        busy = bool(self.recorder and self.recorder.busy)
+        self.watermark_combo.configure(state='readonly' if enabled and not busy else 'disabled')
+        if self.watermark_on.get() and not self.watermark_asset.is_file():
+            self.watermark_note.configure(text='Watermark unavailable · branding asset is missing.', fg=t.RED)
+        else:
+            self.watermark_note.configure(
+                text='Optional · subtle Pulse logo burned into the saved MP4.', fg=t.MUTED)
 
     def mode_changed(self):
         self.target_text.pack_forget()
@@ -292,6 +328,8 @@ class CaptureApp(tk.Tk):
         self.prefs.fps, self.prefs.quality = self.fps.get(), self.quality.get()
         self.prefs.microphone, self.prefs.system_audio = self.mic_on.get(), self.system_on.get()
         self.prefs.hotkey = self.hotkey_on.get()
+        self.prefs.watermark = self.watermark_on.get()
+        self.prefs.watermark_position = self.watermark_position.get()
         for attr, combo, devices in (('mic_device', self.mic_combo, self.inventory.microphones),
                                      ('system_device', self.system_combo, self.inventory.loopbacks)):
             if devices and combo.current() >= 0:
@@ -315,8 +353,14 @@ class CaptureApp(tk.Tk):
                     raise ValueError('Select an available window first.')
                 hwnd = self.windows[index].hwnd
                 validate_window(hwnd)
-            options = CaptureOptions(self.mode.get(), self.fps.get(), self.quality.get(),
-                                     self.region, hwnd, self.selected_audio())
+            watermark = self.watermark_on.get()
+            if watermark and not self.watermark_asset.is_file():
+                raise RuntimeError('Pulse watermark asset is missing. Reinstall or rebuild Pulse Capture.')
+            options = CaptureOptions(
+                mode=self.mode.get(), fps=self.fps.get(), quality=self.quality.get(),
+                region=self.region, hwnd=hwnd, audio=self.selected_audio(),
+                watermark=watermark, watermark_position=self.watermark_position.get(),
+                watermark_path=str(self.watermark_asset) if watermark else '')
             options.validate()
             self.persist()
             self.timer.configure(text='00:00:00')
@@ -332,6 +376,9 @@ class CaptureApp(tk.Tk):
         self.window_combo.configure(state='disabled' if locked else 'readonly')
         self.target_button.configure(state='disabled' if locked else 'normal')
         self.refresh_button.configure(state='disabled' if locked else 'normal')
+        self.watermark_toggle.configure(state='disabled' if locked else 'normal')
+        self.watermark_combo.configure(
+            state='readonly' if self.watermark_on.get() and not locked else 'disabled')
         for combo, toggle, devices in ((self.mic_combo, self.mic_toggle, self.inventory.microphones),
                                        (self.system_combo, self.system_toggle, self.inventory.loopbacks)):
             combo.configure(state='readonly' if devices and not locked else 'disabled')

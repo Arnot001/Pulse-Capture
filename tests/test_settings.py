@@ -15,7 +15,8 @@ class SettingsTests(unittest.TestCase):
         self.assertEqual(load(self.path), Settings())
 
     def test_round_trip_and_unicode(self):
-        value = Settings(fps=60, quality='High', mic_device='Mikrofon — USB', hotkey=True)
+        value = Settings(fps=60, quality='High', mic_device='Mikrofon — USB', hotkey=True,
+                         watermark=True, watermark_position='Top left')
         save(value, self.path)
         self.assertEqual(load(self.path), value)
         self.assertEqual(list(self.path.parent.glob('*.tmp')), [])
@@ -23,6 +24,7 @@ class SettingsTests(unittest.TestCase):
     def test_invalid_types_and_corruption(self):
         self.path.parent.mkdir()
         for raw in ('{', '[]', '{"fps": 120, "microphone": "yes", "quality": "Ultra"}',
+                    '{"watermark": "yes", "watermark_position": "Center"}',
                     '{"version": 200}'):
             self.path.write_text(raw, encoding='utf-8')
             self.assertEqual(load(self.path), Settings())

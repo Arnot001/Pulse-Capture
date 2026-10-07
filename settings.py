@@ -25,6 +25,8 @@ class Settings:
     mic_device: str = ''
     system_device: str = ''
     hotkey: bool = False
+    watermark: bool = False
+    watermark_position: str = 'Bottom right'
     output_folder: str = ''
 
     @property
@@ -38,7 +40,7 @@ def load(path=None):
         raw = json.loads(Path(path or settings_path()).read_text(encoding='utf-8'))
         if not isinstance(raw, dict) or raw.get('version', 1) != 1:
             return result
-        for key in ('microphone', 'system_audio', 'hotkey'):
+        for key in ('microphone', 'system_audio', 'hotkey', 'watermark'):
             if type(raw.get(key)) is bool:
                 setattr(result, key, raw[key])
         for key in ('mic_device', 'system_device', 'output_folder'):
@@ -48,6 +50,8 @@ def load(path=None):
             result.fps = raw['fps']
         if raw.get('quality') in ('Standard', 'High'):
             result.quality = raw['quality']
+        if raw.get('watermark_position') in ('Top left', 'Top right', 'Bottom left', 'Bottom right'):
+            result.watermark_position = raw['watermark_position']
     except (OSError, ValueError, TypeError):
         pass
     return result
