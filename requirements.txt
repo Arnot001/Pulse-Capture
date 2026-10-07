@@ -1,0 +1,2 @@
+# Runtime: Python 3.11+ with Tkinter (included by the python.org Windows installer).
+# No third-party Python runtime packages. FFmpeg and FFprobe are external binaries.
