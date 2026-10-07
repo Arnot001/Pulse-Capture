@@ -1,7 +1,7 @@
 # PULSE // CAPTURE v0.1
 
 A small Windows screen recorder with a dark Pulse interface. Choose a source,
-record, stop, and get a local MP4. No watermark, editor, account, or cloud.
+record, stop, and get a local MP4. Optional Pulse watermark; no editor, account, or cloud.
 
 ## Run
 
@@ -28,11 +28,13 @@ Missing or incompatible binaries produce a visible error and disable recording.
 2. Select microphone/input and system-audio devices when available. Uncheck an
    input for silent capture. **Refresh devices** re-enumerates connected hardware.
 3. Choose Standard (H.264 CRF 23) or High (CRF 18), and 30 or 60 FPS.
-4. Press **Start recording**. “Starting” means FFmpeg is opening devices;
+4. Optionally enable the **Pulse watermark** and choose one of four corners. It is
+   off by default and is burned directly into the saved MP4 when enabled.
+5. Press **Start recording**. “Starting” means FFmpeg is opening devices;
    “Recording” appears only after FFmpeg reports encoded frames.
-5. Press **Stop recording**. Pulse waits for FFmpeg to finalize the MP4, checks
+6. Press **Stop recording**. Pulse waits for FFmpeg to finalize the MP4, checks
    video frames, duration, and requested audio, then shows **Saved**.
-6. **Open folder** opens the recording destination in Explorer.
+7. **Open folder** opens the recording destination in Explorer.
 
 Recordings default to `%USERPROFILE%\Videos\Pulse Capture`.
 Preferences are stored at `%LOCALAPPDATA%\Pulse Capture\settings.json`.
@@ -63,6 +65,8 @@ microphone fails. Pulse does not fabricate device availability or audio content.
 
 ## Recording behavior and limits
 
+- The optional watermark uses the bundled Pulse branding asset at a subtle opacity
+  and small fixed size, with a 24 px edge inset. The setting and corner are remembered.
 - The cursor is included. The recorder itself is visible in full-screen capture;
   minimize it and use the optional shortcut when needed.
 - Keep a target window restored and visible. GDI capture is not guaranteed for
