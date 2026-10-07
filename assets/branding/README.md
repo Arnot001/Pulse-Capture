@@ -10,3 +10,6 @@ Palette: background #0B1017, panel #121B26, cyan #55DDED, text #ECF3FC,
 muted #92A6BC, recording/error #FF596C, success #68E4B3.
 
 Segoe UI provides the interface typography; Consolas is used for the timer.
+
+`pulse.png` is also the compact default recording watermark. Pulse Capture scales it
+inside FFmpeg, keeps it subtle, and only burns it into video when the user opts in.
