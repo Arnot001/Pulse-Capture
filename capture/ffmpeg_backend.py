@@ -61,21 +61,52 @@ def build_command(ffmpeg, options: CaptureOptions, output):
         args += ['-offset_x', str(r.x), '-offset_y', str(r.y), '-video_size', f'{r.width}x{r.height}']
     target = f'hwnd={options.hwnd}' if options.mode == 'window' else 'desktop'
     args += ['-i', target]
+
     for device in options.audio:
         args += ['-thread_queue_size', '512', '-f', 'dshow', '-audio_buffer_size', '50',
                  '-i', f'audio={device}']
-    args += ['-map', '0:v:0']
+
+    watermark_index = None
+    if options.watermark:
+        watermark_index = 1 + len(options.audio)
+        args += ['-loop', '1', '-framerate', str(options.fps), '-i', str(options.watermark_path)]
+
+    filters = []
+    if options.watermark:
+        positions = {
+            'Top left': '24:24',
+            'Top right': 'W-w-24:24',
+            'Bottom left': '24:H-h-24',
+            'Bottom right': 'W-w-24:H-h-24',
+        }
+        filters += [
+            f'[{watermark_index}:v]scale=140:-1,format=rgba,colorchannelmixer=aa=0.82[wm]',
+            f'[0:v][wm]overlay={positions[options.watermark_position]}:format=auto[branded]',
+            '[branded]pad=ceil(iw/2)*2:ceil(ih/2)*2[v]',
+        ]
+
     if len(options.audio) == 2:
-        args += ['-filter_complex',
-                 '[1:a]aresample=async=1:first_pts=0[a1];'
-                 '[2:a]aresample=async=1:first_pts=0[a2];'
-                 '[a1][a2]amix=inputs=2:duration=longest:dropout_transition=2:normalize=1[a]',
-                 '-map', '[a]']
+        filters += [
+            '[1:a]aresample=async=1:first_pts=0[a1]',
+            '[2:a]aresample=async=1:first_pts=0[a2]',
+            '[a1][a2]amix=inputs=2:duration=longest:dropout_transition=2:normalize=1[a]',
+        ]
+
+    if filters:
+        args += ['-filter_complex', ';'.join(filters)]
+
+    args += ['-map', '[v]' if options.watermark else '0:v:0']
+    if len(options.audio) == 2:
+        args += ['-map', '[a]']
     elif options.audio:
         args += ['-map', '1:a:0', '-af', 'aresample=async=1:first_pts=0']
     else:
         args += ['-an']
-    args += ['-vf', 'pad=ceil(iw/2)*2:ceil(ih/2)*2', '-c:v', 'libx264',
+
+    if not options.watermark:
+        args += ['-vf', 'pad=ceil(iw/2)*2:ceil(ih/2)*2']
+
+    args += ['-c:v', 'libx264',
              '-preset', 'veryfast', '-crf', '23' if options.quality == 'Standard' else '18',
              '-pix_fmt', 'yuv420p', '-r', str(options.fps)]
     if options.audio:
