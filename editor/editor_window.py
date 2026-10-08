@@ -174,7 +174,7 @@ class EditorWindow(tk.Toplevel):
         t.label(panel, 'Choose your shape. Use Crop to move the frame.', 9, t.MUTED).pack(anchor='w')
         panel = self.panels['CROP']
         self.add_segments(panel, self.format_choice,
-                          [(v, v.replace(' ', '\\n', 1)) for v in FORMATS], self.format_changed)
+                          [(v, v.replace(' ', '\n', 1)) for v in FORMATS], self.format_changed)
         self.crop_hint = t.label(panel, 'Choose a shape, then drag the cyan frame to keep what matters.', 9, t.MUTED)
         self.crop_hint.pack(anchor='w', pady=(0, 6))
         actions = tk.Frame(panel, bg=t.PANEL)
