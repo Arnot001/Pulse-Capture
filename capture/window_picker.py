@@ -13,6 +13,7 @@ def user32():
     u.IsWindowVisible.argtypes = [wintypes.HWND]
     u.IsIconic.argtypes = [wintypes.HWND]
     u.GetWindowTextLengthW.argtypes = [wintypes.HWND]
+    u.GetClassNameW.argtypes = [wintypes.HWND, wintypes.LPWSTR, ctypes.c_int]
     u.GetWindowTextW.argtypes = [wintypes.HWND, wintypes.LPWSTR, ctypes.c_int]
     u.GetWindowRect.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.RECT)]
     u.GetWindowThreadProcessId.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.DWORD)]
@@ -36,6 +37,7 @@ def desktop_bounds():
 class Window:
     hwnd: int
     title: str
+    minimized: bool = False
 
 
 def list_windows():
@@ -48,12 +50,16 @@ def list_windows():
     def visit(hwnd, _):
         process_id = wintypes.DWORD()
         u.GetWindowThreadProcessId(hwnd, ctypes.byref(process_id))
-        if u.IsWindowVisible(hwnd) and not u.IsIconic(hwnd) and process_id.value != os.getpid():
+        if u.IsWindowVisible(hwnd) and process_id.value != os.getpid():
+            class_name = ctypes.create_unicode_buffer(256)
+            u.GetClassNameW(hwnd, class_name, len(class_name))
+            if class_name.value in ('Progman', 'WorkerW'):
+                return True
             length = u.GetWindowTextLengthW(hwnd)
             if length:
                 title = ctypes.create_unicode_buffer(length + 1)
                 u.GetWindowTextW(hwnd, title, length + 1)
-                windows.append(Window(int(hwnd), title.value))
+                windows.append(Window(int(hwnd), title.value, bool(u.IsIconic(hwnd))))
         return True
 
     u.EnumWindows(visit, 0)

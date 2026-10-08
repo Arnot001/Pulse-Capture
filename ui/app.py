@@ -39,6 +39,7 @@ class CaptureApp(tk.Tk):
         self.detecting = False
         self.windows, self.region = [], None
         self.last_file = None
+        self.editors = set()
         self.closing = False
         self.hotkey = GlobalHotkey()
         self.mode = tk.StringVar(value='screen')
@@ -52,7 +53,7 @@ class CaptureApp(tk.Tk):
         self._shell()
         self._screen()
         self.protocol('WM_DELETE_WINDOW', self.close)
-        self.after(100, self.poll)
+        self._poll_id = self.after(100, self.poll)
         self.after(150, self.refresh_devices)
         if self.hotkey_on.get():
             self.after(200, self.set_hotkey)
@@ -90,7 +91,7 @@ class CaptureApp(tk.Tk):
         footer = tk.Frame(self, bg=t.BG)
         footer.pack(fill='x', padx=26, pady=(10, 8))
         t.label(footer, 'LOCAL CAPTURE.  NOTHING ELSE.', 8, t.MUTED, True).pack(side='left')
-        t.label(footer, 'PULSE UTILITIES  /  v0.1', 8, t.MUTED).pack(side='right')
+        t.label(footer, 'PULSE UTILITIES  /  v0.2.0', 8, t.MUTED).pack(side='right')
 
     def _wheel(self, event):
         if event.widget.winfo_toplevel() == self and not isinstance(event.widget, ttk.Combobox):
@@ -176,13 +177,18 @@ class CaptureApp(tk.Tk):
         self.message = t.label(body, 'Checking recording engine…', 9, t.MUTED,
                                justify='left', anchor='w', wraplength=515)
         self.message.pack(fill='x', pady=(5, 8))
+        actions = tk.Frame(body, bg=t.BG)
+        actions.pack(fill='x', pady=(0, 10))
+        self.quick_edit_button = t.button(actions, 'QUICK EDIT  →', self.open_quick_edit, accent=True)
+        self.quick_edit_button.configure(state='disabled')
+        self.quick_edit_button.pack(side='left', fill='x', expand=True, padx=(0, 10))
+        t.button(actions, 'OPEN FOLDER ↗', self.open_folder).pack(side='right', fill='x', expand=True)
         destination = tk.Frame(body, bg=t.BG)
         destination.pack(fill='x')
         t.label(destination, 'SAVE TO', 8, t.CYAN, True).pack(anchor='w')
         self.folder_label = t.label(destination, str(self.prefs.output), 9, t.MUTED,
                                     wraplength=390, justify='left', anchor='w')
         self.folder_label.pack(side='left', fill='x', expand=True, pady=(3, 0))
-        t.button(destination, 'OPEN FOLDER ↗', self.open_folder).pack(side='right')
         self.hotkey_check = tk.Checkbutton(body, text='Enable global shortcut  Ctrl + Shift + R',
             variable=self.hotkey_on, command=self.set_hotkey, bg=t.BG, fg=t.MUTED,
             selectcolor=t.CONTROL, activebackground=t.BG, activeforeground=t.TEXT, bd=0)
@@ -240,7 +246,7 @@ class CaptureApp(tk.Tk):
     def refresh_windows(self):
         try:
             self.windows = list_windows()
-            self.window_combo.configure(values=[f'{w.title}  [{w.hwnd}]' for w in self.windows])
+            self.window_combo.configure(values=[f'{w.title}{" (minimized — restore first)" if w.minimized else ""}  [{w.hwnd}]' for w in self.windows])
             if self.windows:
                 self.window_combo.current(0)
             else:
@@ -370,6 +376,7 @@ class CaptureApp(tk.Tk):
             self.show_error(str(exc))
 
     def lock_controls(self, locked):
+        self.quick_edit_button.configure(state='normal' if self.last_file and not locked else 'disabled')
         self.capture_segments.enable(not locked)
         self.fps_segments.enable(not locked)
         self.quality_combo.configure(state='disabled' if locked else 'readonly')
@@ -400,6 +407,8 @@ class CaptureApp(tk.Tk):
             self.record_button.configure(text='●   START RECORDING', bg=t.CYAN, fg=t.BG, state='normal')
             if state == State.SAVED:
                 self.last_file = event.path
+                self.quick_edit_button.configure(state='normal')
+                self.after_idle(lambda: self.canvas.yview_moveto(1) if not self._destroyed else None)
                 self.message.configure(text=f'SAVED ✓  {event.path.name}', fg=t.GREEN)
             elif state == State.ERROR:
                 suffix = f'\nPartial file: {event.path}' if event.path else ''
@@ -416,6 +425,7 @@ class CaptureApp(tk.Tk):
         self.message.configure(text=text, fg=t.RED)
 
     def poll(self):
+        self._poll_id = None
         try:
             while True:
                 self.apply_devices(*self.discoveries.get_nowait())
@@ -436,7 +446,7 @@ class CaptureApp(tk.Tk):
                 self.timer.configure(text=f'{h:02d}:{m:02d}:{s:02d}')
         if self.hotkey.poll():
             self.toggle()
-        self.after(100, self.poll)
+        self._poll_id = self.after(100, self.poll)
 
     def set_hotkey(self):
         try:
@@ -445,6 +455,18 @@ class CaptureApp(tk.Tk):
             self.hotkey_on.set(False)
             self.show_error(str(exc))
         self.persist()
+
+    def open_quick_edit(self):
+        if not self.backend or not self.last_file or (self.recorder and self.recorder.busy):
+            return
+        for editor in self.editors:
+            if editor.path == self.last_file and not editor.closed:
+                editor.deiconify()
+                editor.lift()
+                return
+        from editor.editor_window import EditorWindow
+        editor = EditorWindow(self, self.last_file, self.backend, self.editors.discard)
+        self.editors.add(editor)
 
     def open_folder(self):
         try:
@@ -465,6 +487,13 @@ class CaptureApp(tk.Tk):
 
     def destroy(self):
         if not self._destroyed:
+            for editor in list(self.editors):
+                editor.close()
+            if self.editors:
+                self.after(100, self.destroy)
+                return
+            if self._poll_id:
+                self.after_cancel(self._poll_id)
             self._destroyed = True
             self.hotkey.close()
             super().destroy()
