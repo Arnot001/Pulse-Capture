@@ -31,8 +31,8 @@ class PolishTools:
         t.label(speed_row, 'SPEED', 9, t.MUTED, True).pack(side='left', padx=(0, 8))
         speed_group = tk.Frame(speed_row, bg=t.PANEL)
         speed_group.pack(side='left', fill='x', expand=True)
-        window.add_segments(speed_group, self.speed,
-                            [(f'{v:g}x', f'{v:g}x') for v in SPEEDS], self.motion_changed)
+        speed_choices = [('0.5x', '0.5x'), ('1.0x', '1.0x'), ('1.5x', '1.5x'), ('2.0x', '2.0x')]
+        window.add_segments(speed_group, self.speed, speed_choices, self.motion_changed)
         self.motion_hint = t.label(panel, 'Turn Zoom on, then click or drag on the preview to choose the focus.',
                                    9, t.MUTED)
         self.motion_hint.pack(anchor='w', pady=(3, 0))
@@ -128,7 +128,7 @@ class PolishTools:
         w = self.window
         self.zoom_on.set(w.edits.zoom.enabled)
         self.zoom_factor.set(f'{w.edits.zoom.factor:g}x')
-        self.speed.set(f'{w.edits.speed:g}x')
+        self.speed.set('1.0x' if w.edits.speed == 1.0 else f'{w.edits.speed:g}x')
         self.fade_in.set(w.edits.fade.fade_in)
         self.fade_out.set(w.edits.fade.fade_out)
 
