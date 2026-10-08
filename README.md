@@ -1,7 +1,7 @@
-# PULSE // CAPTURE v0.2.0
+# PULSE // CAPTURE v0.3.0
 
 A small Windows screen recorder with a dark Pulse interface. Choose a source,
-record, trim the start/end in Quick Edit, and export a local MP4. Optional Pulse watermark; no account or cloud.
+record, trim and reframe in Quick Edit, and export a local MP4. Optional Pulse watermark; no account or cloud.
 
 ## Run
 
@@ -43,7 +43,7 @@ The optional global **Ctrl+Shift+R** shortcut works while Pulse is in the
 background. A conflict with another app is shown explicitly; the shortcut is
 off by default. Closing Pulse during capture requests a clean stop first.
 
-## Quick Edit — Milestone 1
+## Quick Edit — Milestone 2
 
 After a successful recording, click **Quick Edit**. A separate Pulse window opens
 the new video; the recording engine is unchanged.
@@ -56,9 +56,20 @@ the new video; the recording engine is unchanged.
 3. **Preview trim** plays an approximate, low-frame-rate, silent visual preview
    of the selection. This is a lightweight frame preview, not full audiovisual
    playback. The original audio remains in the export when the source has audio.
-4. Click **Export video**. Rendering runs in the background with real progress
+4. Choose **Format**: **Original**, **16:9 Landscape**, **9:16 Vertical**, or
+   **1:1 Square**. The preview shows the result without stretching or upscaling.
+5. Choose **Crop** to see the full source with a cyan crop frame. Drag inside
+   the frame to reposition it; arrow keys fine-tune after clicking it.
+   **Centre crop** recentres it. **View result** shows the finished composition.
+   Selecting a different format starts a centred crop; **Original** restores the
+   full frame. Changing the trim does not change the crop.
+6. Optionally choose **Brand**, switch **On**, and pick a corner and
+   **Small / Medium / Large**. The rendered preview shows the new Pulse logo.
+   Branding starts **Off** in every editor session. It adds a new overlay;
+   a logo already burned into a recording cannot be removed or repositioned.
+7. Click **Export video**. Rendering runs in the background with real progress
    and a **Cancel export** action. The MP4 is validated before “Exported” appears.
-5. **Open folder** opens the exported file's location. **Change folder** chooses
+8. **Open folder** opens the exported file's location. **Change folder** chooses
    another destination for this editor session.
 
 Exports use `original-name_trimmed.mp4`, then `_001`, `_002`, and so on. The
@@ -66,17 +77,26 @@ original and existing exports are never overwritten. By default the new copy
 is saved beside the source. Cancelling removes this export's temporary file;
 closing the editor or application cancels an active export before closing.
 
-The output keeps the source dimensions (padding an odd edge where H.264 requires
-it), original speed, and first audio track. It re-encodes to H.264/AAC for cuts
-between keyframes; cut boundaries are limited by the source frame spacing.
-The watermark already burned into a recording remains visible after trimming.
-No additional logo is applied during this milestone's export.
+Original keeps the source dimensions (padding an odd edge by one pixel where
+H.264 requires it). The other formats crop to the largest exact-ratio rectangle
+with even dimensions: there is no stretching or upscaling. This can remove a few
+extra edge pixels to keep the ratio exact. Crops move in two-pixel steps.
+All formats preserve original speed and the first audio track when present.
+Exports re-encode to H.264/AAC for cuts between keyframes; cut boundaries are
+limited by the source frame spacing. Processing order is trim, crop, even-edge
+padding, then optional Pulse branding. Preview and export share the same filters.
 
-Milestone 1 intentionally contains **trim only**. Format/aspect presets, crop,
-editable watermark settings, captions, blur/pixelation, zoom, mute/volume,
-speed, fades, and Pulse Promo are later milestones. They are not exposed as
-nonworking controls. The existing branding asset and recorder watermark remain
-intact; a replacement logo can be added separately.
+Brand sizes are proportional to the shorter output edge (12%, 18%, 25%) with a
+small inset and subtle opacity. The recorder and editor share the existing
+bundled Pulse asset path, including in PyInstaller builds. There is no reliable
+recording metadata for burned-in branding, so Quick Edit never enables a second
+logo automatically. Existing source branding stays in the source pixels and may
+be partly or fully cropped out by an aspect change.
+
+Only the selected tool panel is shown. Preview remains a lightweight, silent,
+low-frame-rate preview; Crop displays the source and framing guide, while Trim,
+Format, and Brand show the rendered result. Text, effects, zoom, speed, fades,
+mute/volume, and Pulse Promo remain outside this milestone.
 
 ## Audio availability
 
@@ -127,6 +147,7 @@ microphone fails. Pulse does not fabricate device availability or audio content.
 
 ```text
 pulse_capture.py              Entry point / DPI setup
+branding.py                   Shared source / packaged branding paths
 settings.py                   Settings and destination defaults
 ui/theme.py                   Reusable Pulse design system
 ui/app.py                     App shell and Screen 1
@@ -140,11 +161,13 @@ capture/window_picker.py      Native Windows/DPI helpers and enumeration
 capture/region_picker.py      Pure region geometry
 capture/hotkey.py              Optional global Windows shortcut
 editor/models.py              Editing state and time validation
+editor/transforms.py          Validated aspect, crop, and branding state
+editor/crop_preview.py        Visual crop overlay and source-coordinate dragging
 editor/media.py               Local video metadata loading
 editor/preview.py             Background, bounded-size frame previews
 editor/timeline.py            Trim handles and playhead
 editor/editor_window.py       Separate Quick Edit interface
-editor/ffmpeg_export.py       Pure trim command construction
+editor/ffmpeg_export.py       Combined trim / crop / branding command construction
 editor/export_job.py          Progress, cancellation, and validated export
 editor/filenames.py           Non-overwriting edited-copy reservations
 tests/                        Automated headless tests
@@ -167,15 +190,23 @@ python -m unittest discover -v
 .\build.ps1 -InstallBuildTools
 ```
 
-Optional real FFmpeg tests create synthetic audio/silent clips, export trims,
-decode the results, and verify that the originals are unchanged:
+Optional real FFmpeg tests export all formats with audio/silence, render every
+watermark corner and size, check output pixels and cancellation, decode results,
+and verify source preservation:
 
 ```powershell
 $env:PULSE_RUN_FFMPEG_TESTS = '1'
 python -m unittest discover -v
 ```
 
-See `EDITOR_VERIFICATION.md` for Milestone 1 checks and remaining coverage.
+For the actual Tk editor checks (opens test windows on Windows):
+
+```powershell
+$env:PULSE_RUN_UI_TESTS = '1'
+python -m unittest discover -v
+```
+
+See `EDITOR_VERIFICATION.md` for Milestone 2 checks and remaining coverage.
 
 The application is produced at `dist\Pulse Capture\Pulse Capture.exe`.
 Keep its complete folder together, including `_internal`. This windowed build
