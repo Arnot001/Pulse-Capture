@@ -3,11 +3,11 @@ import os
 from pathlib import Path
 from queue import Empty, Queue
 import threading
-import sys
 import time
 import tkinter as tk
 from tkinter import ttk, messagebox
 import settings
+from branding import asset_root, watermark_path
 from capture.audio_devices import AudioInventory, discover_audio
 from capture.ffmpeg_backend import discover
 from capture.hotkey import GlobalHotkey
@@ -27,9 +27,9 @@ class CaptureApp(tk.Tk):
         self.geometry(f'650x{height}')
         self.minsize(570, 660)
         t.install(self)
-        self.asset_root = Path(getattr(sys, '_MEIPASS', Path(__file__).resolve().parents[1]))
+        self.asset_root = asset_root()
         icon = self.asset_root / 'assets' / 'branding' / 'pulse.ico'
-        self.watermark_asset = self.asset_root / 'assets' / 'branding' / 'pulse.png'
+        self.watermark_asset = watermark_path()
         if icon.is_file():
             self.iconbitmap(str(icon))
         self.prefs = settings.load()
@@ -91,7 +91,7 @@ class CaptureApp(tk.Tk):
         footer = tk.Frame(self, bg=t.BG)
         footer.pack(fill='x', padx=26, pady=(10, 8))
         t.label(footer, 'LOCAL CAPTURE.  NOTHING ELSE.', 8, t.MUTED, True).pack(side='left')
-        t.label(footer, 'PULSE UTILITIES  /  v0.2.0', 8, t.MUTED).pack(side='right')
+        t.label(footer, 'PULSE UTILITIES  /  v0.3.0', 8, t.MUTED).pack(side='right')
 
     def _wheel(self, event):
         if event.widget.winfo_toplevel() == self and not isinstance(event.widget, ttk.Combobox):

@@ -4,6 +4,8 @@ from queue import Queue, Full, Empty
 import subprocess
 import threading
 from capture.ffmpeg_backend import process_options
+from branding import watermark_path
+from .transforms import EditOptions, video_filters
 
 
 @dataclass(frozen=True)
@@ -12,16 +14,25 @@ class Frame:
     position: float
     ppm: bytes = b''
     error: str = ''
+    source_view: bool = True
 
 
-def preview_command(ffmpeg, media, position, width, height):
+def preview_command(ffmpeg, media, position, width, height, edits=None, source_view=True):
     width, height = max(2, min(1280, int(width))), max(2, min(720, int(height)))
     position = max(0, min(position, max(0, media.duration - 1 / media.fps)))
-    return [str(ffmpeg), '-hide_banner', '-loglevel', 'error', '-nostdin',
-            '-ss', f'{position:.6f}', '-i', str(media.path), '-map', '0:v:0',
-            '-frames:v', '1', '-an', '-vf',
-            f'scale={width}:{height}:force_original_aspect_ratio=decrease,setsar=1',
-            '-c:v', 'ppm', '-f', 'image2pipe', 'pipe:1']
+    args = [str(ffmpeg), '-hide_banner', '-loglevel', 'error', '-nostdin',
+            '-ss', f'{position:.6f}', '-i', str(media.path)]
+    scale = f'scale={width}:{height}:force_original_aspect_ratio=decrease,setsar=1'
+    if source_view:
+        args += ['-map', '0:v:0', '-vf', scale]
+    else:
+        filters, complex_graph = video_filters(media, edits or EditOptions(), watermark_path())
+        if complex_graph:
+            args += ['-i', str(watermark_path()), '-filter_complex',
+                     filters + f';[v]{scale}[preview]', '-map', '[preview]']
+        else:
+            args += ['-map', '0:v:0', '-vf', filters + ',' + scale]
+    return args + ['-frames:v', '1', '-an', '-c:v', 'ppm', '-f', 'image2pipe', 'pipe:1']
 
 
 class Preview:
@@ -34,10 +45,10 @@ class Preview:
         self._thread = threading.Thread(target=self._run, daemon=True)
         self._thread.start()
 
-    def request(self, token, position, width, height):
+    def request(self, token, position, width, height, edits=None, source_view=True):
         with self._condition:
             if not self._closed:
-                self._pending = (token, position, width, height)
+                self._pending = (token, position, width, height, edits, source_view)
                 self._condition.notify()
 
     def close(self):
@@ -53,11 +64,11 @@ class Preview:
                 self._condition.wait_for(lambda: self._closed or self._pending is not None)
                 if self._closed:
                     return
-                token, position, width, height = self._pending
+                token, position, width, height, edits, source_view = self._pending
                 self._pending = None
             process = None
             try:
-                command = preview_command(self.ffmpeg, self.media, position, width, height)
+                command = preview_command(self.ffmpeg, self.media, position, width, height, edits, source_view)
                 with self._condition:
                     if self._closed:
                         return
@@ -72,7 +83,7 @@ class Preview:
                     raise RuntimeError('Preview took too long. Try another point in the video.')
                 if process.returncode or not data.startswith(b'P6'):
                     raise RuntimeError('Could not load this preview frame. ' + error.decode('utf-8', 'replace')[-300:])
-                frame = Frame(token, position, data)
+                frame = Frame(token, position, data, source_view=source_view)
             except Exception as exc:
                 frame = Frame(token, position, error=str(exc))
             finally:
