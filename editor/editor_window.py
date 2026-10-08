@@ -102,6 +102,8 @@ class EditorWindow(tk.Toplevel):
         tool_area.pack(side='top', fill='x', before=self.note, pady=(8, 0))
         tabs = t.Segments(tool_area, self.tool, [(v, v) for v in ('TRIM', 'FORMAT', 'CROP', 'BRAND', 'TEXT', 'PRIVACY', 'MOTION', 'FINISH')], self.show_tool)
         tabs.pack(fill='x', pady=(0, 8))
+        for _, button in tabs.buttons:
+            button.configure(padx=7, pady=5, font=(t.FONT, -10, 'bold'))
         self.controls.extend(b for _, b in tabs.buttons)
         # A fixed, compact tool area keeps the preview stable when switching tools.
         panel_area = tk.Frame(tool_area, bg=t.PANEL, height=126)
