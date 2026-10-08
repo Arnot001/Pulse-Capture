@@ -54,7 +54,7 @@ class RealPolishTests(unittest.TestCase):
         width, height = edits.output_size(media)
 
         export_frame = subprocess.run(
-            [self.ffmpeg, '-v', 'error', '-ss', '.5', '-i', str(path), '-frames:v', '1',
+            [self.ffmpeg, '-v', 'error', '-ss', '0.5', '-i', str(path), '-frames:v', '1',
              '-pix_fmt', 'rgb24', '-f', 'rawvideo', '-'],
             capture_output=True, timeout=15)
         self.assertEqual(export_frame.returncode, 0, export_frame.stderr)
