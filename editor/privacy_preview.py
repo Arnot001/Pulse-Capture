@@ -76,20 +76,19 @@ class PrivacyPreview(CropPreview):
 
     def draw_overlay(self):
         super().draw_overlay()
-        self.delete('privacy')
-        if not self.ready():
-            return
-        self.configure(cursor='crosshair')
-        rect = self.candidate or self.visible_mask()
-        if rect is None:
-            return
-        x1, y1, x2, y2 = self.screen_rect(rect)
-        self.create_rectangle(x1, y1, x2, y2, outline=t.CYAN, width=2, tags='privacy')
-        for x, y in ((x1, y1), (x2, y1), (x1, y2), (x2, y2)):
-            self.create_rectangle(x-4, y-4, x+4, y+4, fill=t.CYAN, outline=t.BG, tags='privacy')
-        self.create_text(x1+7, y1+7, text=self.mode.upper(), anchor='nw', fill=t.CYAN,
-                         font=(t.FONT, -11, 'bold'), tags='privacy')
+        self.delete('privacy', 'zoom')
+        if self.ready():
+            self.configure(cursor='crosshair')
+            rect = self.candidate or self.visible_mask()
+            if rect is not None:
+                x1, y1, x2, y2 = self.screen_rect(rect)
+                self.create_rectangle(x1, y1, x2, y2, outline=t.CYAN, width=2, tags='privacy')
+                for x, y in ((x1, y1), (x2, y1), (x1, y2), (x2, y2)):
+                    self.create_rectangle(x-4, y-4, x+4, y+4, fill=t.CYAN, outline=t.BG, tags='privacy')
+                self.create_text(x1+7, y1+7, text=self.mode.upper(), anchor='nw', fill=t.CYAN,
+                                 font=(t.FONT, -11, 'bold'), tags='privacy')
         if self.zoom_ready():
+            self.configure(cursor='crosshair')
             point = self.zoom_screen_point()
             if point:
                 x, y = point
