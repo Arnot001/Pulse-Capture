@@ -1,4 +1,4 @@
-"""Quick Edit: trim, format, visual crop, and optional Pulse branding."""
+"""Quick Edit shell; focused panels and services own editing behavior."""
 import os
 from dataclasses import replace
 from pathlib import Path
@@ -13,7 +13,8 @@ from .media import probe_media
 from .models import TrimRange, format_time, parse_time
 from .preview import Preview
 from .timeline import Timeline
-from .crop_preview import CropPreview
+from .privacy_preview import PrivacyPreview
+from .overlay_tools import OverlayTools
 from .transforms import EditOptions, Branding, FORMATS, CORNERS, SIZES
 
 
@@ -97,14 +98,14 @@ class EditorWindow(tk.Toplevel):
 
         tool_area = tk.Frame(bottom, bg=t.BG)
         tool_area.pack(side='top', fill='x', before=self.note, pady=(8, 0))
-        tabs = t.Segments(tool_area, self.tool, [(v, v) for v in ('TRIM', 'FORMAT', 'CROP', 'BRAND')], self.show_tool)
+        tabs = t.Segments(tool_area, self.tool, [(v, v) for v in ('TRIM', 'FORMAT', 'CROP', 'BRAND', 'TEXT', 'PRIVACY')], self.show_tool)
         tabs.pack(fill='x', pady=(0, 8))
         self.controls.extend(b for _, b in tabs.buttons)
         # A fixed, compact tool area keeps the preview stable when switching tools.
         panel_area = tk.Frame(tool_area, bg=t.PANEL, height=122)
         panel_area.pack(fill='x')
         panel_area.pack_propagate(False)
-        for name in ('TRIM', 'FORMAT', 'CROP', 'BRAND'):
+        for name in ('TRIM', 'FORMAT', 'CROP', 'BRAND', 'TEXT', 'PRIVACY'):
             self.panels[name] = tk.Frame(panel_area, bg=t.PANEL)
         row = self.panels['TRIM']
         row.pack(fill='both', expand=True, padx=12, pady=10)
@@ -130,12 +131,13 @@ class EditorWindow(tk.Toplevel):
         self.selection_label = t.label(row, 'Drag the cyan handles or enter Start and End.', 9, t.MUTED)
         self.selection_label.grid(row=1, column=0, columnspan=3, sticky='w', pady=(8, 0))
         self.build_tools()
+        self.overlay_tools = OverlayTools(self)
         for widget in self.controls:
             widget.configure(state='disabled')
 
         preview_area = tk.Frame(self, bg=t.BG)
         preview_area.pack(fill='both', expand=True, padx=28)
-        self.video = CropPreview(preview_area, self.crop_changed, bg='#060a10', highlightbackground=t.LINE, highlightthickness=1, height=260)
+        self.video = PrivacyPreview(preview_area, self.crop_changed, self.overlay_tools.mask_changed, bg='#060a10', highlightbackground=t.LINE, highlightthickness=1, height=260)
         preview_area.rowconfigure(0, weight=1)
         preview_area.columnconfigure(0, weight=1)
         self.video.grid(row=0, column=0, sticky='nsew')
@@ -201,7 +203,7 @@ class EditorWindow(tk.Toplevel):
         self.panels[self.tool.get()].pack(fill='both', expand=True, padx=12, pady=10)
         self.video.active = self.tool.get() == 'CROP'
         self.video.drag = None
-        self.video.draw_overlay()
+        self.overlay_tools.refresh()
         self.request_frame()
 
     def format_changed(self):
@@ -211,6 +213,7 @@ class EditorWindow(tk.Toplevel):
             if self.format_choice.get() != self.edits.preset:
                 self.edits = self.edits.with_format(self.media, self.format_choice.get())
             self.video.crop = self.edits.crop
+            self.overlay_tools.refresh()
             self.crop_hint.configure(text='Drag the cyan frame to keep what matters. Arrow keys fine-tune.'
                                      if self.edits.crop else 'Original keeps the full frame. Choose a format to crop.')
             self.stop_play()
@@ -224,12 +227,12 @@ class EditorWindow(tk.Toplevel):
             return
         self.edits = replace(self.edits, crop=crop)
         self.video.crop = crop
-        self.video.draw_overlay()
+        self.overlay_tools.refresh()
 
     def center_crop(self):
         self.edits = self.edits.with_format(self.media, self.edits.preset)
         self.video.crop = self.edits.crop
-        self.video.draw_overlay()
+        self.overlay_tools.refresh()
 
     def update_brand_controls(self):
         enabled = bool(self.media and not self.exporter.busy and self.brand_on.get())
@@ -247,6 +250,7 @@ class EditorWindow(tk.Toplevel):
         self.video.coords('placeholder', self.video.winfo_width()/2, self.video.winfo_height()/2)
         self.video.coords('frame', self.video.winfo_width()/2, self.video.winfo_height()/2)
         self.video.drag = None
+        self.video.gesture = self.video.candidate = None
         self.video.draw_overlay()
         if self.preview and not self.playing:
             self.request_frame()
@@ -289,6 +293,8 @@ class EditorWindow(tk.Toplevel):
         if not self.media or self.exporter.busy or self.closing:
             return False
         try:
+            self.overlay_tools.commit_text()
+            self.edits.validate(self.media)
             trim = TrimRange(parse_time(self.start_text.get()), parse_time(self.end_text.get()))
             self.update_trim(trim)
             return True
@@ -358,6 +364,7 @@ class EditorWindow(tk.Toplevel):
         self.timeline.enabled = not busy
         self.video.enabled = not busy
         self.video.drag = None
+        self.video.gesture = self.video.candidate = None
         self.update_brand_controls()
         self.play_button.configure(state='disabled' if busy else 'normal')
         self.export_button.configure(state='disabled' if busy else 'normal',
@@ -412,7 +419,7 @@ class EditorWindow(tk.Toplevel):
                 if frame.token == self.token:
                     if frame.error:
                         self.stop_play()
-                        self.video.delete('frame', 'crop')
+                        self.video.delete('frame', 'crop', 'privacy')
                         self.video.photo = None
                         self.video.source_view = False
                         self.video.itemconfigure('placeholder', text='Preview unavailable')
@@ -420,7 +427,7 @@ class EditorWindow(tk.Toplevel):
                     else:
                         self._photo = tk.PhotoImage(master=self, data=frame.ppm, format='PPM')
                         self.video.itemconfigure('placeholder', text='')
-                        self.video.show_frame(self._photo, frame.source_view)
+                        self.video.show_frame(self._photo, frame.source_view, frame.edits)
                         if self.playing:
                             self._play_id = self.after(60, self.next_frame)
             except Empty:

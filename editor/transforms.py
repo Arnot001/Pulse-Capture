@@ -2,6 +2,8 @@
 from dataclasses import dataclass, replace
 import math
 from pathlib import Path
+from .privacy import Privacy, output_mask, privacy_filters
+from .text_overlay import TextOverlay, text_geometry, text_filter
 
 FORMATS = {'Original': None, '16:9 Landscape': (16, 9),
            '9:16 Vertical': (9, 16), '1:1 Square': (1, 1)}
@@ -78,10 +80,14 @@ class EditOptions:
     preset: str = 'Original'
     crop: Crop | None = None
     branding: Branding = Branding()
+    text: TextOverlay = TextOverlay()
+    privacy: Privacy = Privacy()
 
     def validate(self, media):
         expected = centered_crop(media, self.preset)
         self.branding.validate()
+        self.text.validate()
+        self.privacy.validate(media)
         if expected is None:
             if self.crop is not None:
                 raise ValueError('Original must keep the full frame.')
@@ -91,6 +97,10 @@ class EditOptions:
             self.crop.validate(media)
             if (self.crop.width, self.crop.height) != (expected.width, expected.height):
                 raise ValueError('The crop does not match the selected format.')
+
+        if self.text.enabled:
+            width, height = (self.crop.width, self.crop.height) if self.crop else (media.width, media.height)
+            text_geometry(width, height, self.text)
 
     def with_format(self, media, preset):
         return replace(self, preset=preset, crop=centered_crop(media, preset))
@@ -102,8 +112,8 @@ class EditOptions:
         return (media.width+1)//2*2, (media.height+1)//2*2
 
 
-def video_filters(media, edits, asset=None):
-    """Crop, pad, then brand. Shared by export and the rendered preview."""
+def video_filters(media, edits, asset=None, text_resources=None):
+    """Crop, pad, privacy, text, branding. Shared by preview and export."""
     edits.validate(media)
     filters = []
     if edits.crop:
@@ -111,12 +121,24 @@ def video_filters(media, edits, asset=None):
         filters.append(f'crop={c.width}:{c.height}:{c.x}:{c.y}')
     filters.append('pad=ceil(iw/2)*2:ceil(ih/2)*2')
     base = ','.join(filters)
-    if not edits.branding.enabled:
+    rect = output_mask(edits.privacy.mask, media, edits.crop)
+    if not (rect or edits.text.enabled or edits.branding.enabled):
         return base, False
-    if asset is None or not Path(asset).is_file():
-        raise ValueError('Pulse branding asset is missing. Turn branding off or reinstall Pulse Capture.')
-    x, y, size = watermark_geometry(*edits.output_size(media), edits.branding)
-    graph = (f'[0:v:0]{base}[base];'
-             f'[1:v:0]scale={size}:{size},format=rgba,colorchannelmixer=aa=0.82[wm];'
-             f'[base][wm]overlay={x}:{y}:eof_action=repeat:shortest=0:format=auto[v]')
-    return graph, True
+    graph = [f'[0:v:0]{base}[base]']
+    current = 'base'
+    if rect:
+        graph.extend(privacy_filters(rect, edits.privacy.mode))
+        current = 'private'
+    width, height = edits.output_size(media)
+    if edits.text.enabled:
+        graph.append(f'[{current}]{text_filter(width, height, edits.text, text_resources)}[text]')
+        current = 'text'
+    if edits.branding.enabled:
+        if asset is None or not Path(asset).is_file():
+            raise ValueError('Pulse branding asset is missing. Turn branding off or reinstall Pulse Capture.')
+        x, y, size = watermark_geometry(width, height, edits.branding)
+        graph.extend([f'[1:v:0]scale={size}:{size},format=rgba,colorchannelmixer=aa=0.82[wm]',
+                      f'[{current}][wm]overlay={x}:{y}:eof_action=repeat:shortest=0:format=auto[v]'])
+    else:
+        graph.append(f'[{current}]null[v]')
+    return ';'.join(graph), True

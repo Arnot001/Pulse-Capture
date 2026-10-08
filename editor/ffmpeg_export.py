@@ -4,17 +4,17 @@ from branding import watermark_path
 from .transforms import EditOptions, video_filters
 
 
-def build_export_command(ffmpeg, media, trim, output, edits=None, asset=None):
+def build_export_command(ffmpeg, media, trim, output, edits=None, asset=None, text_resources=None):
     trim.validate(media)
     edits = edits or EditOptions()
     if Path(output).resolve() == media.path.resolve():
         raise ValueError('An export must use a different filename from the original.')
     asset = watermark_path() if asset is None else asset
-    filters, complex_graph = video_filters(media, edits, asset)
+    filters, complex_graph = video_filters(media, edits, asset, text_resources)
     args = [str(ffmpeg), '-hide_banner', '-loglevel', 'warning', '-nostdin', '-n',
             '-stats_period', '0.25', '-progress', 'pipe:1',
             '-ss', f'{trim.start:.6f}', '-i', str(media.path)]
-    if complex_graph:
+    if edits.branding.enabled:
         args += ['-i', str(asset)]
     args += ['-t', f'{trim.duration:.6f}']
     if complex_graph:

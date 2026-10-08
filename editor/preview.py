@@ -6,6 +6,7 @@ import threading
 from capture.ffmpeg_backend import process_options
 from branding import watermark_path
 from .transforms import EditOptions, video_filters
+from .text_overlay import TextResources
 
 
 @dataclass(frozen=True)
@@ -15,9 +16,10 @@ class Frame:
     ppm: bytes = b''
     error: str = ''
     source_view: bool = True
+    edits: EditOptions | None = None
 
 
-def preview_command(ffmpeg, media, position, width, height, edits=None, source_view=True):
+def preview_command(ffmpeg, media, position, width, height, edits=None, source_view=True, text_resources=None):
     width, height = max(2, min(1280, int(width))), max(2, min(720, int(height)))
     position = max(0, min(position, max(0, media.duration - 1 / media.fps)))
     args = [str(ffmpeg), '-hide_banner', '-loglevel', 'error', '-nostdin',
@@ -26,9 +28,12 @@ def preview_command(ffmpeg, media, position, width, height, edits=None, source_v
     if source_view:
         args += ['-map', '0:v:0', '-vf', scale]
     else:
-        filters, complex_graph = video_filters(media, edits or EditOptions(), watermark_path())
+        edits = edits or EditOptions()
+        filters, complex_graph = video_filters(media, edits, watermark_path(), text_resources)
+        if edits.branding.enabled:
+            args += ['-i', str(watermark_path())]
         if complex_graph:
-            args += ['-i', str(watermark_path()), '-filter_complex',
+            args += ['-filter_complex',
                      filters + f';[v]{scale}[preview]', '-map', '[preview]']
         else:
             args += ['-map', '0:v:0', '-vf', filters + ',' + scale]
@@ -66,9 +71,11 @@ class Preview:
                     return
                 token, position, width, height, edits, source_view = self._pending
                 self._pending = None
-            process = None
+            process = resources = None
             try:
-                command = preview_command(self.ffmpeg, self.media, position, width, height, edits, source_view)
+                if not source_view:
+                    resources = TextResources((edits or EditOptions()).text)
+                command = preview_command(self.ffmpeg, self.media, position, width, height, edits, source_view, resources)
                 with self._condition:
                     if self._closed:
                         return
@@ -83,10 +90,15 @@ class Preview:
                     raise RuntimeError('Preview took too long. Try another point in the video.')
                 if process.returncode or not data.startswith(b'P6'):
                     raise RuntimeError('Could not load this preview frame. ' + error.decode('utf-8', 'replace')[-300:])
-                frame = Frame(token, position, data, source_view=source_view)
+                frame = Frame(token, position, data, source_view=source_view, edits=edits)
             except Exception as exc:
                 frame = Frame(token, position, error=str(exc))
             finally:
+                try:
+                    if resources:
+                        resources.close()
+                except OSError as exc:
+                    frame = Frame(token, position, error=f'Could not remove temporary preview text: {exc}')
                 with self._condition:
                     self._process = None
             if self._closed:
