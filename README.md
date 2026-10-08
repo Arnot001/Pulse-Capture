@@ -1,7 +1,7 @@
-# PULSE // CAPTURE v0.1
+# PULSE // CAPTURE v0.2.0
 
 A small Windows screen recorder with a dark Pulse interface. Choose a source,
-record, stop, and get a local MP4. Optional Pulse watermark; no editor, account, or cloud.
+record, trim the start/end in Quick Edit, and export a local MP4. Optional Pulse watermark; no account or cloud.
 
 ## Run
 
@@ -22,7 +22,7 @@ Missing or incompatible binaries produce a visible error and disable recording.
 ## Capture
 
 1. Choose **Full screen**, **Window**, or **Area**. Full screen records the entire
-   virtual desktop. Window lists visible, non-minimized windows and records the
+   virtual desktop. Window lists visible windows (including minimized apps labelled “restore first”) and records the
    selected handle. Area opens a desktop overlay: drag a rectangle, or press Esc
    to cancel. Reverse drags and monitors with negative coordinates are supported.
 2. Select microphone/input and system-audio devices when available. Uncheck an
@@ -34,7 +34,7 @@ Missing or incompatible binaries produce a visible error and disable recording.
    “Recording” appears only after FFmpeg reports encoded frames.
 6. Press **Stop recording**. Pulse waits for FFmpeg to finalize the MP4, checks
    video frames, duration, and requested audio, then shows **Saved**.
-7. **Open folder** opens the recording destination in Explorer.
+7. After saving, choose **Quick Edit** to trim the recording, or **Open folder** to view it in Explorer.
 
 Recordings default to `%USERPROFILE%\Videos\Pulse Capture`.
 Preferences are stored at `%LOCALAPPDATA%\Pulse Capture\settings.json`.
@@ -42,6 +42,41 @@ An advanced `output_folder` preference can set a different directory.
 The optional global **Ctrl+Shift+R** shortcut works while Pulse is in the
 background. A conflict with another app is shown explicitly; the shortcut is
 off by default. Closing Pulse during capture requests a clean stop first.
+
+## Quick Edit — Milestone 1
+
+After a successful recording, click **Quick Edit**. A separate Pulse window opens
+the new video; the recording engine is unchanged.
+
+1. Click the timeline to scrub through the recording. The white line is the
+   playhead; cyan handles mark the section to keep.
+2. Drag the cyan handles, enter **Start** and **End**, or choose **Use playhead**.
+   Times accept seconds (`12.5`), minutes (`1:23.500`), or hours (`1:02:03`).
+   **Reset** restores the full clip. Invalid ranges display a clear explanation.
+3. **Preview trim** plays an approximate, low-frame-rate, silent visual preview
+   of the selection. This is a lightweight frame preview, not full audiovisual
+   playback. The original audio remains in the export when the source has audio.
+4. Click **Export video**. Rendering runs in the background with real progress
+   and a **Cancel export** action. The MP4 is validated before “Exported” appears.
+5. **Open folder** opens the exported file's location. **Change folder** chooses
+   another destination for this editor session.
+
+Exports use `original-name_trimmed.mp4`, then `_001`, `_002`, and so on. The
+original and existing exports are never overwritten. By default the new copy
+is saved beside the source. Cancelling removes this export's temporary file;
+closing the editor or application cancels an active export before closing.
+
+The output keeps the source dimensions (padding an odd edge where H.264 requires
+it), original speed, and first audio track. It re-encodes to H.264/AAC for cuts
+between keyframes; cut boundaries are limited by the source frame spacing.
+The watermark already burned into a recording remains visible after trimming.
+No additional logo is applied during this milestone's export.
+
+Milestone 1 intentionally contains **trim only**. Format/aspect presets, crop,
+editable watermark settings, captions, blur/pixelation, zoom, mute/volume,
+speed, fades, and Pulse Promo are later milestones. They are not exposed as
+nonworking controls. The existing branding asset and recorder watermark remain
+intact; a replacement logo can be added separately.
 
 ## Audio availability
 
@@ -104,6 +139,14 @@ capture/filenames.py           Collision-safe reservations and publication
 capture/window_picker.py      Native Windows/DPI helpers and enumeration
 capture/region_picker.py      Pure region geometry
 capture/hotkey.py              Optional global Windows shortcut
+editor/models.py              Editing state and time validation
+editor/media.py               Local video metadata loading
+editor/preview.py             Background, bounded-size frame previews
+editor/timeline.py            Trim handles and playhead
+editor/editor_window.py       Separate Quick Edit interface
+editor/ffmpeg_export.py       Pure trim command construction
+editor/export_job.py          Progress, cancellation, and validated export
+editor/filenames.py           Non-overwriting edited-copy reservations
 tests/                        Automated headless tests
 assets/branding/               Pulse icon and design notes
 vendor/                       Optional FFmpeg/FFprobe binaries
@@ -113,12 +156,26 @@ The capture layer never imports Tkinter. UI changes do not require altering
 FFmpeg command construction or recording orchestration. Worker threads communicate
 through queues; only the main thread manipulates Tk widgets.
 
+The editor uses independent state and background services. The recorder UI passes
+only the saved path and backend executables to the editor. Neither preview nor
+export logic imports Tkinter; the editor UI alone renders frames on the main thread.
+
 ## Test and build
 
 ```powershell
 python -m unittest discover -v
 .\build.ps1 -InstallBuildTools
 ```
+
+Optional real FFmpeg tests create synthetic audio/silent clips, export trims,
+decode the results, and verify that the originals are unchanged:
+
+```powershell
+$env:PULSE_RUN_FFMPEG_TESTS = '1'
+python -m unittest discover -v
+```
+
+See `EDITOR_VERIFICATION.md` for Milestone 1 checks and remaining coverage.
 
 The application is produced at `dist\Pulse Capture\Pulse Capture.exe`.
 Keep its complete folder together, including `_internal`. This windowed build
