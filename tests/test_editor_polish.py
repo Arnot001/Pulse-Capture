@@ -72,11 +72,17 @@ class PolishCommandTests(unittest.TestCase):
             text=TextOverlay(True, 'Focus'),
             branding=Branding(True),
         )
-        graph = self.command(edits)[self.command(edits).index('-filter_complex')+1]
-        for first, second in (('gblur=', 'scale=1920:1080:flags=lanczos'),
-                              ('flags=lanczos', 'drawtext='),
-                              ('drawtext=', 'overlay=')):
-            self.assertLess(graph.index(first), graph.index(second))
+        cmd = self.command(edits)
+        graph = cmd[cmd.index('-filter_complex')+1]
+        stages = [
+            'gblur=sigma=18:steps=3[hidden]',
+            'format=yuv444:shortest=1[private]',
+            '[private]crop=1280:720:320:180,scale=1920:1080:flags=lanczos[zoomed]',
+            '[zoomed]drawtext=',
+            '[text][wm]overlay=',
+        ]
+        indexes = [graph.index(stage) for stage in stages]
+        self.assertEqual(indexes, sorted(indexes))
 
     def test_speed_adjusts_video_audio_and_expected_duration(self):
         for speed, expected in ((.5, 4), (1, 2), (1.5, 2/1.5), (2, 1)):
@@ -121,9 +127,20 @@ class PolishCommandTests(unittest.TestCase):
         ).with_format(self.media, '9:16 Vertical')
         cmd = self.command(edits)
         graph = cmd[cmd.index('-filter_complex')+1]
-        order = ['crop=594', 'pad=', 'flags=neighbor', 'scale=594:1056:flags=lanczos',
-                 'drawtext=', 'overlay=', 'setpts=PTS/1.5', 'fade=t=in', 'fade=t=out']
-        indexes = [graph.index(value) for value in order]
+        stages = [
+            'crop=594:1056:',
+            'pad=',
+            'flags=neighbor[hidden]',
+            'format=yuv444:shortest=1[private]',
+            '[private]crop=396:704:',
+            'scale=594:1056:flags=lanczos[zoomed]',
+            '[zoomed]drawtext=',
+            '[text][wm]overlay=',
+            '[brand]setpts=PTS/1.5[speed]',
+            '[speed]fade=t=in',
+            'fade=t=out',
+        ]
+        indexes = [graph.index(stage) for stage in stages]
         self.assertEqual(indexes, sorted(indexes))
 
 
