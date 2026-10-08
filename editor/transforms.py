@@ -4,6 +4,7 @@ import math
 from pathlib import Path
 from .privacy import Privacy, output_mask, privacy_filters
 from .text_overlay import TextOverlay, text_geometry, text_filter
+from .polish import Fade, Zoom, fade_seconds, output_duration, validate_speed, zoom_filter
 
 FORMATS = {'Original': None, '16:9 Landscape': (16, 9),
            '9:16 Vertical': (9, 16), '1:1 Square': (1, 1)}
@@ -82,12 +83,18 @@ class EditOptions:
     branding: Branding = Branding()
     text: TextOverlay = TextOverlay()
     privacy: Privacy = Privacy()
+    zoom: Zoom = Zoom()
+    speed: float = 1.0
+    fade: Fade = Fade()
 
     def validate(self, media):
         expected = centered_crop(media, self.preset)
         self.branding.validate()
         self.text.validate()
         self.privacy.validate(media)
+        self.zoom.validate()
+        validate_speed(self.speed)
+        self.fade.validate()
         if expected is None:
             if self.crop is not None:
                 raise ValueError('Original must keep the full frame.')
@@ -111,9 +118,12 @@ class EditOptions:
             return self.crop.width, self.crop.height
         return (media.width+1)//2*2, (media.height+1)//2*2
 
+    def output_duration(self, source_duration):
+        return output_duration(source_duration, self.speed)
 
-def video_filters(media, edits, asset=None, text_resources=None):
-    """Crop, pad, privacy, text, branding. Shared by preview and export."""
+
+def video_filters(media, edits, asset=None, text_resources=None, duration=None):
+    """Crop, privacy, zoom, overlays, timing and fades. Preview omits timing effects."""
     edits.validate(media)
     filters = []
     if edits.crop:
@@ -122,23 +132,52 @@ def video_filters(media, edits, asset=None, text_resources=None):
     filters.append('pad=ceil(iw/2)*2:ceil(ih/2)*2')
     base = ','.join(filters)
     rect = output_mask(edits.privacy.mask, media, edits.crop)
-    if not (rect or edits.text.enabled or edits.branding.enabled):
+    timed = duration is not None and (
+        edits.speed != 1.0 or edits.fade.fade_in or edits.fade.fade_out
+    )
+    if not (rect or edits.zoom.enabled or edits.text.enabled or edits.branding.enabled or timed):
         return base, False
+
     graph = [f'[0:v:0]{base}[base]']
     current = 'base'
     if rect:
         graph.extend(privacy_filters(rect, edits.privacy.mode))
         current = 'private'
+
+    zoom = zoom_filter(media, edits.crop, edits.zoom)
+    if zoom:
+        graph.append(f'[{current}]{zoom}[zoomed]')
+        current = 'zoomed'
+
     width, height = edits.output_size(media)
     if edits.text.enabled:
         graph.append(f'[{current}]{text_filter(width, height, edits.text, text_resources)}[text]')
         current = 'text'
+
     if edits.branding.enabled:
         if asset is None or not Path(asset).is_file():
             raise ValueError('Pulse branding asset is missing. Turn branding off or reinstall Pulse Capture.')
         x, y, size = watermark_geometry(width, height, edits.branding)
-        graph.extend([f'[1:v:0]scale={size}:{size},format=rgba,colorchannelmixer=aa=0.82[wm]',
-                      f'[{current}][wm]overlay={x}:{y}:eof_action=repeat:shortest=0:format=auto[v]'])
-    else:
-        graph.append(f'[{current}]null[v]')
+        graph.extend([
+            f'[1:v:0]scale={size}:{size},format=rgba,colorchannelmixer=aa=0.82[wm]',
+            f'[{current}][wm]overlay={x}:{y}:eof_action=repeat:shortest=0:format=auto[brand]'
+        ])
+        current = 'brand'
+
+    if duration is not None:
+        if edits.speed != 1.0:
+            graph.append(f'[{current}]setpts=PTS/{edits.speed:g}[speed]')
+            current = 'speed'
+        out_duration = edits.output_duration(duration)
+        fade = fade_seconds(out_duration)
+        fades = []
+        if edits.fade.fade_in:
+            fades.append(f'fade=t=in:st=0:d={fade:.6f}')
+        if edits.fade.fade_out:
+            fades.append(f'fade=t=out:st={max(0, out_duration-fade):.6f}:d={fade:.6f}')
+        if fades:
+            graph.append(f'[{current}]{",".join(fades)}[faded]')
+            current = 'faded'
+
+    graph.append(f'[{current}]null[v]')
     return ';'.join(graph), True
