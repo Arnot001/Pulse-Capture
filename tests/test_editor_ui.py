@@ -117,6 +117,56 @@ class EditorUITests(unittest.TestCase):
         self.assertEqual(w.trim, TrimRange(.5, 2.5))
         self.assertFalse(self.errors)
 
+    def test_play_pause_stop_and_crop_live_feedback(self):
+        w = self.window
+        w.update_trim(TrimRange(.5, 2.5))
+        w.seek(1.0)
+        w.play_preview()
+        self.assertTrue(w.playing)
+        self.assertAlmostEqual(w.play_anchor, 1.0, places=2)
+        self.assertEqual(str(w.play_button.cget('state')), 'disabled')
+        self.assertEqual(str(w.pause_button.cget('state')), 'normal')
+        self.pump_until(lambda: w.position > 1.08, timeout=8)
+
+        w.pause_preview()
+        paused = w.position
+        self.assertFalse(w.playing)
+        self.assertEqual(str(w.play_button.cget('state')), 'normal')
+        self.assertEqual(str(w.pause_button.cget('state')), 'disabled')
+        time.sleep(.15)
+        self.root.update()
+        self.assertAlmostEqual(w.position, paused, delta=.03)
+
+        w.play_preview()
+        self.assertAlmostEqual(w.play_anchor, paused, delta=.03)
+        self.pump_until(lambda: w.position > paused+.05, timeout=8)
+        w.stop_preview()
+        self.assertFalse(w.playing)
+        self.assertAlmostEqual(w.position, w.trim.start, places=2)
+
+        w.update_trim(TrimRange(.5, .9))
+        w.seek(.82)
+        w.play_preview()
+        self.pump_until(lambda: not w.playing, timeout=8)
+        self.assertAlmostEqual(w.position, .9, places=2)
+
+        self.next_picture(lambda: w.select_tool('CROP'))
+        w.format_choice.set('9:16 Vertical')
+        self.next_picture(w.format_changed)
+        self.assertTrue(w.video.source_view)
+        before = [tuple(w.video.coords(item)) for item in w.video.find_withtag('crop')]
+        self.assertTrue(before)
+        moved = w.edits.crop.moved(w.media, w.edits.crop.x+40, w.edits.crop.y)
+        w.crop_changed(moved)
+        self.root.update()
+        after = [tuple(w.video.coords(item)) for item in w.video.find_withtag('crop')]
+        self.assertNotEqual(before, after)
+        self.assertEqual(w.edits.crop, moved)
+
+        self.next_picture(lambda: w.select_tool('FORMAT'))
+        self.assertFalse(w.video.source_view)
+        self.assertLess(w.video.photo.width(), w.video.photo.height())
+
     def test_close_cancels_live_export(self):
         w = self.window
         children = []
