@@ -31,6 +31,7 @@ class EditorWindow(tk.Toplevel):
         self.metadata = Queue()
         self.closed = self.closing = self.playing = False
         self.position, self.token = 0.0, 0
+        self.play_anchor = 0.0
         self.last_export = None
         self.output_folder = self.path.parent
         self._seek_id = self._poll_id = self._play_id = None
@@ -145,9 +146,14 @@ class EditorWindow(tk.Toplevel):
         self.video.create_text(350, 120, text='Opening your video…', fill=t.MUTED, tags='placeholder')
         transport = tk.Frame(preview_area, bg=t.BG)
         transport.grid(row=1, column=0, sticky='ew', pady=(8, 0))
-        self.play_button = t.button(transport, '▶  PREVIEW TRIM', self.toggle_play)
-        self.play_button.configure(state='disabled')
+        self.play_button = t.button(transport, '▶  PLAY', self.play_preview)
+        self.pause_button = t.button(transport, '⏸  PAUSE', self.pause_preview)
+        self.stop_button = t.button(transport, '■  STOP', self.stop_preview)
+        for button in (self.play_button, self.pause_button, self.stop_button):
+            button.configure(state='disabled')
         self.play_button.pack(side='left')
+        self.pause_button.pack(side='left', padx=(8, 0))
+        self.stop_button.pack(side='left', padx=(8, 0))
         self.clock = t.label(transport, '0:00.000 / 0:00.000', 11, t.TEXT)
         self.clock.pack(side='left', padx=16)
         self.preview_note = t.label(transport, 'Silent preview · Export keeps audio', 9, t.MUTED)
@@ -167,13 +173,14 @@ class EditorWindow(tk.Toplevel):
                           [(v, v.replace(' ', '\n', 1)) for v in FORMATS], self.format_changed)
         t.label(panel, 'Choose your shape. Use Crop to move the frame.', 9, t.MUTED).pack(anchor='w')
         panel = self.panels['CROP']
-        self.crop_hint = t.label(panel, 'Choose a format first to crop your video.', 10, t.MUTED)
-        self.crop_hint.pack(anchor='w', pady=(0, 8))
+        self.add_segments(panel, self.format_choice,
+                          [(v, v.replace(' ', '\n', 1)) for v in FORMATS], self.format_changed)
+        self.crop_hint = t.label(panel, 'Choose a shape, then drag the cyan frame to keep what matters.', 9, t.MUTED)
+        self.crop_hint.pack(anchor='w', pady=(0, 6))
         actions = tk.Frame(panel, bg=t.PANEL)
         actions.pack(fill='x')
-        for label, command in [('CHOOSE FORMAT', lambda: self.select_tool('FORMAT')),
-                               ('CENTRE CROP', self.center_crop),
-                               ('VIEW RESULT', lambda: self.select_tool('FORMAT'))]:
+        for label, command in [('CENTRE CROP', self.center_crop),
+                               ('VIEW CROPPED RESULT', lambda: self.select_tool('FORMAT'))]:
             button = t.button(actions, label, command)
             button.pack(side='left', padx=(0, 8))
             self.controls.append(button)
@@ -214,8 +221,10 @@ class EditorWindow(tk.Toplevel):
                 self.edits = self.edits.with_format(self.media, self.format_choice.get())
             self.video.crop = self.edits.crop
             self.overlay_tools.refresh()
-            self.crop_hint.configure(text='Drag the cyan frame to keep what matters. Arrow keys fine-tune.'
-                                     if self.edits.crop else 'Original keeps the full frame. Choose a format to crop.')
+            self.crop_hint.configure(
+                text='Drag the cyan frame to reposition it. The full source stays visible while cropping; use VIEW CROPPED RESULT to check the final frame.'
+                if self.edits.crop else 'Original keeps the full frame. Choose Landscape, Vertical, or Square above to crop.'
+            )
             self.stop_play()
             self.request_frame()
         except ValueError as exc:
@@ -317,30 +326,62 @@ class EditorWindow(tk.Toplevel):
         self.update_trim(TrimRange(0, self.media.duration))
         self.seek(0)
 
-    def toggle_play(self):
-        if self.playing:
-            self.stop_play()
+    def _update_transport_controls(self):
+        if not hasattr(self, 'play_button'):
             return
-        if not self.commit_entries():
+        ready = bool(self.media and not self.exporter.busy and not self.closing)
+        self.play_button.configure(state='normal' if ready and not self.playing else 'disabled')
+        self.pause_button.configure(state='normal' if ready and self.playing else 'disabled')
+        self.stop_button.configure(state='normal' if ready else 'disabled')
+
+    def play_preview(self):
+        if self.playing or not self.commit_entries():
             return
+        if self.position < self.trim.start or self.position >= self.trim.end:
+            self.position = self.trim.start
         self.playing = True
+        self.play_anchor = self.position
         self.play_started = time.monotonic()
-        self.position = self.trim.start
-        self.play_button.configure(text='■  STOP PREVIEW')
+        self._update_transport_controls()
         self.update_timeline()
         self.request_frame()
 
-    def stop_play(self):
+    def pause_preview(self):
+        if not self.playing:
+            return
+        self.stop_play()
+        self.request_frame()
+
+    def stop_preview(self):
+        self.stop_play(reset=True)
+        self.request_frame()
+
+    def toggle_play(self):
+        # Backward-compatible helper for any callers from older builds.
+        if self.playing:
+            self.pause_preview()
+        else:
+            self.play_preview()
+
+    def stop_play(self, reset=False):
+        if self.playing and self.trim:
+            self.position = min(self.trim.end,
+                                self.play_anchor + time.monotonic() - self.play_started)
         self.playing = False
-        self.play_button.configure(text='▶  PREVIEW TRIM')
         if self._play_id:
             self.after_cancel(self._play_id)
             self._play_id = None
+        if reset and self.trim:
+            self.position = self.trim.start
+        if self.media and self.trim:
+            self.update_timeline()
+        self._update_transport_controls()
 
     def next_frame(self):
         self._play_id = None
         if self.playing:
-            self.position = min(self.trim.end, self.trim.start + time.monotonic() - self.play_started)
+            self.position = min(self.trim.end,
+                                self.play_anchor + time.monotonic() - self.play_started)
             self.update_timeline()
             if self.position >= self.trim.end:
                 self.stop_play()
@@ -366,7 +407,7 @@ class EditorWindow(tk.Toplevel):
         self.video.drag = None
         self.video.gesture = self.video.candidate = None
         self.update_brand_controls()
-        self.play_button.configure(state='disabled' if busy else 'normal')
+        self._update_transport_controls()
         self.export_button.configure(state='disabled' if busy else 'normal',
                                      text='EXPORTING…' if busy else 'EXPORT VIDEO  ↗')
         if busy:
