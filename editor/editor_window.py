@@ -15,6 +15,7 @@ from .preview import Preview
 from .timeline import Timeline
 from .privacy_preview import PrivacyPreview
 from .overlay_tools import OverlayTools
+from .polish_tools import PolishTools
 from .transforms import EditOptions, Branding, FORMATS, CORNERS, SIZES
 
 
@@ -99,14 +100,14 @@ class EditorWindow(tk.Toplevel):
 
         tool_area = tk.Frame(bottom, bg=t.BG)
         tool_area.pack(side='top', fill='x', before=self.note, pady=(8, 0))
-        tabs = t.Segments(tool_area, self.tool, [(v, v) for v in ('TRIM', 'FORMAT', 'CROP', 'BRAND', 'TEXT', 'PRIVACY')], self.show_tool)
+        tabs = t.Segments(tool_area, self.tool, [(v, v) for v in ('TRIM', 'FORMAT', 'CROP', 'BRAND', 'TEXT', 'PRIVACY', 'MOTION', 'FINISH')], self.show_tool)
         tabs.pack(fill='x', pady=(0, 8))
         self.controls.extend(b for _, b in tabs.buttons)
         # A fixed, compact tool area keeps the preview stable when switching tools.
-        panel_area = tk.Frame(tool_area, bg=t.PANEL, height=122)
+        panel_area = tk.Frame(tool_area, bg=t.PANEL, height=126)
         panel_area.pack(fill='x')
         panel_area.pack_propagate(False)
-        for name in ('TRIM', 'FORMAT', 'CROP', 'BRAND', 'TEXT', 'PRIVACY'):
+        for name in ('TRIM', 'FORMAT', 'CROP', 'BRAND', 'TEXT', 'PRIVACY', 'MOTION', 'FINISH'):
             self.panels[name] = tk.Frame(panel_area, bg=t.PANEL)
         row = self.panels['TRIM']
         row.pack(fill='both', expand=True, padx=12, pady=10)
@@ -133,12 +134,15 @@ class EditorWindow(tk.Toplevel):
         self.selection_label.grid(row=1, column=0, columnspan=3, sticky='w', pady=(8, 0))
         self.build_tools()
         self.overlay_tools = OverlayTools(self)
+        self.polish_tools = PolishTools(self)
         for widget in self.controls:
             widget.configure(state='disabled')
 
         preview_area = tk.Frame(self, bg=t.BG)
         preview_area.pack(fill='both', expand=True, padx=28)
-        self.video = PrivacyPreview(preview_area, self.crop_changed, self.overlay_tools.mask_changed, bg='#060a10', highlightbackground=t.LINE, highlightthickness=1, height=260)
+        self.video = PrivacyPreview(preview_area, self.crop_changed, self.overlay_tools.mask_changed,
+                                    self.polish_tools.focus_changed, bg='#060a10',
+                                    highlightbackground=t.LINE, highlightthickness=1, height=260)
         preview_area.rowconfigure(0, weight=1)
         preview_area.columnconfigure(0, weight=1)
         self.video.grid(row=0, column=0, sticky='nsew')
@@ -210,7 +214,9 @@ class EditorWindow(tk.Toplevel):
         self.panels[self.tool.get()].pack(fill='both', expand=True, padx=12, pady=10)
         self.video.active = self.tool.get() == 'CROP'
         self.video.drag = None
+        self.video.zoom_drag = False
         self.overlay_tools.refresh()
+        self.polish_tools.refresh()
         self.request_frame()
 
     def format_changed(self):
@@ -221,6 +227,7 @@ class EditorWindow(tk.Toplevel):
                 self.edits = self.edits.with_format(self.media, self.format_choice.get())
             self.video.crop = self.edits.crop
             self.overlay_tools.refresh()
+            self.polish_tools.refresh()
             self.crop_hint.configure(
                 text='Drag the cyan frame to reposition it. The full source stays visible while cropping; use VIEW CROPPED RESULT to check the final frame.'
                 if self.edits.crop else 'Original keeps the full frame. Choose Landscape, Vertical, or Square above to crop.'
@@ -237,11 +244,14 @@ class EditorWindow(tk.Toplevel):
         self.edits = replace(self.edits, crop=crop)
         self.video.crop = crop
         self.overlay_tools.refresh()
+        self.polish_tools.refresh()
 
     def center_crop(self):
         self.edits = self.edits.with_format(self.media, self.edits.preset)
         self.video.crop = self.edits.crop
         self.overlay_tools.refresh()
+        self.polish_tools.refresh()
+        self.request_frame()
 
     def update_brand_controls(self):
         enabled = bool(self.media and not self.exporter.busy and self.brand_on.get())
@@ -259,6 +269,7 @@ class EditorWindow(tk.Toplevel):
         self.video.coords('placeholder', self.video.winfo_width()/2, self.video.winfo_height()/2)
         self.video.coords('frame', self.video.winfo_width()/2, self.video.winfo_height()/2)
         self.video.drag = None
+        self.video.zoom_drag = False
         self.video.gesture = self.video.candidate = None
         self.video.draw_overlay()
         if self.preview and not self.playing:
@@ -273,8 +284,11 @@ class EditorWindow(tk.Toplevel):
             self.after_cancel(self._seek_id)
         def send():
             self._seek_id = None
+            edits = self.edits
+            if self.tool.get() == 'MOTION' and edits.zoom.enabled:
+                edits = replace(edits, zoom=replace(edits.zoom, enabled=False))
             self.preview.request(token, self.position, self.video.winfo_width()-4, self.video.winfo_height()-4,
-                                 self.edits, self.tool.get() == 'CROP')
+                                 edits, self.tool.get() == 'CROP')
         self._seek_id = self.after(90 if not self.playing else 1, send)
 
     def seek(self, position):
@@ -366,7 +380,7 @@ class EditorWindow(tk.Toplevel):
     def stop_play(self, reset=False):
         if self.playing and self.trim:
             self.position = min(self.trim.end,
-                                self.play_anchor + time.monotonic() - self.play_started)
+                                self.play_anchor + (time.monotonic() - self.play_started) * self.edits.speed)
         self.playing = False
         if self._play_id:
             self.after_cancel(self._play_id)
@@ -381,7 +395,7 @@ class EditorWindow(tk.Toplevel):
         self._play_id = None
         if self.playing:
             self.position = min(self.trim.end,
-                                self.play_anchor + time.monotonic() - self.play_started)
+                                self.play_anchor + (time.monotonic() - self.play_started) * self.edits.speed)
             self.update_timeline()
             if self.position >= self.trim.end:
                 self.stop_play()
@@ -405,6 +419,7 @@ class EditorWindow(tk.Toplevel):
         self.timeline.enabled = not busy
         self.video.enabled = not busy
         self.video.drag = None
+        self.video.zoom_drag = False
         self.video.gesture = self.video.candidate = None
         self.update_brand_controls()
         self._update_transport_controls()
