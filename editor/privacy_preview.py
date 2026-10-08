@@ -5,10 +5,14 @@ from ui import theme as t
 
 
 class PrivacyPreview(CropPreview):
-    def __init__(self, parent, on_crop, on_privacy, **kwargs):
+    def __init__(self, parent, on_crop, on_privacy, on_zoom=None, **kwargs):
         super().__init__(parent, on_crop, **kwargs)
         self.on_privacy = on_privacy
+        self.on_zoom = on_zoom
         self.privacy_active = False
+        self.zoom_active = False
+        self.zoom_focus = (0.5, 0.5)
+        self.zoom_drag = False
         self.mask = None
         self.mode = 'Blur'
         self.display_crop = None
@@ -47,6 +51,29 @@ class PrivacyPreview(CropPreview):
     def visible_mask(self):
         return self.mask.intersect(self.viewport()) if self.mask else None
 
+    def zoom_ready(self):
+        return (self.zoom_active and self.enabled and not self.source_view and
+                self.photo and self.media and self.display_crop == self.crop)
+
+    def zoom_screen_point(self):
+        if not self.zoom_ready():
+            return None
+        source_x = self.zoom_focus[0] * self.media.width
+        source_y = self.zoom_focus[1] * self.media.height
+        v = self.viewport()
+        source_x = max(v.x, min(v.right, source_x))
+        source_y = max(v.y, min(v.bottom, source_y))
+        return self.screen_rect(type(v)(round(source_x), round(source_y), 1, 1))[:2]
+
+    def _set_zoom_focus(self, event):
+        if not self.zoom_ready() or not self.on_zoom:
+            return
+        x, y = self.source_point(event.x, event.y)
+        self.zoom_focus = (max(0.0, min(1.0, x / self.media.width)),
+                           max(0.0, min(1.0, y / self.media.height)))
+        self.on_zoom(*self.zoom_focus)
+        self.draw_overlay()
+
     def draw_overlay(self):
         super().draw_overlay()
         self.delete('privacy')
@@ -62,8 +89,23 @@ class PrivacyPreview(CropPreview):
             self.create_rectangle(x-4, y-4, x+4, y+4, fill=t.CYAN, outline=t.BG, tags='privacy')
         self.create_text(x1+7, y1+7, text=self.mode.upper(), anchor='nw', fill=t.CYAN,
                          font=(t.FONT, -11, 'bold'), tags='privacy')
+        if self.zoom_ready():
+            point = self.zoom_screen_point()
+            if point:
+                x, y = point
+                radius = 14
+                self.create_oval(x-radius, y-radius, x+radius, y+radius,
+                                 outline=t.CYAN, width=2, tags='zoom')
+                self.create_line(x-radius-7, y, x+radius+7, y, fill=t.CYAN, width=2, tags='zoom')
+                self.create_line(x, y-radius-7, x, y+radius+7, fill=t.CYAN, width=2, tags='zoom')
 
     def begin(self, event):
+        if self.zoom_active:
+            if self.zoom_ready():
+                self.focus_set()
+                self.zoom_drag = True
+                self._set_zoom_focus(event)
+            return
         if not self.privacy_active:
             return super().begin(event)
         if not self.ready():
@@ -91,6 +133,10 @@ class PrivacyPreview(CropPreview):
         self.candidate = None
 
     def move(self, event):
+        if self.zoom_active:
+            if self.zoom_drag:
+                self._set_zoom_focus(event)
+            return
         if not self.privacy_active:
             return super().move(event)
         if not self.ready() or not self.gesture:
@@ -107,6 +153,7 @@ class PrivacyPreview(CropPreview):
 
     def finish(self, _=None):
         self.drag = None
+        self.zoom_drag = False
         if (self.gesture and self.candidate and self.ready() and
                 self.candidate.width >= 2 and self.candidate.height >= 2):
             self.on_privacy(self.candidate)
