@@ -1,13 +1,13 @@
-# PULSE // CAPTURE v0.3.0
+# PULSE // CAPTURE v0.4.0
 
 A small Windows screen recorder with a dark Pulse interface. Choose a source,
-record, trim and reframe in Quick Edit, and export a local MP4. Optional Pulse watermark; no account or cloud.
+record, trim, reframe, add text or a privacy box in Quick Edit, and export a local MP4. Optional Pulse watermark; no account or cloud.
 
 ## Run
 
 Requires Windows 10/11 and Python 3.11+ with Tcl/Tk. There are no third-party
 Python runtime dependencies. Install FFmpeg and FFprobe from a Windows build
-with `gdigrab`, `dshow`, `libx264`, and AAC support. Both binaries must be on PATH
+with `gdigrab`, `dshow`, `libx264`, AAC, `drawtext`, and `gblur` support. Both binaries must be on PATH
 or in this project's `vendor` folder. FFmpeg 9.0.2 was verified on the build PC.
 
 ```powershell
@@ -43,7 +43,7 @@ The optional global **Ctrl+Shift+R** shortcut works while Pulse is in the
 background. A conflict with another app is shown explicitly; the shortcut is
 off by default. Closing Pulse during capture requests a clean stop first.
 
-## Quick Edit — Milestone 2
+## Quick Edit — Milestone 3
 
 After a successful recording, click **Quick Edit**. A separate Pulse window opens
 the new video; the recording engine is unchanged.
@@ -67,9 +67,20 @@ the new video; the recording engine is unchanged.
    **Small / Medium / Large**. The rendered preview shows the new Pulse logo.
    Branding starts **Off** in every editor session. It adds a new overlay;
    a logo already burned into a recording cannot be removed or repositioned.
-7. Click **Export video**. Rendering runs in the background with real progress
+7. Choose **Text**, enter a caption, and switch **On**. Pick **Small / Medium /
+   Large** and **Top / Centre / Bottom**. Text is light with a subtle dark box.
+   Use Enter for up to three lines; the limit is 160 characters. Long lines
+   shrink to fit. If the result would be too small, shorten the text or add a
+   line break. Switch **Off** to remove it from the result without losing it.
+8. Choose **Privacy**, select **Blur** or **Pixelate**, then drag a box over the
+   rendered preview. Drag inside to move it, or drag a corner to resize it.
+   Arrow keys fine-tune the selected box. **Clear mask** removes it; drawing
+   outside the existing box replaces it. The effect updates after releasing
+   the mouse. One fixed box applies throughout the clip: check every part before
+   sharing, especially if private information moves.
+9. Click **Export video**. Rendering runs in the background with real progress
    and a **Cancel export** action. The MP4 is validated before “Exported” appears.
-8. **Open folder** opens the exported file's location. **Change folder** chooses
+10. **Open folder** opens the exported file's location. **Change folder** chooses
    another destination for this editor session.
 
 Exports use `original-name_trimmed.mp4`, then `_001`, `_002`, and so on. The
@@ -84,7 +95,7 @@ extra edge pixels to keep the ratio exact. Crops move in two-pixel steps.
 All formats preserve original speed and the first audio track when present.
 Exports re-encode to H.264/AAC for cuts between keyframes; cut boundaries are
 limited by the source frame spacing. Processing order is trim, crop, even-edge
-padding, then optional Pulse branding. Preview and export share the same filters.
+padding, privacy blur/pixelation, text, then optional Pulse branding. Preview and export share the same filters.
 
 Brand sizes are proportional to the shorter output edge (12%, 18%, 25%) with a
 small inset and subtle opacity. The recorder and editor share the existing
@@ -95,8 +106,30 @@ be partly or fully cropped out by an aspect change.
 
 Only the selected tool panel is shown. Preview remains a lightweight, silent,
 low-frame-rate preview; Crop displays the source and framing guide, while Trim,
-Format, and Brand show the rendered result. Text, effects, zoom, speed, fades,
-mute/volume, and Pulse Promo remain outside this milestone.
+Format, Brand, Text, and Privacy show the rendered result. Privacy also shows a
+selection outline and resize handles; those guides are not exported. All six
+panels preserve the 760 × 700 minimum window layout and full timeline height.
+
+Privacy rectangles are stored in original source pixels. After a format change
+or a moved crop, the renderer intersects that rectangle with the visible crop
+and subtracts the crop origin. The same mapping positions the preview guide.
+The box therefore remains over the same original content. If entirely outside
+the current crop it is not rendered; the Privacy panel explains this. Restore
+Original to see it again, or draw a new box in the current crop to replace it.
+Moving/resizing a partly clipped box edits its visible portion.
+
+Text and privacy both apply throughout the exported trim. Text uses a temporary
+UTF-8 file with literal expansion disabled, not interpolated shell/filter text.
+Arguments remain separate subprocess arguments. Temporary text is removed after
+preview/export, errors, and cancellation. Standard Windows Segoe UI is resolved
+from the system Fonts folder, with Arial/Tahoma fallbacks; no fonts are copied
+or bundled. Unicode input is accepted; available glyphs depend on the selected
+system font (some emoji/CJK glyphs may be unavailable). A missing font produces
+an actionable error; Text Off keeps the rest of the editor usable.
+
+Deferred: timed text/masks, multiple overlays, moving/tracked masks, automatic
+privacy detection, face detection, subtitles, transcription, effects, zoom,
+speed, fades, mute/volume, and Pulse Promo. These controls are not exposed.
 
 ## Audio availability
 
@@ -161,13 +194,17 @@ capture/window_picker.py      Native Windows/DPI helpers and enumeration
 capture/region_picker.py      Pure region geometry
 capture/hotkey.py              Optional global Windows shortcut
 editor/models.py              Editing state and time validation
-editor/transforms.py          Validated aspect, crop, and branding state
+editor/transforms.py          Combined edit state and shared filter graph
+editor/text_overlay.py        Text validation, sizing, font and UTF-8 resources
+editor/privacy.py             Source-anchored mask geometry and privacy filters
+editor/privacy_preview.py     Visual mask drawing, moving, and resizing
+editor/overlay_tools.py       Focused Text and Privacy panels
 editor/crop_preview.py        Visual crop overlay and source-coordinate dragging
 editor/media.py               Local video metadata loading
 editor/preview.py             Background, bounded-size frame previews
 editor/timeline.py            Trim handles and playhead
 editor/editor_window.py       Separate Quick Edit interface
-editor/ffmpeg_export.py       Combined trim / crop / branding command construction
+editor/ffmpeg_export.py       Combined trim / crop / overlays command construction
 editor/export_job.py          Progress, cancellation, and validated export
 editor/filenames.py           Non-overwriting edited-copy reservations
 tests/                        Automated headless tests
@@ -191,8 +228,9 @@ python -m unittest discover -v
 ```
 
 Optional real FFmpeg tests export all formats with audio/silence, render every
-watermark corner and size, check output pixels and cancellation, decode results,
-and verify source preservation:
+watermark corner and size, render literal Unicode text, check privacy pixels
+after every crop, compare preview/export, verify temporary text cleanup and
+cancellation, decode results, and verify source preservation:
 
 ```powershell
 $env:PULSE_RUN_FFMPEG_TESTS = '1'
@@ -206,7 +244,7 @@ $env:PULSE_RUN_UI_TESTS = '1'
 python -m unittest discover -v
 ```
 
-See `EDITOR_VERIFICATION.md` for Milestone 2 checks and remaining coverage.
+See `EDITOR_VERIFICATION.md` for Milestone 3 checks and remaining coverage.
 
 The application is produced at `dist\Pulse Capture\Pulse Capture.exe`.
 Keep its complete folder together, including `_internal`. This windowed build

@@ -91,7 +91,7 @@ class CaptureApp(tk.Tk):
         footer = tk.Frame(self, bg=t.BG)
         footer.pack(fill='x', padx=26, pady=(10, 8))
         t.label(footer, 'LOCAL CAPTURE.  NOTHING ELSE.', 8, t.MUTED, True).pack(side='left')
-        t.label(footer, 'PULSE UTILITIES  /  v0.3.0', 8, t.MUTED).pack(side='right')
+        t.label(footer, 'PULSE UTILITIES  /  v0.4.0', 8, t.MUTED).pack(side='right')
 
     def _wheel(self, event):
         if event.widget.winfo_toplevel() == self and not isinstance(event.widget, ttk.Combobox):

@@ -10,6 +10,7 @@ from capture.ffmpeg_backend import process_options, validate_output
 from .ffmpeg_export import build_export_command
 from .filenames import reserve_export
 from .transforms import EditOptions
+from .text_overlay import TextResources
 
 
 @dataclass(frozen=True)
@@ -71,13 +72,14 @@ class ExportJob:
             log.append(line.rstrip())
 
     def _run(self, media, trim, folder, edits):
-        reservation = process = None
+        reservation = process = resources = None
         readers, log = [], deque(maxlen=30)
         result = ExportEvent('error', message='Export did not finish.')
         try:
             self._check_cancel()
+            resources = TextResources(edits.text)
             reservation = reserve_export(media.path, folder)
-            command = build_export_command(self.backend.ffmpeg, media, trim, reservation.partial, edits)
+            command = build_export_command(self.backend.ffmpeg, media, trim, reservation.partial, edits, text_resources=resources)
             process = self._popen(command, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
                                   stderr=subprocess.PIPE, text=True, encoding='utf-8',
                                   errors='replace', bufsize=1, **process_options())
@@ -126,5 +128,10 @@ class ExportJob:
             except (OSError, subprocess.TimeoutExpired) as exc:
                 result = ExportEvent('error', message=f'Could not finish export cleanup: {exc}')
             finally:
+                try:
+                    if resources:
+                        resources.close()
+                except OSError as exc:
+                    result = ExportEvent('error', message=f'Could not remove temporary text: {exc}')
                 self.busy = False
                 self.events.put(result)
