@@ -5,7 +5,7 @@ from queue import Empty, Queue
 import threading
 import time
 import tkinter as tk
-from tkinter import ttk, messagebox
+from tkinter import ttk, messagebox, filedialog
 import settings
 from branding import asset_root, watermark_path
 from capture.audio_devices import AudioInventory, discover_audio
@@ -16,6 +16,21 @@ from capture.recorder import Recorder, State
 from capture.window_picker import list_windows, validate_window
 from .region_overlay import RegionOverlay
 from . import theme as t
+
+
+def choose_quick_edit_path(parent, last_file, output_folder):
+    """Use the latest recording when available; otherwise let the user choose an MP4."""
+    if last_file:
+        latest = Path(last_file)
+        if latest.is_file():
+            return latest
+    selected = filedialog.askopenfilename(
+        parent=parent,
+        initialdir=str(output_folder),
+        title='Choose a video to edit',
+        filetypes=(('MP4 video', '*.mp4'), ('All files', '*.*')),
+    )
+    return Path(selected) if selected else None
 
 
 class CaptureApp(tk.Tk):
@@ -313,6 +328,7 @@ class CaptureApp(tk.Tk):
         self.audio_notice.configure(text=notice)
         self.refresh_button.configure(state='normal')
         self.record_button.configure(state='normal' if backend else 'disabled')
+        self.quick_edit_button.configure(state='normal' if backend else 'disabled')
         if error:
             self.show_error(error)
         else:
@@ -376,7 +392,7 @@ class CaptureApp(tk.Tk):
             self.show_error(str(exc))
 
     def lock_controls(self, locked):
-        self.quick_edit_button.configure(state='normal' if self.last_file and not locked else 'disabled')
+        self.quick_edit_button.configure(state='normal' if self.backend and not locked else 'disabled')
         self.capture_segments.enable(not locked)
         self.fps_segments.enable(not locked)
         self.quality_combo.configure(state='disabled' if locked else 'readonly')
@@ -457,15 +473,19 @@ class CaptureApp(tk.Tk):
         self.persist()
 
     def open_quick_edit(self):
-        if not self.backend or not self.last_file or (self.recorder and self.recorder.busy):
+        if not self.backend or (self.recorder and self.recorder.busy):
             return
+        path = choose_quick_edit_path(self, self.last_file, self.prefs.output)
+        if path is None:
+            return
+        self.last_file = path
         for editor in self.editors:
-            if editor.path == self.last_file and not editor.closed:
+            if editor.path == path and not editor.closed:
                 editor.deiconify()
                 editor.lift()
                 return
         from editor.editor_window import EditorWindow
-        editor = EditorWindow(self, self.last_file, self.backend, self.editors.discard)
+        editor = EditorWindow(self, path, self.backend, self.editors.discard)
         self.editors.add(editor)
 
     def open_folder(self):
