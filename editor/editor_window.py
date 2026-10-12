@@ -287,10 +287,13 @@ class EditorWindow(tk.Toplevel):
         def send():
             self._seek_id = None
             edits = self.edits
-            if self.tool.get() == 'MOTION' and edits.zoom.enabled:
-                edits = replace(edits, zoom=replace(edits.zoom, enabled=False))
+            if (self.tool.get() == 'MOTION' and edits.zoom.enabled
+                    and not self.polish_tools.zoom_result):
+                # Focus placement must remain visible even at a fade boundary.
+                edits = replace(edits, zoom=replace(edits.zoom, enabled=False),
+                                fade=replace(edits.fade, fade_in=False, fade_out=False))
             self.preview.request(token, self.position, self.video.winfo_width()-4, self.video.winfo_height()-4,
-                                 edits, self.tool.get() == 'CROP')
+                                 edits, self.tool.get() == 'CROP', self.trim)
         self._seek_id = self.after(90 if not self.playing else 1, send)
 
     def seek(self, position):
@@ -365,7 +368,10 @@ class EditorWindow(tk.Toplevel):
     def pause_preview(self):
         if not self.playing:
             return
+        paused = self.position
         self.stop_play()
+        self.position = paused
+        self.update_timeline()
         self.request_frame()
 
     def stop_preview(self):
@@ -424,6 +430,7 @@ class EditorWindow(tk.Toplevel):
         self.video.zoom_drag = False
         self.video.gesture = self.video.candidate = None
         self.update_brand_controls()
+        self.polish_tools.refresh()
         self._update_transport_controls()
         self.export_button.configure(state='disabled' if busy else 'normal',
                                      text='EXPORTING…' if busy else 'EXPORT VIDEO  ↗')
@@ -477,7 +484,7 @@ class EditorWindow(tk.Toplevel):
                 if frame.token == self.token:
                     if frame.error:
                         self.stop_play()
-                        self.video.delete('frame', 'crop', 'privacy')
+                        self.video.delete('frame', 'crop', 'privacy', 'zoom')
                         self.video.photo = None
                         self.video.source_view = False
                         self.video.itemconfigure('placeholder', text='Preview unavailable')

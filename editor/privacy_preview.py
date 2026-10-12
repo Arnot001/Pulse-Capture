@@ -16,11 +16,13 @@ class PrivacyPreview(CropPreview):
         self.mask = None
         self.mode = 'Blur'
         self.display_crop = None
+        self.display_zoomed = False
         self.gesture = self.candidate = None
         self.bind('<ButtonRelease-1>', self.finish)
 
     def show_frame(self, photo, source_view, edits=None):
         self.display_crop = edits.crop if edits else None
+        self.display_zoomed = bool(edits and edits.zoom.enabled)
         super().show_frame(photo, source_view)
 
     def ready(self):
@@ -52,7 +54,7 @@ class PrivacyPreview(CropPreview):
         return self.mask.intersect(self.viewport()) if self.mask else None
 
     def zoom_ready(self):
-        return (self.zoom_active and self.enabled and not self.source_view and
+        return (self.zoom_active and self.enabled and not self.source_view and not self.display_zoomed and
                 self.photo and self.media and self.display_crop == self.crop)
 
     def zoom_screen_point(self):

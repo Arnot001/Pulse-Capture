@@ -45,7 +45,7 @@ class PolishGeometryTests(unittest.TestCase):
         for zoom in (Zoom(True, 3), Zoom(True, 1.5, -0.1, .5), Zoom(True, 1.5, .5, 1.1)):
             with self.subTest(zoom=zoom), self.assertRaises(ValueError):
                 zoom.validate()
-        for speed in (0, .75, 3):
+        for speed in (0, .75, 5):
             with self.subTest(speed=speed), self.assertRaises(ValueError):
                 EditOptions(speed=speed).validate(self.media)
         self.assertEqual(output_duration(4, .5), 8)

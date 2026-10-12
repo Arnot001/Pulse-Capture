@@ -6,6 +6,7 @@ import threading
 from capture.ffmpeg_backend import process_options
 from branding import watermark_path
 from .transforms import EditOptions, video_filters
+from .models import TrimRange
 from .text_overlay import TextResources
 
 
@@ -19,8 +20,11 @@ class Frame:
     edits: EditOptions | None = None
 
 
-def preview_command(ffmpeg, media, position, width, height, edits=None, source_view=True, text_resources=None):
+def preview_command(ffmpeg, media, position, width, height, edits=None, source_view=True, text_resources=None, trim=None):
     width, height = max(2, min(1280, int(width))), max(2, min(720, int(height)))
+    # Decode the last available frame at EOF, but keep the requested animation
+    # time so scrubbing to trim end reaches the exact target zoom.
+    animation_position = max(0, min(position, media.duration))
     position = max(0, min(position, max(0, media.duration - 1 / media.fps)))
     args = [str(ffmpeg), '-hide_banner', '-loglevel', 'error', '-nostdin',
             '-ss', f'{position:.6f}', '-i', str(media.path)]
@@ -29,7 +33,12 @@ def preview_command(ffmpeg, media, position, width, height, edits=None, source_v
         args += ['-map', '0:v:0', '-vf', scale]
     else:
         edits = edits or EditOptions()
-        filters, complex_graph = video_filters(media, edits, watermark_path(), text_resources)
+        edits.validate(media)
+        trim = trim or TrimRange(0, media.duration)
+        trim.validate(media)
+        output_time = max(0, min(trim.duration, animation_position-trim.start)) / edits.speed
+        filters, complex_graph = video_filters(media, edits, watermark_path(), text_resources,
+                                                trim.duration, output_time)
         if edits.branding.enabled:
             args += ['-i', str(watermark_path())]
         if complex_graph:
@@ -50,10 +59,10 @@ class Preview:
         self._thread = threading.Thread(target=self._run, daemon=True)
         self._thread.start()
 
-    def request(self, token, position, width, height, edits=None, source_view=True):
+    def request(self, token, position, width, height, edits=None, source_view=True, trim=None):
         with self._condition:
             if not self._closed:
-                self._pending = (token, position, width, height, edits, source_view)
+                self._pending = (token, position, width, height, edits, source_view, trim)
                 self._condition.notify()
 
     def close(self):
@@ -69,13 +78,13 @@ class Preview:
                 self._condition.wait_for(lambda: self._closed or self._pending is not None)
                 if self._closed:
                     return
-                token, position, width, height, edits, source_view = self._pending
+                token, position, width, height, edits, source_view, trim = self._pending
                 self._pending = None
             process = resources = None
             try:
                 if not source_view:
                     resources = TextResources((edits or EditOptions()).text)
-                command = preview_command(self.ffmpeg, self.media, position, width, height, edits, source_view, resources)
+                command = preview_command(self.ffmpeg, self.media, position, width, height, edits, source_view, resources, trim)
                 with self._condition:
                     if self._closed:
                         return

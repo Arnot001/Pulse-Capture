@@ -2,7 +2,7 @@
 from pathlib import Path
 from branding import watermark_path
 from .transforms import EditOptions, video_filters
-from .polish import fade_seconds
+from .polish import fade_seconds, audio_tempo_filters
 
 
 def build_export_command(ffmpeg, media, trim, output, edits=None, asset=None, text_resources=None):
@@ -23,9 +23,7 @@ def build_export_command(ffmpeg, media, trim, output, edits=None, asset=None, te
     else:
         args += ['-vf', filters, '-map', '0:v:0']
     if media.has_audio:
-        audio_filters = []
-        if edits.speed != 1.0:
-            audio_filters.append(f'atempo={edits.speed:g}')
+        audio_filters = audio_tempo_filters(edits.speed)
         out_duration = edits.output_duration(trim.duration)
         fade = fade_seconds(out_duration)
         if edits.fade.fade_in:

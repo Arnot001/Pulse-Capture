@@ -2,40 +2,55 @@
 from dataclasses import replace
 import tkinter as tk
 from ui import theme as t
-from .polish import Fade, Zoom, SPEEDS, ZOOM_FACTORS
+from .polish import Fade, Zoom, SPEEDS, ZOOM_FACTORS, ZOOM_MODES, ZOOM_TIMINGS
 from .transforms import Branding
 
 
 class PolishTools:
     def __init__(self, window):
         self.window = window
+        # Preview-only state: never stored in EditOptions or used by export.
+        self.zoom_result = False
         self.zoom_on = tk.BooleanVar(value=False)
         self.zoom_factor = tk.StringVar(value='1.5x')
+        self.zoom_mode = tk.StringVar(value='Static')
+        self.zoom_motion = tk.StringVar(value='Medium')
         self.speed = tk.StringVar(value='1.0x')
         self.fade_in = tk.BooleanVar(value=False)
         self.fade_out = tk.BooleanVar(value=False)
 
         panel = window.panels['MOTION']
-        row = tk.Frame(panel, bg=t.PANEL)
-        row.pack(fill='x')
-        zoom_toggle = tk.Frame(row, bg=t.PANEL)
-        zoom_toggle.pack(side='left', padx=(0, 10))
-        window.add_segments(zoom_toggle, self.zoom_on, [(False, 'ZOOM OFF'), (True, 'ZOOM ON')], self.motion_changed)
-        zoom_amount = tk.Frame(row, bg=t.PANEL)
-        zoom_amount.pack(side='left', fill='x', expand=True)
-        window.add_segments(zoom_amount, self.zoom_factor,
-                            [(f'{v:g}x', f'{v:g}x') for v in ZOOM_FACTORS], self.motion_changed)
+        def row():
+            frame = tk.Frame(panel, bg=t.PANEL)
+            frame.pack(fill='x', pady=(0, 2))
+            return frame
 
-        speed_row = tk.Frame(panel, bg=t.PANEL)
-        speed_row.pack(fill='x', pady=(3, 0))
-        t.label(speed_row, 'SPEED', 9, t.MUTED, True).pack(side='left', padx=(0, 8))
-        speed_group = tk.Frame(speed_row, bg=t.PANEL)
-        speed_group.pack(side='left', fill='x', expand=True)
-        speed_choices = [('0.5x', '0.5x'), ('1.0x', '1.0x'), ('1.5x', '1.5x'), ('2.0x', '2.0x')]
-        window.add_segments(speed_group, self.speed, speed_choices, self.motion_changed)
-        self.motion_hint = t.label(panel, 'Turn Zoom on, then click or drag on the preview to choose the focus.',
-                                   9, t.MUTED)
-        self.motion_hint.pack(anchor='w', pady=(3, 0))
+        def segments(parent, variable, choices):
+            group = t.Segments(parent, variable, choices, self.motion_changed)
+            group.pack(side='left', fill='x', expand=True, padx=(0, 6))
+            for _, button in group.buttons:
+                button.configure(padx=7, pady=2, font=(t.FONT, -12, 'bold'))
+                window.controls.append(button)
+            return group
+
+        zoom_row = row()
+        segments(zoom_row, self.zoom_on, [(False, 'ZOOM OFF'), (True, 'ZOOM ON')])
+        segments(zoom_row, self.zoom_factor, [(f'{v:g}x', f'{v:g}x') for v in ZOOM_FACTORS])
+        mode_row = row()
+        self.mode_segments = segments(mode_row, self.zoom_mode, [(v, v.upper()) for v in ZOOM_MODES])
+        t.label(mode_row, 'ZOOM MOTION', 8, t.MUTED, True).pack(side='left', padx=(4, 8))
+        self.motion_segments = segments(mode_row, self.zoom_motion, [(v, v.upper()) for v in ZOOM_TIMINGS])
+        speed_row = row()
+        t.label(speed_row, 'CLIP SPEED', 8, t.MUTED, True).pack(side='left', padx=(0, 8))
+        self.speed_segments = segments(speed_row, self.speed, [(f'{v:.1f}x', f'{v:.1f}x') for v in SPEEDS])
+        preview_row = row()
+        self.zoom_view_button = t.button(preview_row, 'VIEW ZOOM RESULT', self.toggle_zoom_view,
+                                         accent=True, font=(t.FONT, -12, 'bold'))
+        self.zoom_view_button.configure(pady=2, state='disabled')
+        self.zoom_view_button.pack(side='left', padx=(0, 10))
+        window.controls.append(self.zoom_view_button)
+        self.motion_hint = t.label(preview_row, 'Turn Zoom on to choose the focus.', 9, t.MUTED)
+        self.motion_hint.pack(side='left')
 
         panel = window.panels['FINISH']
         row = tk.Frame(panel, bg=t.PANEL)
@@ -62,16 +77,32 @@ class PolishTools:
             return
         try:
             zoom = replace(w.edits.zoom, enabled=self.zoom_on.get(),
-                           factor=self._number(self.zoom_factor.get()))
+                           factor=self._number(self.zoom_factor.get()),
+                           mode=self.zoom_mode.get(), motion_speed=self.zoom_motion.get())
             speed = self._number(self.speed.get())
+            w.stop_play()
             w.edits = replace(w.edits, zoom=zoom, speed=speed)
             if w.media:
                 w.edits.validate(w.media)
-            w.stop_play()
             self.refresh()
             w.request_frame()
         except ValueError as exc:
             w.note.configure(text=str(exc), fg=t.RED)
+
+    def toggle_zoom_view(self):
+        w = self.window
+        if (not w.media or w.exporter.busy or w.closing or
+                w.tool.get() != 'MOTION' or not w.edits.zoom.enabled):
+            return
+        w.stop_play()
+        self.zoom_result = not self.zoom_result
+        w.video.zoom_drag = False
+        self.refresh()
+        if self.zoom_result and w.edits.zoom.mode == 'Zoom in':
+            w.position = w.trim.start
+            w.play_preview()
+        else:
+            w.request_frame()
 
     def finish_changed(self):
         w = self.window
@@ -89,7 +120,8 @@ class PolishTools:
 
     def focus_changed(self, focus_x, focus_y):
         w = self.window
-        if w.exporter.busy or w.closing or not self.zoom_on.get():
+        if (w.exporter.busy or w.closing or not w.edits.zoom.enabled or
+                self.zoom_result or w.tool.get() != 'MOTION'):
             return
         w.edits = replace(w.edits, zoom=replace(w.edits.zoom, enabled=True,
                                                 focus_x=focus_x, focus_y=focus_y))
@@ -128,7 +160,9 @@ class PolishTools:
         w = self.window
         self.zoom_on.set(w.edits.zoom.enabled)
         self.zoom_factor.set(f'{w.edits.zoom.factor:g}x')
-        self.speed.set('1.0x' if w.edits.speed == 1.0 else f'{w.edits.speed:g}x')
+        self.zoom_mode.set(w.edits.zoom.mode)
+        self.zoom_motion.set(w.edits.zoom.motion_speed)
+        self.speed.set(f'{w.edits.speed:.1f}x')
         self.fade_in.set(w.edits.fade.fade_in)
         self.fade_out.set(w.edits.fade.fade_out)
 
@@ -136,6 +170,22 @@ class PolishTools:
         w = self.window
         if not hasattr(w, 'video'):
             return
-        w.video.zoom_active = w.tool.get() == 'MOTION' and w.edits.zoom.enabled
+        if not w.edits.zoom.enabled:
+            self.zoom_result = False
+        ready = bool(w.media and w.video.enabled and not w.exporter.busy and not w.closing)
+        self.mode_segments.enable(ready and w.edits.zoom.enabled)
+        self.motion_segments.enable(ready and w.edits.zoom.enabled and w.edits.zoom.mode == 'Zoom in')
+        self.zoom_view_button.configure(
+            text='EDIT ZOOM FOCUS' if self.zoom_result else 'VIEW ZOOM RESULT',
+            state='normal' if ready and w.edits.zoom.enabled else 'disabled')
+        self.motion_hint.configure(text=(
+            'Turn Zoom on to choose the focus.' if not w.edits.zoom.enabled else
+            'Play or scrub to preview the zoom motion.' if self.zoom_result and w.edits.zoom.mode == 'Zoom in' else
+            'Showing your zoomed result.' if self.zoom_result else
+            'Click or drag the cyan target to choose the focus.'))
+        w.video.zoom_active = (w.tool.get() == 'MOTION' and w.edits.zoom.enabled
+                               and not self.zoom_result)
+        if not w.video.zoom_active:
+            w.video.zoom_drag = False
         w.video.zoom_focus = (w.edits.zoom.focus_x, w.edits.zoom.focus_y)
         w.video.draw_overlay()

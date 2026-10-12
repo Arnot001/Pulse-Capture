@@ -122,8 +122,8 @@ class EditOptions:
         return output_duration(source_duration, self.speed)
 
 
-def video_filters(media, edits, asset=None, text_resources=None, duration=None):
-    """Crop, privacy, zoom, overlays, timing and fades. Preview omits timing effects."""
+def video_filters(media, edits, asset=None, text_resources=None, duration=None, preview_time=None):
+    """Shared visual order; preview_time samples output time without retiming a still."""
     edits.validate(media)
     filters = []
     if edits.crop:
@@ -144,7 +144,7 @@ def video_filters(media, edits, asset=None, text_resources=None, duration=None):
         graph.extend(privacy_filters(rect, edits.privacy.mode))
         current = 'private'
 
-    zoom = zoom_filter(media, edits.crop, edits.zoom)
+    zoom = zoom_filter(media, edits.crop, edits.zoom, edits.speed, duration, preview_time)
     if zoom:
         graph.append(f'[{current}]{zoom}[zoomed]')
         current = 'zoomed'
@@ -164,8 +164,12 @@ def video_filters(media, edits, asset=None, text_resources=None, duration=None):
         ])
         current = 'brand'
 
-    if duration is not None:
-        if edits.speed != 1.0:
+    sample_fade = preview_time is not None and (edits.fade.fade_in or edits.fade.fade_out)
+    if duration is not None and (preview_time is None or sample_fade):
+        if preview_time is not None:
+            graph.append(f'[{current}]setpts={max(0, preview_time):.9f}/TB[instant]')
+            current = 'instant'
+        elif edits.speed != 1.0:
             graph.append(f'[{current}]setpts=PTS/{edits.speed:g}[speed]')
             current = 'speed'
         out_duration = edits.output_duration(duration)
@@ -179,5 +183,6 @@ def video_filters(media, edits, asset=None, text_resources=None, duration=None):
             graph.append(f'[{current}]{",".join(fades)}[faded]')
             current = 'faded'
 
-    graph.append(f'[{current}]null[v]')
+    tail = 'setpts=PTS-STARTPTS' if sample_fade else 'null'
+    graph.append(f'[{current}]{tail}[v]')
     return ';'.join(graph), True
