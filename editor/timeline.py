@@ -1,4 +1,4 @@
-"""A small trim range with draggable handles and a separate playhead."""
+"""Trim, removed sections, draft cut markers, and a separate playhead."""
 import tkinter as tk
 from ui import theme as t
 from .models import TrimRange, format_time
@@ -9,6 +9,8 @@ class Timeline(tk.Canvas):
         super().__init__(parent, height=65, bg=t.BG, highlightthickness=0, cursor='hand2')
         self.on_seek, self.on_trim = on_seek, on_trim
         self.media = self.trim = None
+        self.cuts = None
+        self.cut_draft = (None, None)
         self.position = 0
         self.enabled = True
         self.drag = None
@@ -31,6 +33,24 @@ class Timeline(tk.Canvas):
         self.create_rectangle(14, 12, right, 36, fill=t.CONTROL, outline='')
         start, end = self.x(self.trim.start), self.x(self.trim.end)
         self.create_rectangle(start, 12, end, 36, fill='#17464f', outline=t.CYAN)
+
+        if self.cuts:
+            for cut in self.cuts.visible_ranges(self.trim):
+                left, cut_right = self.x(cut.start), self.x(cut.end)
+                self.create_rectangle(left, 12, cut_right, 36, fill='#4b2028',
+                                      outline=t.RED, width=1, tags='cut')
+                if cut_right-left > 32:
+                    self.create_text((left+cut_right)/2, 24, text='CUT', fill=t.TEXT,
+                                     font=(t.FONT, -9, 'bold'), tags='cut')
+
+        draft_start, draft_end = self.cut_draft
+        for value, label in ((draft_start, 'S'), (draft_end, 'E')):
+            if value is not None:
+                point = self.x(value)
+                self.create_line(point, 7, point, 41, fill=t.RED, width=2, dash=(3, 2), tags='cut-draft')
+                self.create_text(point, 5, text=label, anchor='s', fill=t.RED,
+                                 font=(t.FONT, -9, 'bold'), tags='cut-draft')
+
         for point in (start, end):
             self.create_rectangle(point-5, 8, point+5, 40, fill=t.CYAN, outline='')
             self.create_line(point, 18, point, 30, fill=t.BG, width=2)
