@@ -225,6 +225,8 @@ class EditorWindow(tk.Toplevel):
         self.cut_tools.refresh()
         self.overlay_tools.refresh()
         self.polish_tools.refresh()
+        if self.media and self.trim:
+            self.update_timeline()
         self.request_frame()
 
     def format_changed(self):
@@ -311,7 +313,11 @@ class EditorWindow(tk.Toplevel):
     def update_timeline(self):
         self.timeline.media, self.timeline.trim, self.timeline.position = self.media, self.trim, self.position
         self.timeline.cuts = self.cuts
-        self.timeline.cut_draft = self.cut_tools.draft() if hasattr(self, 'cut_tools') else (None, None)
+        self.timeline.cut_draft = (
+            self.cut_tools.draft()
+            if hasattr(self, 'cut_tools') and self.tool.get() == 'CUT'
+            else (None, None)
+        )
         self.timeline.draw()
         self.clock.configure(text=f'{format_time(self.position)} / {format_time(self.media.duration)}')
 
