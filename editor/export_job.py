@@ -7,6 +7,7 @@ import subprocess
 import threading
 import time
 from capture.ffmpeg_backend import process_options, validate_output
+from .cuts import CutPlan
 from .ffmpeg_export import build_export_command
 from .filenames import reserve_export
 from .transforms import EditOptions
@@ -33,15 +34,17 @@ class ExportJob:
         self._cancel = threading.Event()
         self._worker = None
 
-    def start(self, media, trim, folder=None, edits=None):
+    def start(self, media, trim, folder=None, edits=None, cuts=None):
         if self.busy:
             raise RuntimeError('An export is already running.')
         trim.validate(media)
         edits = edits or EditOptions()
         edits.validate(media)
+        cuts = cuts or CutPlan()
+        cuts.validate_selection(media, trim)
         self._cancel.clear()
         self.busy = True
-        self._worker = threading.Thread(target=self._run, args=(media, trim, folder, edits), daemon=True)
+        self._worker = threading.Thread(target=self._run, args=(media, trim, folder, edits, cuts), daemon=True)
         self._worker.start()
 
     def cancel(self):
@@ -71,7 +74,7 @@ class ExportJob:
         for line in stream:
             log.append(line.rstrip())
 
-    def _run(self, media, trim, folder, edits):
+    def _run(self, media, trim, folder, edits, cuts):
         reservation = process = resources = None
         readers, log = [], deque(maxlen=30)
         result = ExportEvent('error', message='Export did not finish.')
@@ -79,11 +82,12 @@ class ExportJob:
             self._check_cancel()
             resources = TextResources(edits.text)
             reservation = reserve_export(media.path, folder)
-            command = build_export_command(self.backend.ffmpeg, media, trim, reservation.partial, edits, text_resources=resources)
+            command = build_export_command(self.backend.ffmpeg, media, trim, reservation.partial, edits,
+                                           text_resources=resources, cuts=cuts)
             process = self._popen(command, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
                                   stderr=subprocess.PIPE, text=True, encoding='utf-8',
                                   errors='replace', bufsize=1, **process_options())
-            out_duration = edits.output_duration(trim.duration)
+            out_duration = edits.output_duration(cuts.kept_duration(trim))
             readers = [threading.Thread(target=self._progress, args=(process.stdout, out_duration), daemon=True),
                        threading.Thread(target=self._drain, args=(process.stderr, log), daemon=True)]
             for reader in readers:
