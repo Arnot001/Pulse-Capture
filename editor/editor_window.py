@@ -8,6 +8,8 @@ import time
 import tkinter as tk
 from tkinter import filedialog, ttk
 from ui import theme as t
+from .cuts import CutPlan
+from .cut_tools import CutTools
 from .export_job import ExportJob
 from .media import probe_media
 from .models import TrimRange, format_time, parse_time
@@ -28,11 +30,13 @@ class EditorWindow(tk.Toplevel):
         self.minsize(760, 700)
         self.path, self.backend, self.on_close = Path(path), backend, on_close
         self.media = self.trim = self.preview = None
+        self.cuts = CutPlan()
         self.exporter = ExportJob(backend)
         self.metadata = Queue()
         self.closed = self.closing = self.playing = False
         self.position, self.token = 0.0, 0
         self.play_anchor = 0.0
+        self.play_anchor_elapsed = 0.0
         self.last_export = None
         self.output_folder = self.path.parent
         self._seek_id = self._poll_id = self._play_id = None
@@ -100,16 +104,16 @@ class EditorWindow(tk.Toplevel):
 
         tool_area = tk.Frame(bottom, bg=t.BG)
         tool_area.pack(side='top', fill='x', before=self.note, pady=(8, 0))
-        tabs = t.Segments(tool_area, self.tool, [(v, v) for v in ('TRIM', 'FORMAT', 'CROP', 'BRAND', 'TEXT', 'PRIVACY', 'MOTION', 'FINISH')], self.show_tool)
+        tabs = t.Segments(tool_area, self.tool, [(v, v) for v in ('TRIM', 'CUT', 'FORMAT', 'CROP', 'BRAND', 'TEXT', 'PRIVACY', 'MOTION', 'FINISH')], self.show_tool)
         tabs.pack(fill='x', pady=(0, 8))
         for _, button in tabs.buttons:
-            button.configure(padx=7, pady=5, font=(t.FONT, -10, 'bold'))
+            button.configure(padx=5, pady=5, font=(t.FONT, -9, 'bold'))
         self.controls.extend(b for _, b in tabs.buttons)
         # A fixed, compact tool area keeps the preview stable when switching tools.
         panel_area = tk.Frame(tool_area, bg=t.PANEL, height=126)
         panel_area.pack(fill='x')
         panel_area.pack_propagate(False)
-        for name in ('TRIM', 'FORMAT', 'CROP', 'BRAND', 'TEXT', 'PRIVACY', 'MOTION', 'FINISH'):
+        for name in ('TRIM', 'CUT', 'FORMAT', 'CROP', 'BRAND', 'TEXT', 'PRIVACY', 'MOTION', 'FINISH'):
             self.panels[name] = tk.Frame(panel_area, bg=t.PANEL)
         row = self.panels['TRIM']
         row.pack(fill='both', expand=True, padx=12, pady=10)
@@ -135,6 +139,7 @@ class EditorWindow(tk.Toplevel):
         self.selection_label = t.label(row, 'Drag the cyan handles or enter Start and End.', 9, t.MUTED)
         self.selection_label.grid(row=1, column=0, columnspan=3, sticky='w', pady=(8, 0))
         self.build_tools()
+        self.cut_tools = CutTools(self)
         self.overlay_tools = OverlayTools(self)
         self.polish_tools = PolishTools(self)
         for widget in self.controls:
@@ -217,6 +222,7 @@ class EditorWindow(tk.Toplevel):
         self.video.active = self.tool.get() == 'CROP'
         self.video.drag = None
         self.video.zoom_drag = False
+        self.cut_tools.refresh()
         self.overlay_tools.refresh()
         self.polish_tools.refresh()
         self.request_frame()
@@ -293,7 +299,7 @@ class EditorWindow(tk.Toplevel):
                 edits = replace(edits, zoom=replace(edits.zoom, enabled=False),
                                 fade=replace(edits.fade, fade_in=False, fade_out=False))
             self.preview.request(token, self.position, self.video.winfo_width()-4, self.video.winfo_height()-4,
-                                 edits, self.tool.get() == 'CROP', self.trim)
+                                 edits, self.tool.get() == 'CROP', self.trim, self.cuts)
         self._seek_id = self.after(90 if not self.playing else 1, send)
 
     def seek(self, position):
@@ -304,18 +310,48 @@ class EditorWindow(tk.Toplevel):
 
     def update_timeline(self):
         self.timeline.media, self.timeline.trim, self.timeline.position = self.media, self.trim, self.position
+        self.timeline.cuts = self.cuts
+        self.timeline.cut_draft = self.cut_tools.draft() if hasattr(self, 'cut_tools') else (None, None)
         self.timeline.draw()
         self.clock.configure(text=f'{format_time(self.position)} / {format_time(self.media.duration)}')
 
+    def update_selection_label(self):
+        if not self.trim:
+            return
+        kept = self.cuts.kept_duration(self.trim)
+        removed = self.cuts.removed_duration(self.trim)
+        if removed > .0005:
+            self.selection_label.configure(
+                text=f'Selected {format_time(self.trim.duration)}  ·  '
+                     f'After cuts {format_time(kept)}  ·  Removed {format_time(removed)}'
+            )
+        else:
+            self.selection_label.configure(
+                text=f'Keeping {format_time(self.trim.duration)}  ·  Drag the cyan handles to adjust.'
+            )
+
     def update_trim(self, trim):
         trim.validate(self.media)
+        self.cuts.validate_selection(self.media, trim)
         self.trim = trim
         self.start_text.set(format_time(trim.start))
         self.end_text.set(format_time(trim.end))
-        self.selection_label.configure(text=f'Keeping {format_time(trim.duration)}  ·  Drag the cyan handles to adjust.')
+        self.update_selection_label()
+        if hasattr(self, 'cut_tools'):
+            self.cut_tools.refresh()
         self.note.configure(text='Ready to export. Your original recording stays untouched.', fg=t.MUTED)
         self.export_button.configure(state='normal')
         self.update_timeline()
+
+    def cuts_changed(self, message):
+        self.cuts.validate_selection(self.media, self.trim)
+        self.stop_play()
+        self.update_selection_label()
+        self.cut_tools.refresh()
+        self.update_timeline()
+        self.export_button.configure(state='normal')
+        self.note.configure(text=message, fg=t.MUTED)
+        self.request_frame()
 
     def commit_entries(self):
         if not self.media or self.exporter.busy or self.closing:
@@ -338,8 +374,11 @@ class EditorWindow(tk.Toplevel):
         self.commit_entries()
 
     def drag_trim(self, trim, bound):
-        self.update_trim(trim)
-        self.seek(trim.start if bound == 'start' else trim.end)
+        try:
+            self.update_trim(trim)
+            self.seek(trim.start if bound == 'start' else trim.end)
+        except ValueError as exc:
+            self.note.configure(text=str(exc), fg=t.RED)
 
     def reset_trim(self):
         self.update_trim(TrimRange(0, self.media.duration))
@@ -356,10 +395,18 @@ class EditorWindow(tk.Toplevel):
     def play_preview(self):
         if self.playing or not self.commit_entries():
             return
+        segments = self.cuts.kept_segments(self.trim)
+        if not segments:
+            return
         if self.position < self.trim.start or self.position >= self.trim.end:
-            self.position = self.trim.start
+            self.position = segments[0].start
+        else:
+            self.position = self.cuts.snap_position(self.position, self.trim)
+            if self.position >= segments[-1].end - 1e-9:
+                self.position = segments[0].start
         self.playing = True
         self.play_anchor = self.position
+        self.play_anchor_elapsed = self.cuts.source_elapsed(self.position, self.trim)
         self.play_started = time.monotonic()
         self._update_transport_controls()
         self.update_timeline()
@@ -387,14 +434,17 @@ class EditorWindow(tk.Toplevel):
 
     def stop_play(self, reset=False):
         if self.playing and self.trim:
-            self.position = min(self.trim.end,
-                                self.play_anchor + (time.monotonic() - self.play_started) * self.edits.speed)
+            total = self.cuts.kept_duration(self.trim)
+            elapsed = min(total, self.play_anchor_elapsed +
+                          (time.monotonic() - self.play_started) * self.edits.speed)
+            self.position = self.cuts.source_from_elapsed(elapsed, self.trim)
         self.playing = False
         if self._play_id:
             self.after_cancel(self._play_id)
             self._play_id = None
         if reset and self.trim:
-            self.position = self.trim.start
+            segments = self.cuts.kept_segments(self.trim)
+            self.position = segments[0].start if segments else self.trim.start
         if self.media and self.trim:
             self.update_timeline()
         self._update_transport_controls()
@@ -402,11 +452,14 @@ class EditorWindow(tk.Toplevel):
     def next_frame(self):
         self._play_id = None
         if self.playing:
-            self.position = min(self.trim.end,
-                                self.play_anchor + (time.monotonic() - self.play_started) * self.edits.speed)
+            total = self.cuts.kept_duration(self.trim)
+            elapsed = min(total, self.play_anchor_elapsed +
+                          (time.monotonic() - self.play_started) * self.edits.speed)
+            self.position = self.cuts.source_from_elapsed(elapsed, self.trim)
             self.update_timeline()
-            if self.position >= self.trim.end:
-                self.stop_play()
+            if elapsed >= total - 1e-9:
+                self.playing = False
+                self._update_transport_controls()
             self.request_frame()
 
     def export(self):
@@ -414,7 +467,7 @@ class EditorWindow(tk.Toplevel):
             return
         self.stop_play()
         try:
-            self.exporter.start(self.media, self.trim, self.output_folder, self.edits)
+            self.exporter.start(self.media, self.trim, self.output_folder, self.edits, self.cuts)
             self.set_busy(True)
             self.progress['value'] = 0
             self.note.configure(text='Exporting your video…', fg=t.CYAN)
@@ -430,6 +483,7 @@ class EditorWindow(tk.Toplevel):
         self.video.zoom_drag = False
         self.video.gesture = self.video.candidate = None
         self.update_brand_controls()
+        self.cut_tools.refresh()
         self.polish_tools.refresh()
         self._update_transport_controls()
         self.export_button.configure(state='disabled' if busy else 'normal',
