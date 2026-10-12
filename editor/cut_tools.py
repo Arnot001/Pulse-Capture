@@ -1,5 +1,6 @@
 """Compact CUT panel for non-destructive section removal."""
 import tkinter as tk
+from tkinter import ttk
 
 from ui import theme as t
 from .cuts import CutRange
@@ -49,6 +50,9 @@ class CutTools:
         )
         self.listbox.pack(side='left', fill='both', expand=True)
         self.listbox.bind('<<ListboxSelect>>', self.selection_changed)
+        scroll = ttk.Scrollbar(lower, orient='vertical', command=self.listbox.yview)
+        scroll.pack(side='left', fill='y', padx=(3, 0))
+        self.listbox.configure(yscrollcommand=scroll.set)
 
         actions = tk.Frame(lower, bg=t.PANEL)
         actions.pack(side='right', padx=(8, 0), fill='y')
@@ -92,6 +96,7 @@ class CutTools:
         w = self.window
         if self.start is None or self.end is None or not w.media or not w.trim:
             return
+        w.stop_play()
         try:
             if self.start < w.trim.start - .0005 or self.end > w.trim.end + .0005:
                 raise ValueError('Keep Cut Start and Cut End inside the current Trim selection.')
@@ -133,6 +138,7 @@ class CutTools:
 
     def _restore(self, cut, message):
         w = self.window
+        w.stop_play()
         try:
             w.cuts = w.cuts.remove(cut)
         except ValueError as exc:
@@ -150,6 +156,11 @@ class CutTools:
 
     def refresh(self, select=None):
         w = self.window
+        if w.trim:
+            if self.start is not None and not (w.trim.start <= self.start <= w.trim.end):
+                self.start = None
+            if self.end is not None and not (w.trim.start <= self.end <= w.trim.end):
+                self.end = None
         previous = None
         selection = self.listbox.curselection()
         if selection and selection[0] < len(self.items):
