@@ -55,6 +55,13 @@ class CutPlan:
         plan.validate(media)
         return plan
 
+    def remove(self, cut):
+        if cut not in self.ranges:
+            raise ValueError('That removed section is no longer present.')
+        items = list(self.ranges)
+        items.remove(cut)
+        return CutPlan(tuple(items))
+
     def visible_ranges(self, trim):
         visible = []
         for cut in self.ranges:
@@ -98,6 +105,10 @@ class CutPlan:
             if position < segment.end:
                 break
         return max(0.0, min(elapsed, self.kept_duration(trim)))
+
+    def snap_position(self, position, trim):
+        """Move a source position out of a removed section onto the kept timeline."""
+        return self.source_from_elapsed(self.source_elapsed(position, trim), trim)
 
     def source_from_elapsed(self, elapsed, trim):
         """Map kept source seconds back to source time, jumping removed ranges."""
