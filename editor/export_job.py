@@ -83,7 +83,8 @@ class ExportJob:
             process = self._popen(command, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
                                   stderr=subprocess.PIPE, text=True, encoding='utf-8',
                                   errors='replace', bufsize=1, **process_options())
-            readers = [threading.Thread(target=self._progress, args=(process.stdout, trim.duration), daemon=True),
+            out_duration = edits.output_duration(trim.duration)
+            readers = [threading.Thread(target=self._progress, args=(process.stdout, out_duration), daemon=True),
                        threading.Thread(target=self._drain, args=(process.stderr, log), daemon=True)]
             for reader in readers:
                 reader.start()
@@ -98,7 +99,7 @@ class ExportJob:
             self.events.put(ExportEvent('validating', .99, 'Checking your exported video…'))
             info = self._validator(self.backend.ffprobe, reservation.partial, media.has_audio)
             duration = float(info['format']['duration'])
-            if abs(duration - trim.duration) > max(.15, 2 / media.fps):
+            if abs(duration - out_duration) > max(.15, 2 / media.fps):
                 raise RuntimeError('The exported length did not match your selection. The original is unchanged.')
             self._check_cancel()
             reservation.publish()

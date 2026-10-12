@@ -1,7 +1,8 @@
-# PULSE // CAPTURE v0.4.0
+# PULSE // CAPTURE v0.5.0
 
 A small Windows screen recorder with a dark Pulse interface. Choose a source,
-record, trim, reframe, add text or a privacy box in Quick Edit, and export a local MP4. Optional Pulse watermark; no account or cloud.
+record, edit in Quick Edit, and export a local MP4. Optional Pulse watermark;
+no account or cloud.
 
 ## Run
 
@@ -43,19 +44,21 @@ The optional global **Ctrl+Shift+R** shortcut works while Pulse is in the
 background. A conflict with another app is shown explicitly; the shortcut is
 off by default. Closing Pulse during capture requests a clean stop first.
 
-## Quick Edit — Milestone 3
+## Quick Edit — v0.5.0
 
-After a successful recording, click **Quick Edit**. A separate Pulse window opens
-the new video; the recording engine is unchanged.
+Click **Quick Edit** after recording to open the latest video. You can also
+click it after startup to choose an existing MP4 once the recording engine is
+ready. Editing opens in a separate window.
 
 1. Click the timeline to scrub through the recording. The white line is the
    playhead; cyan handles mark the section to keep.
 2. Drag the cyan handles, enter **Start** and **End**, or choose **Use playhead**.
    Times accept seconds (`12.5`), minutes (`1:23.500`), or hours (`1:02:03`).
    **Reset** restores the full clip. Invalid ranges display a clear explanation.
-3. **Preview trim** plays an approximate, low-frame-rate, silent visual preview
-   of the selection. This is a lightweight frame preview, not full audiovisual
-   playback. The original audio remains in the export when the source has audio.
+3. Use **Play / Pause / Stop** to preview the selection. Pause freezes the
+   position; Play resumes; Stop returns to trim start. Preview is silent and
+   sampled, so it may appear less smooth than the export. Source audio is kept
+   in the exported video.
 4. Choose **Format**: **Original**, **16:9 Landscape**, **9:16 Vertical**, or
    **1:1 Square**. The preview shows the result without stretching or upscaling.
 5. Choose **Crop** to see the full source with a cyan crop frame. Drag inside
@@ -78,9 +81,26 @@ the new video; the recording engine is unchanged.
    outside the existing box replaces it. The effect updates after releasing
    the mouse. One fixed box applies throughout the clip: check every part before
    sharing, especially if private information moves.
-9. Click **Export video**. Rendering runs in the background with real progress
+9. Choose **Motion** for **Static** zoom or animated **Zoom In**, with amounts
+   **1.25x / 1.5x / 2x**. Click or drag the cyan target to choose the focus.
+   **View Zoom Result** shows the zoom; **Edit Zoom Focus** returns to the
+   unzoomed framing without changing your settings. Animated result view starts
+   playback at trim start and works with Play / Pause / Stop and scrubbing.
+10. Zoom In uses smooth easing: **Fast 0.6s**, **Medium 1.5s**, **Slow 3.5s**,
+    or **Full Clip**. These timings use output time. Full Clip spans the entire
+    trimmed output: a 12-second trim at 3x gives a 4-second zoom. Fixed presets
+    shorten safely for very short clips. The curve begins at 1x and reaches the
+    selected amount at its end; encoded frames sample that curve.
+11. **Clip Speed** offers **0.5x / 1x / 1.5x / 2x / 3x / 4x**. Audio changes
+    tempo while retaining pitch; silent sources stay silent.
+12. Choose **Finish** for **Fade In / Fade Out**. Each lasts up to 0.5 output
+    seconds, shortened for tiny clips, and also fades source audio.
+    **Pulse Promo** applies a centred Vertical crop, Medium Pulse branding at
+    bottom right, both fades, 1x speed and Zoom Off. It keeps trim, text and
+    privacy; you can adjust its settings afterward.
+13. Click **Export video**. Rendering runs in the background with real progress
    and a **Cancel export** action. The MP4 is validated before “Exported” appears.
-10. **Open folder** opens the exported file's location. **Change folder** chooses
+14. **Open folder** opens the exported file's location. **Change folder** chooses
    another destination for this editor session.
 
 Exports use `original-name_trimmed.mp4`, then `_001`, `_002`, and so on. The
@@ -92,10 +112,11 @@ Original keeps the source dimensions (padding an odd edge by one pixel where
 H.264 requires it). The other formats crop to the largest exact-ratio rectangle
 with even dimensions: there is no stretching or upscaling. This can remove a few
 extra edge pixels to keep the ratio exact. Crops move in two-pixel steps.
-All formats preserve original speed and the first audio track when present.
+All formats keep the first audio track when present; speed defaults to 1x.
 Exports re-encode to H.264/AAC for cuts between keyframes; cut boundaries are
 limited by the source frame spacing. Processing order is trim, crop, even-edge
-padding, privacy blur/pixelation, text, then optional Pulse branding. Preview and export share the same filters.
+padding, privacy blur/pixelation, zoom, text, Pulse branding, speed, then fades.
+Preview and export share the same visual filters.
 
 Brand sizes are proportional to the shorter output edge (12%, 18%, 25%) with a
 small inset and subtle opacity. The recorder and editor share the existing
@@ -106,9 +127,10 @@ be partly or fully cropped out by an aspect change.
 
 Only the selected tool panel is shown. Preview remains a lightweight, silent,
 low-frame-rate preview; Crop displays the source and framing guide, while Trim,
-Format, Brand, Text, and Privacy show the rendered result. Privacy also shows a
-selection outline and resize handles; those guides are not exported. All six
-panels preserve the 760 × 700 minimum window layout and full timeline height.
+Format, Brand, Text, Privacy and Finish show the rendered result. Motion has
+separate focus and result views. Privacy shows a selection outline and resize
+handles; guides are not exported. All eight panels fit the 760 × 700 minimum
+window layout with the full timeline height.
 
 Privacy rectangles are stored in original source pixels. After a format change
 or a moved crop, the renderer intersects that rectangle with the visible crop
@@ -128,8 +150,8 @@ system font (some emoji/CJK glyphs may be unavailable). A missing font produces
 an actionable error; Text Off keeps the rest of the editor usable.
 
 Deferred: timed text/masks, multiple overlays, moving/tracked masks, automatic
-privacy detection, face detection, subtitles, transcription, effects, zoom,
-speed, fades, mute/volume, and Pulse Promo. These controls are not exposed.
+privacy detection, face detection, subtitles, transcription, animation
+keyframes, zoom out, mute/volume, music and transitions.
 
 ## Audio availability
 
@@ -199,6 +221,8 @@ editor/text_overlay.py        Text validation, sizing, font and UTF-8 resources
 editor/privacy.py             Source-anchored mask geometry and privacy filters
 editor/privacy_preview.py     Visual mask drawing, moving, and resizing
 editor/overlay_tools.py       Focused Text and Privacy panels
+editor/polish.py              Zoom timing/geometry, speed and fade helpers
+editor/polish_tools.py        Motion, focus/result, Finish and Promo controls
 editor/crop_preview.py        Visual crop overlay and source-coordinate dragging
 editor/media.py               Local video metadata loading
 editor/preview.py             Background, bounded-size frame previews
@@ -207,7 +231,7 @@ editor/editor_window.py       Separate Quick Edit interface
 editor/ffmpeg_export.py       Combined trim / crop / overlays command construction
 editor/export_job.py          Progress, cancellation, and validated export
 editor/filenames.py           Non-overwriting edited-copy reservations
-tests/                        Automated headless tests
+tests/                        Pure logic, real FFmpeg and opt-in Tk tests
 assets/branding/               Pulse icon and design notes
 vendor/                       Optional FFmpeg/FFprobe binaries
 ```
@@ -244,7 +268,18 @@ $env:PULSE_RUN_UI_TESTS = '1'
 python -m unittest discover -v
 ```
 
-See `EDITOR_VERIFICATION.md` for Milestone 3 checks and remaining coverage.
+For the complete release suite, enable both opt-ins together:
+
+```powershell
+$env:PULSE_RUN_UI_TESTS = '1'
+$env:PULSE_RUN_FFMPEG_TESTS = '1'
+python -m unittest discover -v
+```
+
+See [v0.5.0 release verification](V05_RELEASE_VERIFICATION.md),
+[Motion checks](V05_MOTION_VERIFICATION.md) and
+[focus/result checks](V05_ZOOM_VERIFICATION.md). Earlier recorder and overlay
+reports remain in `VERIFICATION.md` and `EDITOR_VERIFICATION.md`.
 
 The application is produced at `dist\Pulse Capture\Pulse Capture.exe`.
 Keep its complete folder together, including `_internal`. This windowed build
