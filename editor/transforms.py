@@ -122,7 +122,7 @@ class EditOptions:
         return output_duration(source_duration, self.speed)
 
 
-def video_filters(media, edits, asset=None, text_resources=None, duration=None, preview_time=None):
+def video_filters(media, edits, asset=None, text_resources=None, duration=None, preview_time=None, input_label='0:v:0'):
     """Shared visual order; preview_time samples output time without retiming a still."""
     edits.validate(media)
     filters = []
@@ -138,7 +138,7 @@ def video_filters(media, edits, asset=None, text_resources=None, duration=None, 
     if not (rect or edits.zoom.enabled or edits.text.enabled or edits.branding.enabled or timed):
         return base, False
 
-    graph = [f'[0:v:0]{base}[base]']
+    graph = [f'[{input_label}]{base}[base]']
     current = 'base'
     if rect:
         graph.extend(privacy_filters(rect, edits.privacy.mode))
