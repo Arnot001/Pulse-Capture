@@ -148,7 +148,7 @@ def build_export_command(ffmpeg, media, trim, output, edits=None, asset=None,
         if media.has_audio:
             graph.append(
                 f'[sourcea][musica]amix=inputs=2:duration=longest:dropout_transition=0:normalize=0,'
-                f'alimiter=limit=0.95:level=false,atrim=start=0:end={out_duration:.6f}[a]'
+                f'alimiter=limit=0.95:level=false:latency=true,atrim=start=0:end={out_duration:.6f}[a]'
             )
         else:
             graph.append(f'[musica]anull[a]')
