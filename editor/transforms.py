@@ -3,6 +3,7 @@ from dataclasses import dataclass, replace
 import math
 from pathlib import Path
 from .privacy import Privacy, output_mask, privacy_filters, mask_intervals
+from .music import Music
 from .models import TrimRange
 from .text_overlay import TextOverlay, text_geometry, text_filter
 from .polish import Fade, Zoom, fade_seconds, output_duration, validate_speed, zoom_filter
@@ -84,6 +85,7 @@ class EditOptions:
     branding: Branding = Branding()
     text: TextOverlay = TextOverlay()
     privacy: Privacy = Privacy()
+    music: Music = Music()
     zoom: Zoom = Zoom()
     speed: float = 1.0
     fade: Fade = Fade()
@@ -93,6 +95,7 @@ class EditOptions:
         self.branding.validate()
         self.text.validate()
         self.privacy.validate(media)
+        self.music.validate()
         self.zoom.validate()
         validate_speed(self.speed)
         self.fade.validate()
