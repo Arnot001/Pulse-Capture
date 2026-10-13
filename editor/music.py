@@ -10,6 +10,7 @@ import math
 import os
 from pathlib import Path
 import random
+import threading
 import wave
 
 TRACKS = {
@@ -213,7 +214,9 @@ def generate_track(track, destination=None):
     beat = 60.0 / recipe['bpm']
     duration = BARS * 4 * beat
     frames = int(round(duration * SAMPLE_RATE))
-    temp = destination.with_suffix('.partial.wav')
+    temp = destination.with_name(
+        destination.name + f'.{os.getpid()}.{threading.get_ident()}.partial'
+    )
     pcm = array('h')
     edge = max(1, int(.008 * SAMPLE_RATE))
     for index in range(frames):
