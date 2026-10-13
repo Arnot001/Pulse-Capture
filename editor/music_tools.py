@@ -73,6 +73,7 @@ class MusicTools:
             else:
                 self.original_volume_combo = combo
 
+        self.option_checks = []
         for label, variable in (
             ('LOOP', self.loop),
             ('FADE IN', self.fade_in),
@@ -86,6 +87,7 @@ class MusicTools:
             )
             check.pack(side='left', padx=(0, 8))
             window.controls.append(check)
+            self.option_checks.append(check)
 
         self.hint = t.label(
             panel,
@@ -171,7 +173,7 @@ class MusicTools:
         self.fade_out.set(music.fade_out)
         self.imported = music.imported
         values = list(TRACKS)
-        if music.track == IMPORT_LABEL and music.imported:
+        if self.imported:
             values.append(IMPORT_LABEL)
         self.track_combo.configure(values=tuple(values))
 
@@ -186,6 +188,8 @@ class MusicTools:
         self.import_button.configure(state='normal' if ready else 'disabled')
         self.music_volume_combo.configure(state='readonly' if enabled else 'disabled')
         self.original_volume_combo.configure(state='readonly' if enabled else 'disabled')
+        for check in self.option_checks:
+            check.configure(state='normal' if enabled else 'disabled')
         music = w.edits.music
         if music.track == IMPORT_LABEL and music.imported:
             self.hint.configure(text=f'Imported · {Path(music.imported).name} · check your usage rights.')
@@ -196,3 +200,14 @@ class MusicTools:
             )
         else:
             self.hint.configure(text='Pulse originals are generated locally · no third-party samples.')
+        if hasattr(w, 'preview_note') and w.media:
+            if music.enabled:
+                w.preview_note.configure(
+                    text='Silent preview · Music + source audio on export'
+                    if w.media.has_audio else 'Silent preview · Music added on export'
+                )
+            else:
+                w.preview_note.configure(
+                    text='Silent preview · Audio kept on export'
+                    if w.media.has_audio else 'Silent preview · No audio in source'
+                )
