@@ -42,7 +42,7 @@ def preview_command(ffmpeg, media, position, width, height, edits=None, source_v
         kept_duration = cuts.kept_duration(trim)
         output_time = cuts.source_elapsed(animation_position, trim) / edits.speed
         filters, complex_graph = video_filters(media, edits, watermark_path(), text_resources,
-                                                kept_duration, output_time)
+                                                kept_duration, output_time, trim=trim, cuts=cuts, source_position=position)
         if edits.branding.enabled:
             args += ['-i', str(watermark_path())]
         if complex_graph:

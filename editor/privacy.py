@@ -1,5 +1,7 @@
 """Source-anchored rectangular privacy masks and shared viewport mapping."""
 from dataclasses import dataclass, replace
+from .models import TrimRange
+from .cuts import CutPlan
 import math
 
 MODES = ('Blur', 'Pixelate')
@@ -66,20 +68,70 @@ def rectangle_from_points(bounds, x1, y1, x2, y2):
 
 
 @dataclass(frozen=True)
-class Privacy:
-    mode: str = 'Blur'
-    mask: Rect | None = None
+class PrivacyMask:
+    mode: str
+    rect: Rect
+    start: float
+    end: float
 
     def validate(self, media):
+        media.validate()
         if self.mode not in MODES:
             raise ValueError('Choose Blur or Pixelate.')
-        if self.mask is not None:
-            if not isinstance(self.mask, Rect):
-                raise ValueError('Choose a valid privacy rectangle.')
-            self.mask.validate(media.width, media.height)
+        if not isinstance(self.rect, Rect):
+            raise ValueError('Draw a privacy rectangle first.')
+        self.rect.validate(media.width, media.height)
+        if not all(type(v) in (int, float) and math.isfinite(v) for v in (self.start, self.end)):
+            raise ValueError('Choose valid privacy Start and End times.')
+        if self.start < 0 or self.end > media.duration:
+            raise ValueError('Keep privacy times inside the source video.')
+        if self.end <= self.start:
+            raise ValueError('Privacy End must be after Start.')
+        if self.end-self.start < min(1/media.fps, media.duration)-0.0005:
+            raise ValueError('Keep privacy active for at least one frame.')
+
+    def active(self, position):
+        # Half-open intervals avoid an extra protected frame after End.
+        return self.start <= position < self.end
 
 
-def privacy_filters(rect, mode):
+@dataclass(frozen=True)
+class Privacy:
+    # Deliberate insertion order also defines deterministic overlap rendering.
+    masks: tuple[PrivacyMask, ...] = ()
+
+    def validate(self, media):
+        if not isinstance(self.masks, tuple):
+            raise ValueError('Choose a valid privacy mask collection.')
+        for mask in self.masks:
+            if not isinstance(mask, PrivacyMask):
+                raise ValueError('Choose a valid privacy mask.')
+            mask.validate(media)
+
+    def active_masks(self, position):
+        return tuple(mask for mask in self.masks if mask.active(position))
+
+
+def mask_intervals(mask, trim, cuts=None, speed=1.0):
+    """Source interval -> kept timeline. Privacy filters use speed=1 (pre-speed).
+
+    Passing clip speed explicitly yields final-output intervals for consumers.
+    Keep pieces separate and in source order, including adjacent joined pieces.
+    """
+    from .polish import validate_speed
+    validate_speed(speed)
+    elapsed = 0.0
+    intervals = []
+    for segment in (cuts or CutPlan()).kept_segments(trim):
+        start, end = max(mask.start, segment.start), min(mask.end, segment.end)
+        if end > start:
+            intervals.append(TrimRange((elapsed+start-segment.start)/speed,
+                                       (elapsed+end-segment.start)/speed))
+        elapsed += segment.duration
+    return tuple(intervals)
+
+
+def privacy_filters(rect, mode, input_label="base", output_label="private", enable=None):
     """Exact pixel placement, including odd offsets and clipped one-pixel edges."""
     crop = f'crop={rect.width}:{rect.height}:{rect.x}:{rect.y}:exact=1'
     if mode == 'Blur':
@@ -89,8 +141,10 @@ def privacy_filters(rect, mode):
                   f'scale={rect.width}:{rect.height}:flags=neighbor')
     else:
         raise ValueError('Choose Blur or Pixelate.')
+    back, region, hidden = (output_label + suffix for suffix in ('_back', '_region', '_hidden'))
+    timing = f":enable='{enable}'" if enable is not None else ''
     return [
-        '[base]format=yuv444p,split[back][region]',
-        f'[region]{crop},{effect}[hidden]',
-        f'[back][hidden]overlay={rect.x}:{rect.y}:format=yuv444:shortest=1[private]',
+        f'[{input_label}]format=yuv444p,split[{back}][{region}]',
+        f'[{region}]{crop},{effect}[{hidden}]',
+        f'[{back}][{hidden}]overlay={rect.x}:{rect.y}:format=yuv444:shortest=1{timing}[{output_label}]',
     ]

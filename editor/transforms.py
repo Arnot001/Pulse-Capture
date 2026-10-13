@@ -2,7 +2,8 @@
 from dataclasses import dataclass, replace
 import math
 from pathlib import Path
-from .privacy import Privacy, output_mask, privacy_filters
+from .privacy import Privacy, output_mask, privacy_filters, mask_intervals
+from .models import TrimRange
 from .text_overlay import TextOverlay, text_geometry, text_filter
 from .polish import Fade, Zoom, fade_seconds, output_duration, validate_speed, zoom_filter
 
@@ -122,7 +123,7 @@ class EditOptions:
         return output_duration(source_duration, self.speed)
 
 
-def video_filters(media, edits, asset=None, text_resources=None, duration=None, preview_time=None, input_label='0:v:0'):
+def video_filters(media, edits, asset=None, text_resources=None, duration=None, preview_time=None, input_label='0:v:0', trim=None, cuts=None, source_position=None):
     """Shared visual order; preview_time samples output time without retiming a still."""
     edits.validate(media)
     filters = []
@@ -131,18 +132,32 @@ def video_filters(media, edits, asset=None, text_resources=None, duration=None, 
         filters.append(f'crop={c.width}:{c.height}:{c.x}:{c.y}')
     filters.append('pad=ceil(iw/2)*2:ceil(ih/2)*2')
     base = ','.join(filters)
-    rect = output_mask(edits.privacy.mask, media, edits.crop)
+    trim = trim or TrimRange(0, media.duration)
+    privacy = []
+    for mask in edits.privacy.masks:
+        rect = output_mask(mask.rect, media, edits.crop)
+        intervals = mask_intervals(mask, trim, cuts)
+        if not rect or (source_position is None and not intervals):
+            continue
+        if source_position is not None:
+            if not mask.active(source_position):
+                continue
+            enable = None
+        else:
+            enable = '+'.join(f'gte(t,{r.start:.9f})*lt(t,{r.end:.9f})' for r in intervals)
+        privacy.append((mask, rect, enable))
     timed = duration is not None and (
         edits.speed != 1.0 or edits.fade.fade_in or edits.fade.fade_out
     )
-    if not (rect or edits.zoom.enabled or edits.text.enabled or edits.branding.enabled or timed):
+    if not (privacy or edits.zoom.enabled or edits.text.enabled or edits.branding.enabled or timed):
         return base, False
 
     graph = [f'[{input_label}]{base}[base]']
     current = 'base'
-    if rect:
-        graph.extend(privacy_filters(rect, edits.privacy.mode))
-        current = 'private'
+    for index, (mask, rect, enable) in enumerate(privacy):
+        label = f'private{index}'
+        graph.extend(privacy_filters(rect, mask.mode, current, label, enable))
+        current = label
 
     zoom = zoom_filter(media, edits.crop, edits.zoom, edits.speed, duration, preview_time)
     if zoom:

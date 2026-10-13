@@ -123,6 +123,7 @@ class PolishUITests(unittest.TestCase):
         overlay.text_on.set(True)
         self.next_picture(overlay.text_changed)
         self.next_picture(lambda: overlay.mask_changed(Rect(200, 100, 100, 100)))
+        self.next_picture(overlay.add_mask)
         w.edits = replace(w.edits, branding=Branding(True, 'Bottom right', 'Medium'))
         controls.zoom_on.set(True)
         controls.zoom_factor.set('1.5x')
@@ -274,6 +275,7 @@ class PolishUITests(unittest.TestCase):
         self.next_picture(controls.text_changed)
         mask = Rect(180, 120, 120, 100)
         self.next_picture(lambda: controls.mask_changed(mask))
+        self.next_picture(controls.add_mask)
 
         w.polish_tools.zoom_on.set(True)
         w.polish_tools.zoom_factor.set('1.5x')
@@ -291,7 +293,7 @@ class PolishUITests(unittest.TestCase):
         self.assertFalse(w.edits.zoom.enabled)
         self.assertEqual(w.edits.fade, Fade(True, True))
         self.assertTrue(w.edits.text.enabled)
-        self.assertEqual(w.edits.privacy.mask, mask)
+        self.assertEqual(w.edits.privacy.masks[0].rect, mask)
         self.assertEqual(w.trim, TrimRange(.5, 2.5))
 
         w.export()

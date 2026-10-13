@@ -5,7 +5,7 @@ import unittest
 from editor.ffmpeg_export import build_export_command
 from editor.models import MediaInfo, TrimRange
 from editor.polish import Fade, Zoom, fade_seconds, output_duration, zoom_geometry
-from editor.privacy import Privacy, Rect
+from editor.privacy import PrivacyMask, Privacy, Rect
 from editor.text_overlay import TextOverlay, TextResources
 from editor.transforms import Branding, EditOptions
 
@@ -68,16 +68,16 @@ class PolishCommandTests(unittest.TestCase):
     def test_zoom_is_after_privacy_before_text_and_brand(self):
         edits = EditOptions(
             zoom=Zoom(True, 1.5),
-            privacy=Privacy('Blur', Rect(800, 300, 120, 100)),
+            privacy=Privacy((PrivacyMask('Blur', Rect(800, 300, 120, 100), 0, self.media.duration),)),
             text=TextOverlay(True, 'Focus'),
             branding=Branding(True),
         )
         cmd = self.command(edits)
         graph = cmd[cmd.index('-filter_complex')+1]
         stages = [
-            'gblur=sigma=18:steps=3[hidden]',
-            'format=yuv444:shortest=1[private]',
-            '[private]crop=1280:720:320:180,scale=1920:1080:flags=lanczos[zoomed]',
+            'gblur=sigma=18:steps=3[private0_hidden]',
+            "format=yuv444:shortest=1:enable='gte(t,0.000000000)*lt(t,2.000000000)'[private0]",
+            '[private0]crop=1280:720:320:180,scale=1920:1080:flags=lanczos[zoomed]',
             '[zoomed]drawtext=',
             '[text][wm]overlay=',
         ]
@@ -120,7 +120,7 @@ class PolishCommandTests(unittest.TestCase):
         edits = EditOptions(
             text=TextOverlay(True, 'Promo'),
             branding=Branding(True),
-            privacy=Privacy('Pixelate', Rect(800, 300, 120, 100)),
+            privacy=Privacy((PrivacyMask('Pixelate', Rect(800, 300, 120, 100), 0, self.media.duration),)),
             zoom=Zoom(True, 1.5),
             speed=1.5,
             fade=Fade(True, True),
@@ -130,9 +130,9 @@ class PolishCommandTests(unittest.TestCase):
         stages = [
             'crop=594:1056:',
             'pad=',
-            'flags=neighbor[hidden]',
-            'format=yuv444:shortest=1[private]',
-            '[private]crop=396:704:',
+            'flags=neighbor[private0_hidden]',
+            "format=yuv444:shortest=1:enable='gte(t,0.000000000)*lt(t,2.000000000)'[private0]",
+            '[private0]crop=396:704:',
             'scale=594:1056:flags=lanczos[zoomed]',
             '[zoomed]drawtext=',
             '[text][wm]overlay=',

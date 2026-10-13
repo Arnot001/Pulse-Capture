@@ -295,6 +295,11 @@ class EditorWindow(tk.Toplevel):
         def send():
             self._seek_id = None
             edits = self.edits
+            if self.tool.get() == 'PRIVACY':
+                edits = self.overlay_tools.preview_edits(edits)
+                # Source-anchored rectangle editing needs unzoomed, visible pixels.
+                edits = replace(edits, zoom=replace(edits.zoom, enabled=False),
+                                fade=replace(edits.fade, fade_in=False, fade_out=False))
             if (self.tool.get() == 'MOTION' and edits.zoom.enabled
                     and not self.polish_tools.zoom_result):
                 # Focus placement must remain visible even at a fade boundary.
@@ -469,7 +474,7 @@ class EditorWindow(tk.Toplevel):
             self.request_frame()
 
     def export(self):
-        if not self.commit_entries():
+        if not self.overlay_tools.privacy_committed() or not self.commit_entries():
             return
         self.stop_play()
         try:
@@ -490,6 +495,7 @@ class EditorWindow(tk.Toplevel):
         self.video.gesture = self.video.candidate = None
         self.update_brand_controls()
         self.cut_tools.refresh()
+        self.overlay_tools.refresh()
         self.polish_tools.refresh()
         self._update_transport_controls()
         self.export_button.configure(state='disabled' if busy else 'normal',
@@ -544,7 +550,7 @@ class EditorWindow(tk.Toplevel):
                 if frame.token == self.token:
                     if frame.error:
                         self.stop_play()
-                        self.video.delete('frame', 'crop', 'privacy', 'zoom')
+                        self.video.delete('frame', 'crop', 'privacy', 'privacy-active', 'zoom')
                         self.video.photo = None
                         self.video.source_view = False
                         self.video.itemconfigure('placeholder', text='Preview unavailable')
@@ -552,7 +558,7 @@ class EditorWindow(tk.Toplevel):
                     else:
                         self._photo = tk.PhotoImage(master=self, data=frame.ppm, format='PPM')
                         self.video.itemconfigure('placeholder', text='')
-                        self.video.show_frame(self._photo, frame.source_view, frame.edits)
+                        self.video.show_frame(self._photo, frame.source_view, frame.edits, frame.position)
                         if self.playing:
                             self._play_id = self.after(60, self.next_frame)
             except Empty:

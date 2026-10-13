@@ -44,7 +44,18 @@ The optional global **Ctrl+Shift+R** shortcut works while Pulse is in the
 background. A conflict with another app is shown explicitly; the shortcut is
 off by default. Closing Pulse during capture requests a clean stop first.
 
-## Quick Edit — v0.5.0
+## Development branch: CUT and Privacy Tracks
+
+`codex/cut-sections-v06` extends the released v0.5.0 app. The visible version
+remains v0.5.0 until release approval. CUT removes multiple source-time sections:
+set Start/End, Remove Section, Restore or Undo Last. Playback skips removed
+sections and export joins their video/audio before applying the remaining edits.
+
+Privacy now supports multiple independent Blur/Pixelate boxes with source-time
+Start/End values. The workflow below describes this development branch.
+See `V06_PRIVACY_VERIFICATION.md` for verification and limits.
+
+## Quick Edit
 
 Click **Quick Edit** after recording to open the latest video. You can also
 click it after startup to choose an existing MP4 once the recording engine is
@@ -75,12 +86,19 @@ ready. Editing opens in a separate window.
    Use Enter for up to three lines; the limit is 160 characters. Long lines
    shrink to fit. If the result would be too small, shorten the text or add a
    line break. Switch **Off** to remove it from the result without losing it.
-8. Choose **Privacy**, select **Blur** or **Pixelate**, then drag a box over the
-   rendered preview. Drag inside to move it, or drag a corner to resize it.
-   Arrow keys fine-tune the selected box. **Clear mask** removes it; drawing
-   outside the existing box replaces it. The effect updates after releasing
-   the mouse. One fixed box applies throughout the clip: check every part before
-   sharing, especially if private information moves.
+8. Choose **Privacy**, then **Blur** or **Pixelate**. Draw a box, set **Start**
+   and **End** (or **Use Playhead** for each), and click **Add Privacy Mask**.
+   Drawing and timing can happen in either order. **New** starts a fresh draft.
+   Select a saved row to edit its box/mode/times, then **Update**; it replaces
+   that row without adding a duplicate. **Remove** deletes the selected mask;
+   **Clear All** removes all masks. Draw/move/resize and arrow-key nudging work
+   on the cyan editing guide. Draft feedback is live; export asks you to Add or
+   Update an unfinished draft, or use New to discard it.
+   Only active masks affect each preview frame. Other active masks have subtle
+   outlines. The selected cyan guide remains editable even outside its time
+   range; the guide is not an effect and is never exported. Privacy editing
+   temporarily omits zoom and fades so the box stays easy to position; other
+   tools show the saved rendered result. Check the whole video before sharing.
 9. Choose **Motion** for **Static** zoom or animated **Zoom In**, with amounts
    **1.25x / 1.5x / 2x**. Click or drag the cyan target to choose the focus.
    **View Zoom Result** shows the zoom; **Edit Zoom Focus** returns to the
@@ -114,7 +132,7 @@ with even dimensions: there is no stretching or upscaling. This can remove a few
 extra edge pixels to keep the ratio exact. Crops move in two-pixel steps.
 All formats keep the first audio track when present; speed defaults to 1x.
 Exports re-encode to H.264/AAC for cuts between keyframes; cut boundaries are
-limited by the source frame spacing. Processing order is trim, crop, even-edge
+limited by the source frame spacing. Processing order is trim, remove cuts and join, crop, even-edge
 padding, privacy blur/pixelation, zoom, text, Pulse branding, speed, then fades.
 Preview and export share the same visual filters.
 
@@ -127,9 +145,9 @@ be partly or fully cropped out by an aspect change.
 
 Only the selected tool panel is shown. Preview remains a lightweight, silent,
 low-frame-rate preview; Crop displays the source and framing guide, while Trim,
-Format, Brand, Text, Privacy and Finish show the rendered result. Motion has
+Format, Brand, Text and Finish show the rendered result. Motion has
 separate focus and result views. Privacy shows a selection outline and resize
-handles; guides are not exported. All eight panels fit the 760 × 700 minimum
+handles on its unzoomed editing view; guides are not exported. All nine panels fit the 760 × 700 minimum
 window layout with the full timeline height.
 
 Privacy rectangles are stored in original source pixels. After a format change
@@ -140,7 +158,16 @@ the current crop it is not rendered; the Privacy panel explains this. Restore
 Original to see it again, or draw a new box in the current crop to replace it.
 Moving/resizing a partly clipped box edits its visible portion.
 
-Text and privacy both apply throughout the exported trim. Text uses a temporary
+Privacy intervals stay in source time when trim/cuts change. Export intersects
+each interval with kept source sections and maps the surviving pieces onto the
+joined timeline, then applies clip speed. Example: cut 10–15 and a mask at
+20–25 becomes 15–20 in kept time, or 5–6.667 output seconds at 3x. A mask at
+8–18 across that cut becomes 8–13 in kept time. No removed-time gap remains.
+Fully excluded masks are kept in the editor but do not affect export. Overlaps
+render in list order; masks are not silently merged. Thin cyan timeline strips
+indicate source privacy ranges; CUT markings remain red.
+
+Text applies throughout the exported trim. Text uses a temporary
 UTF-8 file with literal expansion disabled, not interpolated shell/filter text.
 Arguments remain separate subprocess arguments. Temporary text is removed after
 preview/export, errors, and cancellation. Standard Windows Segoe UI is resolved
@@ -149,7 +176,7 @@ or bundled. Unicode input is accepted; available glyphs depend on the selected
 system font (some emoji/CJK glyphs may be unavailable). A missing font produces
 an actionable error; Text Off keeps the rest of the editor usable.
 
-Deferred: timed text/masks, multiple overlays, moving/tracked masks, automatic
+Deferred: timed/multiple text overlays, moving/tracked masks, automatic
 privacy detection, face detection, subtitles, transcription, animation
 keyframes, zoom out, mute/volume, music and transitions.
 
@@ -220,7 +247,8 @@ editor/transforms.py          Combined edit state and shared filter graph
 editor/text_overlay.py        Text validation, sizing, font and UTF-8 resources
 editor/privacy.py             Source-anchored mask geometry and privacy filters
 editor/privacy_preview.py     Visual mask drawing, moving, and resizing
-editor/overlay_tools.py       Focused Text and Privacy panels
+editor/overlay_tools.py       Text panel and privacy-panel integration
+editor/privacy_tools.py       Timed-mask list, source times and draft editing
 editor/polish.py              Zoom timing/geometry, speed and fade helpers
 editor/polish_tools.py        Motion, focus/result, Finish and Promo controls
 editor/crop_preview.py        Visual crop overlay and source-coordinate dragging

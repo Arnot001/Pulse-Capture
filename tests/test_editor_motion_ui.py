@@ -134,6 +134,7 @@ class MotionUITests(unittest.TestCase):
         o.input.insert('1.0','Demo');o.text_on.set(True)
         self.next_picture(o.text_changed)
         self.next_picture(lambda:o.mask_changed(Rect(200,100,80,100)))
+        self.next_picture(o.add_mask)
         w.edits=replace(w.edits,branding=Branding(True),fade=Fade(True,True))
         edits=w.edits
         with patch.object(w.preview,'request',wraps=w.preview.request) as requests:

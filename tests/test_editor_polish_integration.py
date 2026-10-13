@@ -10,7 +10,7 @@ from editor.export_job import ExportJob
 from editor.models import TrimRange
 from editor.polish import Fade, Zoom
 from editor.preview import preview_command
-from editor.privacy import Privacy, Rect
+from editor.privacy import PrivacyMask, Privacy, Rect
 from editor.text_overlay import TextOverlay, TextResources
 from editor.transforms import Branding, EditOptions
 from tests import test_editor_formats_integration as fixtures
@@ -77,7 +77,7 @@ class RealPolishTests(unittest.TestCase):
         edits = EditOptions(
             text=TextOverlay(True, 'PULSE DEMO'),
             branding=Branding(True, 'Bottom right', 'Medium'),
-            privacy=Privacy('Pixelate', Rect(230, 100, 100, 100)),
+            privacy=Privacy((PrivacyMask('Pixelate', Rect(230, 100, 100, 100), 0, media.duration),)),
             zoom=Zoom(True, 1.5, .55, .45),
             speed=1.5,
             fade=Fade(True, True),

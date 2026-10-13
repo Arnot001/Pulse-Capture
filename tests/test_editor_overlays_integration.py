@@ -12,7 +12,7 @@ from capture.ffmpeg_backend import run
 from editor.media import probe_media
 from editor.models import TrimRange
 from editor.transforms import EditOptions, Branding, FORMATS
-from editor.privacy import Rect, Privacy, output_mask
+from editor.privacy import PrivacyMask, Rect, Privacy, output_mask
 from editor.text_overlay import TextOverlay, TextResources
 from editor.export_job import ExportJob
 from editor.preview import preview_command, Preview
@@ -32,13 +32,13 @@ class RealOverlayTests(unittest.TestCase):
         for audio in (True, False):
             media = self.source(audio)
             digest = hashlib.sha256(media.path.read_bytes()).digest()
-            cases = [EditOptions(text=text), EditOptions(privacy=Privacy('Blur', mask)),
-                     EditOptions(privacy=Privacy('Pixelate', mask)),
-                     EditOptions(privacy=Privacy('Blur', mask)).with_format(media, '16:9 Landscape'),
+            cases = [EditOptions(text=text), EditOptions(privacy=Privacy((PrivacyMask('Blur', mask, 0, media.duration),))),
+                     EditOptions(privacy=Privacy((PrivacyMask('Pixelate', mask, 0, media.duration),))),
+                     EditOptions(privacy=Privacy((PrivacyMask('Blur', mask, 0, media.duration),))).with_format(media, '16:9 Landscape'),
                      EditOptions(text=text, branding=Branding(True)).with_format(media, '9:16 Vertical'),
-                     EditOptions(privacy=Privacy('Pixelate', mask)).with_format(media, '1:1 Square'),
-                     EditOptions(text=text, privacy=Privacy('Blur', mask), branding=Branding(True)).with_format(media, '9:16 Vertical'),
-                     EditOptions(text=text, privacy=Privacy('Pixelate', mask), branding=Branding(True)).with_format(media, '9:16 Vertical')]
+                     EditOptions(privacy=Privacy((PrivacyMask('Pixelate', mask, 0, media.duration),))).with_format(media, '1:1 Square'),
+                     EditOptions(text=text, privacy=Privacy((PrivacyMask('Blur', mask, 0, media.duration),)), branding=Branding(True)).with_format(media, '9:16 Vertical'),
+                     EditOptions(text=text, privacy=Privacy((PrivacyMask('Pixelate', mask, 0, media.duration),)), branding=Branding(True)).with_format(media, '9:16 Vertical')]
             for index, edits in enumerate(cases):
                 with self.subTest(audio=audio, case=index):
                     self.export(media, edits)
@@ -65,7 +65,7 @@ class RealOverlayTests(unittest.TestCase):
             clean = self.rgb(self.export(media, base))
             for mode in ('Blur', 'Pixelate'):
                 with self.subTest(preset=preset, mode=mode):
-                    edits = replace(base, privacy=Privacy(mode, mask))
+                    edits = replace(base, privacy=Privacy((PrivacyMask(mode, mask, 0, media.duration),)))
                     hidden = self.rgb(self.export(media, edits))
                     rect = output_mask(mask, media, base.crop)
                     indexes = [(y*width+x)*3 for y in range(rect.y+8, rect.bottom-8)
@@ -91,7 +91,7 @@ class RealOverlayTests(unittest.TestCase):
         for mode in ('Blur', 'Pixelate'):
             for rect in (Rect(base.crop.x-1, 100, 2, 30), Rect(0, 0, 20, 20)):
                 with self.subTest(mode=mode, mask=rect):
-                    self.export(media, replace(base, privacy=Privacy(mode, rect)))
+                    self.export(media, replace(base, privacy=Privacy((PrivacyMask(mode, rect, 0, media.duration),))))
 
     def test_literal_unicode_text_positions_and_special_resource_paths(self):
         media = self.source(False)
@@ -115,7 +115,7 @@ class RealOverlayTests(unittest.TestCase):
     def test_cancellation_and_launch_failure_remove_text_resources(self):
         media = self.source(True)
         edits = EditOptions(text=TextOverlay(True, 'Private'), branding=Branding(True),
-                            privacy=Privacy('Pixelate', Rect(230, 100, 100, 100))).with_format(media, '9:16 Vertical')
+                            privacy=Privacy((PrivacyMask('Pixelate', Rect(230, 100, 100, 100), 0, media.duration),))).with_format(media, '9:16 Vertical')
         resource_paths = []
         def resources(text):
             result = TextResources(text)

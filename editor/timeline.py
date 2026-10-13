@@ -10,6 +10,7 @@ class Timeline(tk.Canvas):
         self.on_seek, self.on_trim = on_seek, on_trim
         self.media = self.trim = None
         self.cuts = None
+        self.privacy = None
         self.cut_draft = (None, None)
         self.position = 0
         self.enabled = True
@@ -42,6 +43,11 @@ class Timeline(tk.Canvas):
                 if cut_right-left > 32:
                     self.create_text((left+cut_right)/2, 24, text='CUT', fill=t.TEXT,
                                      font=(t.FONT, -9, 'bold'), tags='cut')
+
+        if self.privacy:
+            for mask in self.privacy.masks:
+                self.create_line(self.x(mask.start), 46, self.x(mask.end), 46,
+                                 fill=t.CYAN, width=2, tags='privacy-range')
 
         draft_start, draft_end = self.cut_draft
         for value, label in ((draft_start, 'S'), (draft_end, 'E')):

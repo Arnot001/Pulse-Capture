@@ -15,18 +15,21 @@ class PrivacyPreview(CropPreview):
         self.zoom_drag = False
         self.mask = None
         self.mode = 'Blur'
+        self.selected_index = None
+        self.active_masks = ()
         self.display_crop = None
         self.display_zoomed = False
         self.gesture = self.candidate = None
         self.bind('<ButtonRelease-1>', self.finish)
 
-    def show_frame(self, photo, source_view, edits=None):
+    def show_frame(self, photo, source_view, edits=None, position=0):
+        self.active_masks = tuple((i,m) for i,m in enumerate(edits.privacy.masks) if m.active(position)) if edits else ()
         self.display_crop = edits.crop if edits else None
         self.display_zoomed = bool(edits and edits.zoom.enabled)
         super().show_frame(photo, source_view)
 
     def ready(self):
-        return (self.privacy_active and self.enabled and not self.source_view and
+        return (self.privacy_active and self.enabled and not self.source_view and not self.display_zoomed and
                 self.photo and self.media and self.display_crop == self.crop)
 
     def viewport(self):
@@ -78,16 +81,22 @@ class PrivacyPreview(CropPreview):
 
     def draw_overlay(self):
         super().draw_overlay()
-        self.delete('privacy', 'zoom')
+        self.delete('privacy', 'privacy-active', 'zoom')
         if self.ready():
             self.configure(cursor='crosshair')
+            for index, mask in self.active_masks:
+                if index != self.selected_index:
+                    visible = mask.rect.intersect(self.viewport())
+                    if visible:
+                        self.create_rectangle(*self.screen_rect(visible),outline=t.MUTED,
+                                              dash=(3,3),tags='privacy-active')
             rect = self.candidate or self.visible_mask()
             if rect is not None:
                 x1, y1, x2, y2 = self.screen_rect(rect)
                 self.create_rectangle(x1, y1, x2, y2, outline=t.CYAN, width=2, tags='privacy')
                 for x, y in ((x1, y1), (x2, y1), (x1, y2), (x2, y2)):
                     self.create_rectangle(x-4, y-4, x+4, y+4, fill=t.CYAN, outline=t.BG, tags='privacy')
-                self.create_text(x1+7, y1+7, text=self.mode.upper(), anchor='nw', fill=t.CYAN,
+                self.create_text(x1+7, y1+7, text=self.mode.upper()+' · EDIT GUIDE', anchor='nw', fill=t.CYAN,
                                  font=(t.FONT, -11, 'bold'), tags='privacy')
         if self.zoom_ready():
             self.configure(cursor='crosshair')

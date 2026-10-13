@@ -11,7 +11,7 @@ from editor.export_job import ExportJob
 from editor.models import TrimRange
 from editor.polish import Fade, Zoom
 from editor.preview import preview_command
-from editor.privacy import Privacy, Rect
+from editor.privacy import PrivacyMask, Privacy, Rect
 from editor.text_overlay import TextOverlay, TextResources
 from editor.transforms import Branding, EditOptions
 from tests import test_editor_formats_integration as fixtures
@@ -92,7 +92,7 @@ class RealCutTests(unittest.TestCase):
         edits = EditOptions(
             text=TextOverlay(True, 'PULSE CUT'),
             branding=Branding(True, 'Bottom right', 'Medium'),
-            privacy=Privacy('Pixelate', Rect(230, 100, 50, 90)),
+            privacy=Privacy((PrivacyMask('Pixelate', Rect(230, 100, 50, 90), 0, media.duration),)),
             zoom=Zoom(
                 enabled=True, factor=1.5, focus_x=.58, focus_y=.42,
                 mode='Zoom in', motion_speed='Full clip',

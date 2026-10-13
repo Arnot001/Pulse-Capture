@@ -68,7 +68,7 @@ def build_export_command(ffmpeg, media, trim, output, edits=None, asset=None,
     if active_cuts:
         graph, video_input, audio_input = _cut_filter_graph(media, trim, cuts)
         filters, complex_graph = video_filters(
-            media, edits, asset, text_resources, kept_duration, input_label=video_input
+            media, edits, asset, text_resources, kept_duration, input_label=video_input, trim=trim, cuts=cuts
         )
         if complex_graph:
             graph.append(filters)
@@ -98,7 +98,7 @@ def build_export_command(ffmpeg, media, trim, output, edits=None, asset=None,
             args += ['-an']
     else:
         filters, complex_graph = video_filters(
-            media, edits, asset, text_resources, trim.duration
+            media, edits, asset, text_resources, trim.duration, trim=trim, cuts=cuts
         )
         if complex_graph:
             args += ['-filter_complex', filters, '-map', '[v]']

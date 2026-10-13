@@ -6,7 +6,7 @@ from unittest.mock import patch
 from capture.ffmpeg_backend import Backend
 from editor.models import MediaInfo, TrimRange
 from editor.transforms import EditOptions, Branding, FORMATS
-from editor.privacy import Rect, Privacy, output_mask, source_viewport, rectangle_from_points
+from editor.privacy import PrivacyMask, Rect, Privacy, output_mask, source_viewport, rectangle_from_points
 from editor.text_overlay import TextOverlay, TextResources, text_geometry, filter_path, resolve_font
 from editor.ffmpeg_export import build_export_command
 from editor.preview import preview_command
@@ -19,16 +19,16 @@ class PrivacyGeometryTests(unittest.TestCase):
 
     def test_valid_modes_and_rectangles(self):
         for mode in ('Blur', 'Pixelate'):
-            Privacy(mode, Rect(15, 21, 100, 80)).validate(self.media)
+            Privacy((PrivacyMask(mode, Rect(15, 21, 100, 80), 0, self.media.duration),)).validate(self.media)
 
     def test_invalid_rectangles(self):
         for rect in (Rect(0, 0, 0, 10), Rect(0, 0, -10, 10), Rect(0, 0, 10, 0),
                      Rect(-1, 0, 10, 10), Rect(1919, 0, 10, 10), Rect(0, 1079, 10, 10),
                      Rect(0.5, 0, 10, 10), Rect(0, 0, 1, 10)):
             with self.subTest(rect=rect), self.assertRaises(ValueError):
-                Privacy(mask=rect).validate(self.media)
+                Privacy((PrivacyMask('Blur', rect, 0, self.media.duration),)).validate(self.media)
         with self.assertRaises(ValueError):
-            Privacy('unknown').validate(self.media)
+            Privacy((PrivacyMask('unknown', Rect(0, 0, 20, 20), 0, self.media.duration),)).validate(self.media)
 
     def test_drag_clamps_every_edge(self):
         bounds = Rect(50, 70, 300, 200)
@@ -49,8 +49,8 @@ class PrivacyGeometryTests(unittest.TestCase):
         expected = {'Original': mask, '16:9 Landscape': mask,
                     '9:16 Vertical': Rect(58, 108, 100, 80), '1:1 Square': Rect(300, 120, 100, 80)}
         for preset in FORMATS:
-            edits = EditOptions(privacy=Privacy(mask=mask)).with_format(self.media, preset)
-            self.assertEqual(edits.privacy.mask, mask)
+            edits = EditOptions(privacy=Privacy((PrivacyMask('Blur', mask, 0, self.media.duration),))).with_format(self.media, preset)
+            self.assertEqual(edits.privacy.masks[0].rect, mask)
             self.assertEqual(output_mask(mask, self.media, edits.crop), expected[preset])
 
     def test_shifted_crop_uses_source_pixels_not_relative_percentage(self):
@@ -145,7 +145,7 @@ class OverlayCommandTests(unittest.TestCase):
 
     def test_trim_crop_blur_and_pixelate(self):
         for mode, filter_name in [('Blur', 'gblur='), ('Pixelate', 'flags=neighbor')]:
-            edits = EditOptions(privacy=Privacy(mode, Rect(720, 120, 100, 80))).with_format(self.media, '9:16 Vertical')
+            edits = EditOptions(privacy=Privacy((PrivacyMask(mode, Rect(720, 120, 100, 80), 0, self.media.duration),))).with_format(self.media, '9:16 Vertical')
             cmd = self.command(edits)
             graph = cmd[cmd.index('-filter_complex')+1]
             self.assertIn('crop=100:80:58:108:exact=1', graph)
@@ -155,7 +155,7 @@ class OverlayCommandTests(unittest.TestCase):
 
     def test_combined_order_and_audio(self):
         edits = EditOptions(text=TextOverlay(True, 'Hello'), branding=Branding(True),
-                            privacy=Privacy('Pixelate', Rect(720, 120, 100, 80))).with_format(self.media, '9:16 Vertical')
+                            privacy=Privacy((PrivacyMask('Pixelate', Rect(720, 120, 100, 80), 0, self.media.duration),))).with_format(self.media, '9:16 Vertical')
         cmd = self.command(edits)
         graph = cmd[cmd.index('-filter_complex')+1]
         for first, second in [('crop=594', 'pad='), ('pad=', 'split'), ('flags=neighbor', 'drawtext='),
@@ -176,14 +176,19 @@ class OverlayCommandTests(unittest.TestCase):
             self.assertIn('drawtext=', cmd[cmd.index('-filter_complex')+1])
 
     def test_preview_uses_identical_graph(self):
-        edits = EditOptions(text=TextOverlay(True, 'Hello'), privacy=Privacy(mask=Rect(100, 100, 200, 200)))
+        edits = EditOptions(text=TextOverlay(True, 'Hello'), privacy=Privacy((PrivacyMask('Blur', Rect(100, 100, 200, 200), 0, self.media.duration),)))
         with TextResources(edits.text) as resources:
             cmd = build_export_command('ffmpeg', self.media, self.trim, 'out.mp4', edits, text_resources=resources)
             preview = preview_command('ffmpeg', self.media, 1, 640, 360, edits, False, resources)
-            self.assertTrue(preview[preview.index('-filter_complex')+1].startswith(cmd[cmd.index('-filter_complex')+1]))
+            # Preview resolves active masks at source time; export gates that same
+            # visual graph with its trim-relative interval.
+            graph = cmd[cmd.index('-filter_complex')+1]
+            self.assertIn(":enable='gte(t,0.000000000)*lt(t,2.000000000)'", graph)
+            graph = graph.replace(":enable='gte(t,0.000000000)*lt(t,2.000000000)'", '')
+            self.assertTrue(preview[preview.index('-filter_complex')+1].startswith(graph))
 
     def test_invalid_state_never_launches(self):
-        for edits in (EditOptions(text=TextOverlay(True, '')), EditOptions(privacy=Privacy(mask=Rect(-1, 1, 20, 20)))):
+        for edits in (EditOptions(text=TextOverlay(True, '')), EditOptions(privacy=Privacy((PrivacyMask('Blur', Rect(-1, 1, 20, 20), 0, self.media.duration),)))):
             with self.subTest(edits=edits):
                 launch = unittest.mock.Mock()
                 job = ExportJob(Backend('ffmpeg', 'ffprobe', True), popen=launch)

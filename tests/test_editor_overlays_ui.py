@@ -31,7 +31,8 @@ class OverlayUITests(unittest.TestCase):
         w.video.event_generate('<B1-Motion>', x=x2, y=y2)
         w.video.event_generate('<ButtonRelease-1>')
         self.pump_until(lambda: w.video.photo is not before)
-        self.assertIsNotNone(w.edits.privacy.mask)
+        self.next_picture(w.overlay_tools.add_mask)
+        self.assertIsNotNone(w.edits.privacy.masks[0].rect)
         w.edits.validate(w.media)
         self.assertTrue(w.video.find_withtag('privacy'))
 
@@ -70,14 +71,15 @@ class OverlayUITests(unittest.TestCase):
         self.next_picture(lambda: w.select_tool('CROP'))
         w.crop_changed(w.edits.crop.moved(w.media, 100, 20))
         self.draw_mask()
-        mask = w.edits.privacy.mask
+        mask = w.edits.privacy.masks[0].rect
         x1, y1, x2, y2 = w.video.screen_rect(mask)
         old = w.video.photo
         w.video.event_generate('<Button-1>', x=round((x1+x2)/2), y=round((y1+y2)/2))
         w.video.event_generate('<B1-Motion>', x=10000, y=10000)
         w.video.event_generate('<ButtonRelease-1>')
         self.pump_until(lambda: w.video.photo is not old)
-        moved = w.edits.privacy.mask
+        self.next_picture(w.overlay_tools.update_mask)
+        moved = w.edits.privacy.masks[0].rect
         self.assertGreater(moved.x, mask.x)
         self.assertEqual(moved.right, w.video.viewport().right)
         self.assertEqual(moved.bottom, w.video.viewport().bottom)
@@ -87,16 +89,17 @@ class OverlayUITests(unittest.TestCase):
         w.video.event_generate('<B1-Motion>', x=round(x1-15), y=round(y1-15))
         w.video.event_generate('<ButtonRelease-1>')
         self.pump_until(lambda: w.video.photo is not old)
-        resized = w.edits.privacy.mask
+        self.next_picture(w.overlay_tools.update_mask)
+        resized = w.edits.privacy.masks[0].rect
         self.assertGreater(resized.width, moved.width)
         self.assertGreater(resized.height, moved.height)
         for preset in ('Original', '16:9 Landscape', '1:1 Square', '9:16 Vertical'):
             w.format_choice.set(preset)
             self.next_picture(w.format_changed)
-            self.assertEqual(w.edits.privacy.mask, resized)
+            self.assertEqual(w.edits.privacy.masks[0].rect, resized)
             self.assertEqual(w.video.visible_mask(), resized.intersect(w.video.viewport()))
-        self.next_picture(lambda: w.overlay_tools.mask_changed(None))
-        self.assertIsNone(w.edits.privacy.mask)
+        self.next_picture(w.overlay_tools.clear_masks)
+        self.assertEqual(w.edits.privacy.masks, ())
         self.assertFalse(w.video.find_withtag('privacy'))
 
     def test_combined_ui_export_and_preview_modes(self):
@@ -107,6 +110,7 @@ class OverlayUITests(unittest.TestCase):
         self.draw_mask()
         w.overlay_tools.privacy_mode.set('Pixelate')
         self.next_picture(w.overlay_tools.mode_changed)
+        self.next_picture(w.overlay_tools.update_mask)
         w.brand_on.set(True)
         self.next_picture(w.brand_changed)
         self.assertFalse(w.video.source_view)
@@ -128,6 +132,7 @@ class OverlayUITests(unittest.TestCase):
         self.next_picture(w.format_changed)
         mask = Rect(w.edits.crop.x-1, 100, 2, 30)
         self.next_picture(lambda: w.overlay_tools.mask_changed(mask))
+        self.next_picture(w.overlay_tools.add_mask)
         self.next_picture(lambda: w.select_tool('PRIVACY'))
         visible = w.video.visible_mask()
         self.assertEqual(visible.width, 1)
@@ -135,12 +140,14 @@ class OverlayUITests(unittest.TestCase):
         w.video.event_generate('<Button-1>', x=round(x1), y=round(y1))
         w.video.event_generate('<ButtonRelease-1>')
         self.root.update()
-        self.assertEqual(w.edits.privacy.mask, mask)
+        self.assertEqual(w.edits.privacy.masks[0].rect, mask)
         self.next_picture(lambda: w.video.nudge(2, 0))
+        self.next_picture(w.overlay_tools.update_mask)
+        self.assertEqual(w.edits.privacy.masks[0], w.overlay_tools.draft_mask())
         w.edits.validate(w.media)
-        self.next_picture(lambda: w.overlay_tools.mask_changed(None))
+        self.next_picture(w.overlay_tools.clear_masks)
         self.draw_mask()
-        mask = w.edits.privacy.mask
+        mask = w.edits.privacy.masks[0].rect
         x1, y1, x2, y2 = w.video.screen_rect(mask)
         w.video.event_generate('<Button-1>', x=round((x1+x2)/2), y=round((y1+y2)/2))
         self.assertIsNotNone(w.video.gesture)
@@ -148,7 +155,7 @@ class OverlayUITests(unittest.TestCase):
         self.root.update()
         self.assertIsNone(w.video.gesture)
         w.video.event_generate('<ButtonRelease-1>')
-        self.assertEqual(w.edits.privacy.mask, mask)
+        self.assertEqual(w.edits.privacy.masks[0].rect, mask)
 
     def test_close_during_combined_export(self):
         w = self.window

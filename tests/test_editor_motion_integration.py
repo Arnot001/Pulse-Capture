@@ -10,7 +10,7 @@ from capture.ffmpeg_backend import run, validate_output
 from editor.media import probe_media
 from editor.models import TrimRange
 from editor.polish import Zoom, Fade, SPEEDS, ZOOM_TIMINGS, animation_duration
-from editor.privacy import Privacy, Rect
+from editor.privacy import PrivacyMask, Privacy, Rect
 from editor.preview import preview_command
 from editor.text_overlay import TextOverlay, TextResources
 from editor.transforms import EditOptions, Branding, FORMATS
@@ -106,7 +106,7 @@ class AnimatedExportTests(unittest.TestCase):
         media=probe_media(self.probe,path)
         digest=hashlib.sha256(path.read_bytes()).digest()
         for speed in (3,4):
-            edits=EditOptions(privacy=Privacy('Pixelate',Rect(160,100,100,100)),
+            edits=EditOptions(privacy=Privacy((PrivacyMask('Pixelate', Rect(160,100,100,100), 0, media.duration),)),
                 text=TextOverlay(True,'PULSE DEMO'),branding=Branding(True,'Bottom right','Medium'),
                 zoom=Zoom(True,1.5,.6,.3,'Zoom in','Full clip'),speed=speed,fade=Fade(True,True)
                 ).with_format(media,'9:16 Vertical')
