@@ -8,7 +8,8 @@ from editor.cuts import CutPlan, CutRange
 from editor.ffmpeg_export import build_export_command
 from editor.models import MediaInfo, TrimRange
 from editor.music import (
-    IMPORT_LABEL, Music, TRACKS, VOLUME_LEVELS, generate_track, music_duration,
+    ARRANGEMENT_BARS, IMPORT_LABEL, Music, TRACKS, VOLUME_LEVELS,
+    arrangement_section, generate_track, music_duration,
 )
 from editor.transforms import Branding, EditOptions
 
@@ -33,6 +34,18 @@ class MusicModelTests(unittest.TestCase):
         self.assertTrue(all(0 <= value <= 1 for value in VOLUME_LEVELS))
         self.assertGreater(music_duration('Pulse // Night'), 10)
 
+    def test_v2_library_has_distinct_palettes_and_arrangement(self):
+        self.assertEqual(ARRANGEMENT_BARS, 12)
+        self.assertEqual(
+            [arrangement_section(bar) for bar in range(12)],
+            ['INTRO', 'A', 'A', 'A', 'A', 'B', 'B', 'B', 'B', 'LIFT', 'LIFT', 'TURN'],
+        )
+        self.assertEqual(len({recipe['palette'] for recipe in TRACKS.values()}), len(TRACKS))
+        self.assertTrue(all(recipe['slug'].endswith('-v2') for recipe in TRACKS.values()))
+        self.assertTrue(all(len(recipe['roots_a']) == 4 for recipe in TRACKS.values()))
+        self.assertTrue(all(len(recipe['roots_b']) == 4 for recipe in TRACKS.values()))
+        self.assertTrue(all(recipe['roots_a'] != recipe['roots_b'] for recipe in TRACKS.values()))
+
     def test_invalid_tracks_volumes_and_imports(self):
         for music in (
             Music(track='Unknown'),
@@ -46,6 +59,15 @@ class MusicModelTests(unittest.TestCase):
 
         Music(track=IMPORT_LABEL, imported=Path('track.mp3')).validate()
         Music(track=IMPORT_LABEL, imported=Path('track.wav')).validate()
+
+    def test_short_generated_tracks_are_distinct(self):
+        with TemporaryDirectory() as folder, patch('editor.music.BARS', .05):
+            payloads = []
+            for index, name in enumerate(TRACKS):
+                path = Path(folder) / f'{index}.wav'
+                generate_track(name, path)
+                payloads.append(path.read_bytes()[44:])
+            self.assertEqual(len(set(payloads)), len(TRACKS))
 
     def test_generator_is_deterministic_and_valid_wav(self):
         with TemporaryDirectory() as folder, patch('editor.music.BARS', .08):
