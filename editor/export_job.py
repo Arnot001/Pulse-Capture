@@ -86,6 +86,7 @@ class ExportJob:
             if edits.music.enabled:
                 self.events.put(ExportEvent('progress', 0, 'Preparing soundtrack…'))
                 music_path = resolve_music_path(edits.music)
+                self._check_cancel()
             reservation = reserve_export(media.path, folder)
             command = build_export_command(self.backend.ffmpeg, media, trim, reservation.partial, edits,
                                            text_resources=resources, cuts=cuts, music_path=music_path)
