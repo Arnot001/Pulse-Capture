@@ -44,7 +44,7 @@ The optional global **Ctrl+Shift+R** shortcut works while Pulse is in the
 background. A conflict with another app is shown explicitly; the shortcut is
 off by default. Closing Pulse during capture requests a clean stop first.
 
-## Development branch: CUT and Privacy Tracks
+## Development branch: CUT, Privacy Tracks and Music
 
 `codex/cut-sections-v06` extends the released v0.5.0 app. The visible version
 remains v0.5.0 until release approval. CUT removes multiple source-time sections:
@@ -52,8 +52,11 @@ set Start/End, Remove Section, Restore or Undo Last. Playback skips removed
 sections and export joins their video/audio before applying the remaining edits.
 
 Privacy now supports multiple independent Blur/Pixelate boxes with source-time
-Start/End values. The workflow below describes this development branch.
-See `V06_PRIVACY_VERIFICATION.md` for verification and limits.
+Start/End values. The Music panel adds original Pulse instrumentals or an
+imported MP3/WAV, with separate soundtrack/source volume, looping and soundtrack
+fades. The built-ins are synthesized locally from Pulse-owned recipes and use no
+third-party audio samples. The workflow below describes this development branch.
+See `V06_PRIVACY_VERIFICATION.md` for Privacy verification and limits.
 
 ## Quick Edit
 
@@ -111,14 +114,20 @@ ready. Editing opens in a separate window.
     selected amount at its end; encoded frames sample that curve.
 11. **Clip Speed** offers **0.5x / 1x / 1.5x / 2x / 3x / 4x**. Audio changes
     tempo while retaining pitch; silent sources stay silent.
-12. Choose **Finish** for **Fade In / Fade Out**. Each lasts up to 0.5 output
+12. Choose **Music** to add a soundtrack. Built-in choices are **Pulse // Night,
+    Drive, Focus, Lift, Horizon,** and **Circuit**. Set soundtrack volume and
+    original-audio volume independently, choose Loop and soundtrack Fade In /
+    Fade Out, or import your own MP3/WAV. Built-in tracks are generated locally
+    the first time they are needed and contain no third-party audio samples.
+    The editor preview remains silent; the soundtrack is mixed into export.
+13. Choose **Finish** for **Fade In / Fade Out**. Each lasts up to 0.5 output
     seconds, shortened for tiny clips, and also fades source audio.
     **Pulse Promo** applies a centred Vertical crop, Medium Pulse branding at
-    bottom right, both fades, 1x speed and Zoom Off. It keeps trim, text and
-    privacy; you can adjust its settings afterward.
-13. Click **Export video**. Rendering runs in the background with real progress
+    bottom right, both fades, 1x speed and Zoom Off. It keeps trim, text,
+    privacy and music; you can adjust its settings afterward.
+14. Click **Export video**. Rendering runs in the background with real progress
    and a **Cancel export** action. The MP4 is validated before “Exported” appears.
-14. **Open folder** opens the exported file's location. **Change folder** chooses
+15. **Open folder** opens the exported file's location. **Change folder** chooses
    another destination for this editor session.
 
 Exports use `original-name_trimmed.mp4`, then `_001`, `_002`, and so on. The
@@ -134,7 +143,10 @@ All formats keep the first audio track when present; speed defaults to 1x.
 Exports re-encode to H.264/AAC for cuts between keyframes; cut boundaries are
 limited by the source frame spacing. Processing order is trim, remove cuts and join, crop, even-edge
 padding, privacy blur/pixelation, zoom, text, Pulse branding, speed, then fades.
-Preview and export share the same visual filters.
+Source audio follows CUT joins and clip speed. When Music is enabled, source
+volume and soundtrack volume are applied independently and mixed to AAC; silent
+source videos gain an audio track from the soundtrack. Preview and export share
+the same visual filters; preview audio remains intentionally silent.
 
 Brand sizes are proportional to the shorter output edge (12%, 18%, 25%) with a
 small inset and subtle opacity. The recorder and editor share the existing
@@ -147,7 +159,7 @@ Only the selected tool panel is shown. Preview remains a lightweight, silent,
 low-frame-rate preview; Crop displays the source and framing guide, while Trim,
 Format, Brand, Text and Finish show the rendered result. Motion has
 separate focus and result views. Privacy shows a selection outline and resize
-handles on its unzoomed editing view; guides are not exported. All nine panels fit the 760 × 700 minimum
+handles on its unzoomed editing view; guides are not exported. All ten panels fit the 760 × 700 minimum
 window layout with the full timeline height.
 
 Privacy rectangles are stored in original source pixels. After a format change
@@ -178,7 +190,8 @@ an actionable error; Text Off keeps the rest of the editor usable.
 
 Deferred: timed/multiple text overlays, moving/tracked masks, automatic
 privacy detection, face detection, subtitles, transcription, animation
-keyframes, zoom out, mute/volume, music and transitions.
+keyframes, zoom out, live soundtrack audition, ducking, music automation and
+transitions.
 
 ## Audio availability
 
@@ -249,6 +262,8 @@ editor/privacy.py             Source-anchored mask geometry and privacy filters
 editor/privacy_preview.py     Visual mask drawing, moving, and resizing
 editor/overlay_tools.py       Text panel and privacy-panel integration
 editor/privacy_tools.py       Timed-mask list, source times and draft editing
+editor/music.py               Original Pulse soundtrack recipes, cache and state
+editor/music_tools.py         Music dropdown, volumes, loop/fades and import UI
 editor/polish.py              Zoom timing/geometry, speed and fade helpers
 editor/polish_tools.py        Motion, focus/result, Finish and Promo controls
 editor/crop_preview.py        Visual crop overlay and source-coordinate dragging
@@ -261,6 +276,7 @@ editor/export_job.py          Progress, cancellation, and validated export
 editor/filenames.py           Non-overwriting edited-copy reservations
 tests/                        Pure logic, real FFmpeg and opt-in Tk tests
 assets/branding/               Pulse icon and design notes
+assets/music/                  Original soundtrack provenance notes
 vendor/                       Optional FFmpeg/FFprobe binaries
 ```
 
