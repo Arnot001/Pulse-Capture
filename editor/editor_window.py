@@ -17,6 +17,7 @@ from .preview import Preview
 from .timeline import Timeline
 from .privacy_preview import PrivacyPreview
 from .overlay_tools import OverlayTools
+from .music_tools import MusicTools
 from .polish_tools import PolishTools
 from .transforms import EditOptions, Branding, FORMATS, CORNERS, SIZES
 
@@ -104,16 +105,16 @@ class EditorWindow(tk.Toplevel):
 
         tool_area = tk.Frame(bottom, bg=t.BG)
         tool_area.pack(side='top', fill='x', before=self.note, pady=(8, 0))
-        tabs = t.Segments(tool_area, self.tool, [(v, v) for v in ('TRIM', 'CUT', 'FORMAT', 'CROP', 'BRAND', 'TEXT', 'PRIVACY', 'MOTION', 'FINISH')], self.show_tool)
+        tabs = t.Segments(tool_area, self.tool, [(v, v) for v in ('TRIM', 'CUT', 'FORMAT', 'CROP', 'BRAND', 'TEXT', 'PRIVACY', 'MOTION', 'MUSIC', 'FINISH')], self.show_tool)
         tabs.pack(fill='x', pady=(0, 8))
         for _, button in tabs.buttons:
-            button.configure(padx=5, pady=5, font=(t.FONT, -9, 'bold'))
+            button.configure(padx=4, pady=5, font=(t.FONT, -8, 'bold'))
         self.controls.extend(b for _, b in tabs.buttons)
         # A fixed, compact tool area keeps the preview stable when switching tools.
         panel_area = tk.Frame(tool_area, bg=t.PANEL, height=126)
         panel_area.pack(fill='x')
         panel_area.pack_propagate(False)
-        for name in ('TRIM', 'CUT', 'FORMAT', 'CROP', 'BRAND', 'TEXT', 'PRIVACY', 'MOTION', 'FINISH'):
+        for name in ('TRIM', 'CUT', 'FORMAT', 'CROP', 'BRAND', 'TEXT', 'PRIVACY', 'MOTION', 'MUSIC', 'FINISH'):
             self.panels[name] = tk.Frame(panel_area, bg=t.PANEL)
         row = self.panels['TRIM']
         row.pack(fill='both', expand=True, padx=12, pady=10)
@@ -141,6 +142,7 @@ class EditorWindow(tk.Toplevel):
         self.build_tools()
         self.cut_tools = CutTools(self)
         self.overlay_tools = OverlayTools(self)
+        self.music_tools = MusicTools(self)
         self.polish_tools = PolishTools(self)
         for widget in self.controls:
             widget.configure(state='disabled')
@@ -224,6 +226,7 @@ class EditorWindow(tk.Toplevel):
         self.video.zoom_drag = False
         self.cut_tools.refresh()
         self.overlay_tools.refresh()
+        self.music_tools.refresh()
         self.polish_tools.refresh()
         if self.media and self.trim:
             self.update_timeline()
@@ -496,6 +499,7 @@ class EditorWindow(tk.Toplevel):
         self.update_brand_controls()
         self.cut_tools.refresh()
         self.overlay_tools.refresh()
+        self.music_tools.refresh()
         self.polish_tools.refresh()
         self._update_transport_controls()
         self.export_button.configure(state='disabled' if busy else 'normal',
