@@ -5,6 +5,7 @@ import os
 from pathlib import Path
 import subprocess
 import unittest
+from unittest.mock import patch
 
 from capture.ffmpeg_backend import run, validate_output
 from editor.cuts import CutPlan, CutRange
@@ -50,6 +51,24 @@ class RealMusicTests(unittest.TestCase):
         )
         self.assertEqual(decoded.returncode, 0, decoded.stderr)
         return path, info
+
+    def test_builtin_v2_track_generates_caches_and_exports(self):
+        media = self.source(False)
+        cache = self.folder / 'pulse-music-cache'
+        music = Music(
+            True, 'Pulse // Night', None, .20, 1.0,
+            True, True, True,
+        )
+        with patch.dict(os.environ, {'PULSE_MUSIC_CACHE': str(cache)}), \
+                patch('editor.music.BARS', .20):
+            path, info = self.export_music(
+                media, TrimRange(0, 3), CutPlan(), EditOptions(music=music)
+            )
+        generated = cache / 'pulse-night-v2.wav'
+        self.assertTrue(generated.is_file())
+        self.assertGreater(generated.stat().st_size, 1000)
+        self.assertTrue(path.is_file())
+        self.assertTrue(any(s['codec_type'] == 'audio' for s in info['streams']))
 
     def test_music_adds_audio_to_silent_and_mixes_with_source_audio(self):
         music_path = self.soundtrack(1.2)
