@@ -29,7 +29,7 @@ class CutUITests(unittest.TestCase):
     def test_cut_panel_add_restore_undo_timeline_and_minimum_layout(self):
         w = self.window
         self.assertIn('CUT', w.panels)
-        self.assertEqual(len(w.panels), 9)
+        self.assertEqual(len(w.panels), 10)
         self.next_picture(lambda: w.select_tool('CUT'))
         controls = w.cut_tools
         self.assertEqual(str(controls.remove_button.cget('state')), 'disabled')
