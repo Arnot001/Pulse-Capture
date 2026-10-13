@@ -41,13 +41,14 @@ class MusicUITests(unittest.TestCase):
         self.assertFalse(music.fade_in)
         self.assertTrue(music.fade_out)
         self.assertIn('124 BPM', controls.hint.cget('text'))
-        self.assertIn('Music + source audio', w.preview_note.cget('text'))
+        self.assertFalse(w.media.has_audio)
+        self.assertIn('Music added on export', w.preview_note.cget('text'))
 
         controls.music_on.set(False)
         controls.changed()
         self.root.update()
         self.assertFalse(w.edits.music.enabled)
-        self.assertIn('Audio kept on export', w.preview_note.cget('text'))
+        self.assertIn('No audio in source', w.preview_note.cget('text'))
 
     def test_import_mp3_wav_and_switch_back_to_pulse_track(self):
         w = self.window
