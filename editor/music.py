@@ -9,7 +9,6 @@ from dataclasses import dataclass
 import math
 import os
 from pathlib import Path
-import random
 import threading
 import wave
 
