@@ -120,6 +120,8 @@ ready. Editing opens in a separate window.
     Fade Out, or import your own MP3/WAV. Built-in tracks are generated locally
     the first time they are needed and contain no third-party audio samples.
     The editor preview remains silent; the soundtrack is mixed into export.
+    Music runs in final output time: CUT removes video/source-audio time without
+    punching gaps into the soundtrack, and Clip Speed does not retime the music.
 13. Choose **Finish** for **Fade In / Fade Out**. Each lasts up to 0.5 output
     seconds, shortened for tiny clips, and also fades source audio.
     **Pulse Promo** applies a centred Vertical crop, Medium Pulse branding at
