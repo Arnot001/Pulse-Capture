@@ -10,6 +10,7 @@ from capture.ffmpeg_backend import process_options, validate_output
 from .cuts import CutPlan
 from .ffmpeg_export import build_export_command
 from .filenames import reserve_export
+from .music import resolve_music_path
 from .transforms import EditOptions
 from .text_overlay import TextResources
 
@@ -81,9 +82,13 @@ class ExportJob:
         try:
             self._check_cancel()
             resources = TextResources(edits.text)
+            music_path = None
+            if edits.music.enabled:
+                self.events.put(ExportEvent('progress', 0, 'Preparing soundtrack…'))
+                music_path = resolve_music_path(edits.music)
             reservation = reserve_export(media.path, folder)
             command = build_export_command(self.backend.ffmpeg, media, trim, reservation.partial, edits,
-                                           text_resources=resources, cuts=cuts)
+                                           text_resources=resources, cuts=cuts, music_path=music_path)
             process = self._popen(command, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
                                   stderr=subprocess.PIPE, text=True, encoding='utf-8',
                                   errors='replace', bufsize=1, **process_options())
@@ -101,7 +106,7 @@ class ExportJob:
             if process.returncode:
                 raise RuntimeError('The video could not be exported.\n' + '\n'.join(log)[-1600:])
             self.events.put(ExportEvent('validating', .99, 'Checking your exported video…'))
-            info = self._validator(self.backend.ffprobe, reservation.partial, media.has_audio)
+            info = self._validator(self.backend.ffprobe, reservation.partial, media.has_audio or edits.music.enabled)
             duration = float(info['format']['duration'])
             if abs(duration - out_duration) > max(.15, 2 / media.fps):
                 raise RuntimeError('The exported length did not match your selection. The original is unchanged.')
