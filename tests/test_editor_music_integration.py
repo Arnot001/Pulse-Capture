@@ -78,8 +78,14 @@ class RealMusicTests(unittest.TestCase):
         path, info = self.export_music(
             media, TrimRange(0, 4), CutPlan(), EditOptions(music=music)
         )
-        audio = next(s for s in info['streams'] if s['codec_type'] == 'audio')
-        self.assertAlmostEqual(float(audio['duration']), 4.0, delta=.16)
+        decoded = subprocess.run(
+            [self.ffmpeg, '-v', 'error', '-i', str(path), '-map', '0:a:0',
+             '-ac', '1', '-ar', '48000', '-f', 's16le', '-'],
+            capture_output=True, timeout=20,
+        )
+        self.assertEqual(decoded.returncode, 0, decoded.stderr)
+        seconds = len(decoded.stdout) / 2 / 48000
+        self.assertAlmostEqual(seconds, 4.0, delta=.16)
         self.assertTrue(path.is_file())
 
     def test_music_survives_cuts_speed_privacy_zoom_text_brand_and_fades(self):
