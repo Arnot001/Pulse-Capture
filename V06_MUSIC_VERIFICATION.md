@@ -26,8 +26,7 @@ Built-in tracks:
 - Pulse // Horizon — cinematic — 76 BPM
 - Pulse // Circuit — clean tech — 110 BPM
 
-The built-ins are deterministic local synthesis from `editor/music.py`.
-They contain no third-party recordings, loops, stems, or downloaded samples.
+The built-ins now use Pulse Music Engine v2: deterministic local synthesis from `editor/music.py` with track-specific 12-bar arrangements, A/B harmony, fills, motifs, transitions, stereo movement and lightweight mastering. They contain no third-party recordings, loops, stems, or downloaded samples.
 Generated WAVs are cached under `%LOCALAPPDATA%\Pulse Capture\music` unless
 `PULSE_MUSIC_CACHE` is set.
 
@@ -62,6 +61,9 @@ validation and cancellation behavior remain in the existing export job.
 
 Pure tests cover:
 - library/default state
+- v2 arrangement sections and unique track palettes
+- v2 cache slugs so old simple cached WAVs are not reused
+- deterministic but distinct generated audio across all six built-ins
 - invalid track/import/volume values
 - deterministic WAV generation
 - independent source/music volumes
@@ -72,6 +74,7 @@ Pure tests cover:
 - Music Off legacy silent behavior
 
 Real FFmpeg tests cover:
+- generating/caching a real built-in v2 track and exporting it
 - adding music to silent video
 - mixing music with source audio
 - short non-loop music padded to video duration
@@ -109,9 +112,7 @@ Start-Process ".\dist\Pulse Capture\Pulse Capture.exe"
 
 Record the exact passing test count and build result here after execution.
 
-Manual acceptance should audition every built-in track. These are first-pass
-original compositions; code-level correctness does not replace listening for
-musical quality, narration balance, looping feel, or taste.
+Manual acceptance should audition every built-in track. Engine v2 is the richer second-pass arrangement system; code-level correctness still does not replace listening for musical quality, narration balance, looping feel, or taste.
 
 Also check:
 - Music Off retains source audio exactly as expected
