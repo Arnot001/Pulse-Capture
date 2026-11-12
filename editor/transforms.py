@@ -4,6 +4,7 @@ import math
 from pathlib import Path
 from .privacy import Privacy, output_mask, privacy_filters, mask_intervals
 from .music import Music
+from .crop_motion import CropMotion, motion_crop_filter
 from .models import TrimRange
 from .text_overlay import TextOverlay, text_geometry, text_filter
 from .polish import Fade, Zoom, fade_seconds, output_duration, validate_speed, zoom_filter
@@ -93,6 +94,7 @@ class EditOptions:
     zoom: Zoom = Zoom()
     speed: float = 1.0
     fade: Fade = Fade()
+    crop_motion: CropMotion = CropMotion()
 
     def validate(self, media):
         expected = centered_crop(media, self.preset)
@@ -103,6 +105,16 @@ class EditOptions:
         self.zoom.validate()
         validate_speed(self.speed)
         self.fade.validate()
+        if not isinstance(self.crop_motion, CropMotion):
+            raise ValueError('Choose valid crop keyframes.')
+        if self.crop_motion.keyframes:
+            if self.preset != SHORTS_FORMAT:
+                raise ValueError('Crop keyframes are available in YouTube Shorts format.')
+            # A source-anchored privacy mask could conceal the wrong area once
+            # the crop moves. Reject rather than silently expose source pixels.
+            if self.privacy.masks:
+                raise ValueError('Clear Privacy masks before using moving crop keyframes.')
+            self.crop_motion.validate(media, self.crop)
         if expected is None:
             if self.crop is not None:
                 raise ValueError('Original must keep the full frame.')
@@ -118,7 +130,12 @@ class EditOptions:
             text_geometry(width, height, self.text)
 
     def with_format(self, media, preset):
-        return replace(self, preset=preset, crop=centered_crop(media, preset))
+        return replace(self, preset=preset, crop=centered_crop(media, preset), crop_motion=CropMotion())
+
+    def crop_at(self, media, source_time):
+        """Preview and source-coordinate editing share one sampled crop."""
+        self.validate(media)
+        return self.crop_motion.sample(media, self.crop, source_time)
 
     def output_size(self, media):
         self.validate(media)
@@ -135,16 +152,25 @@ class EditOptions:
         return output_duration(source_duration, self.speed)
 
 
-def video_filters(media, edits, asset=None, text_resources=None, duration=None, preview_time=None, input_label='0:v:0', trim=None, cuts=None, source_position=None):
+def video_filters(media, edits, asset=None, text_resources=None, duration=None, preview_time=None, input_label='0:v:0', trim=None, cuts=None, source_position=None, skip_crop=False):
     """Shared visual order; preview_time samples output time without retiming a still."""
     edits.validate(media)
+    trim = trim or TrimRange(0, media.duration)
     filters = []
-    if edits.crop:
+    if edits.crop and not skip_crop:
         c = edits.crop
-        filters.append(f'crop={c.width}:{c.height}:{c.x}:{c.y}')
+        if edits.crop_motion.keyframes:
+            if source_position is None:
+                filters.append(motion_crop_filter(c, edits.crop_motion, time_offset=trim.start))
+            else:
+                # A still preview is sought at absolute source time; rendering
+                # the sampled crop is identical to the export on this frame.
+                sampled = edits.crop_motion.sample(media, c, source_position)
+                filters.append(f'crop={c.width}:{c.height}:{sampled.x}:{sampled.y}')
+        else:
+            filters.append(f'crop={c.width}:{c.height}:{c.x}:{c.y}')
     filters.append('pad=ceil(iw/2)*2:ceil(ih/2)*2')
     base = ','.join(filters)
-    trim = trim or TrimRange(0, media.duration)
     privacy = []
     for mask in edits.privacy.masks:
         rect = output_mask(mask.rect, media, edits.crop)
