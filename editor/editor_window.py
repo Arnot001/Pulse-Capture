@@ -264,7 +264,12 @@ class EditorWindow(tk.Toplevel):
     def refresh_crop_guide(self):
         if not self.media or not hasattr(self, 'video'):
             return
-        self.video.crop = self.edits.crop_at(self.media, self.position)
+        try:
+            self.video.crop = self.edits.crop_at(self.media, self.position)
+        except ValueError as exc:
+            # An invalid draft is reported during editing; never crash Tk.
+            self.video.crop = self.edits.crop
+            self.note.configure(text=str(exc), fg=t.RED)
         self.video.draw_overlay()
         count = len(self.edits.crop_motion.keyframes)
         shorts = self.edits.preset == SHORTS_FORMAT
@@ -291,9 +296,11 @@ class EditorWindow(tk.Toplevel):
                 # Once the first keyframe exists, dragging at a new playhead
                 # position creates the next key automatically.
                 keys = self.edits.crop_motion.at(self.media, crop, self.position)
-                self.edits = replace(self.edits, crop_motion=keys)
+                proposed = replace(self.edits, crop_motion=keys)
             else:
-                self.edits = replace(self.edits, crop=crop)
+                proposed = replace(self.edits, crop=crop)
+            proposed.validate(self.media)
+            self.edits = proposed
             self.refresh_crop_guide()
             self.update_timeline()
             self.overlay_tools.refresh()
@@ -308,7 +315,9 @@ class EditorWindow(tk.Toplevel):
         try:
             crop = self.edits.crop_at(self.media, self.position)
             motion = self.edits.crop_motion.at(self.media, crop, self.position)
-            self.edits = replace(self.edits, crop_motion=motion)
+            proposed = replace(self.edits, crop_motion=motion)
+            proposed.validate(self.media)
+            self.edits = proposed
             self.refresh_crop_guide()
             self.update_timeline()
             self.note.configure(text=f'Crop keyframe saved at {format_time(self.position)}.', fg=t.CYAN)
@@ -321,11 +330,9 @@ class EditorWindow(tk.Toplevel):
             return
         margin = .50001 / self.media.fps
         keys = self.edits.crop_motion.keyframes
-        candidates = (key for key in keys if
-                      (key.time > self.position+margin if direction > 0
-                       else key.time < self.position-margin))
-        key = next(candidates, None) if direction > 0 else next(
-            (key for key in reversed(keys) if key.time < self.position-margin), None)
+        key = next((k for k in (keys if direction > 0 else reversed(keys))
+                    if (k.time > self.position+margin if direction > 0
+                        else k.time < self.position-margin)), None)
         if key:
             self.seek(key.time)
 
