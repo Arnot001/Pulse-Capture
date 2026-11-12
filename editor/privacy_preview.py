@@ -24,7 +24,7 @@ class PrivacyPreview(CropPreview):
 
     def show_frame(self, photo, source_view, edits=None, position=0):
         self.active_masks = tuple((i,m) for i,m in enumerate(edits.privacy.masks) if m.active(position)) if edits else ()
-        self.display_crop = edits.crop if edits else None
+        self.display_crop = edits.crop_at(self.media, position) if edits else None
         self.display_zoomed = bool(edits and edits.zoom.enabled)
         super().show_frame(photo, source_view)
 
