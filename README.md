@@ -79,9 +79,24 @@ ready. Editing opens in a separate window.
    source-sized pixels without stretching or upscaling.
 5. Choose **Crop** to see the full source with a cyan crop frame. Drag inside
    the frame to reposition it; arrow keys fine-tune after clicking it.
-   **Centre crop** recentres it. **View result** shows the finished composition.
+   **Centre** recentres it. **View Result** shows the finished composition.
    Selecting a different format starts a centred crop; **Original** restores the
    full frame. Changing the trim does not change the crop.
+
+   **Move the crop during a YouTube Short:** select **YouTube Shorts (9:16)**,
+   seek to the first important moment and drag the cyan crop into place.
+   Click **ADD KEY** to save that position. Seek to the next moment and drag
+   the frame again; the next keyframe is created automatically. Keep adding
+   positions where the action changes. Playback and **View Result** show
+   smooth movement between those times. Cyan diamonds on the timeline mark
+   saved keyframes; **◀ KEY / KEY ▶** jump between them, **DELETE KEY** removes
+   the one under the playhead, and **CLEAR KEYS** returns to a stationary crop.
+   The original file is never altered. Keyframes stay anchored to source time
+   across trim changes and removed sections, and the crop moves appropriately
+   when video is joined after cuts. Changing away from YouTube Shorts clears
+   the moving-crop keyframes. For privacy, moving crop and source-anchored blur/
+   pixelate masks cannot be combined; keep a static crop or remove masks.
+   This is manual keyframing, not automatic subject detection.
 6. Optionally choose **Brand**, switch **On**, and pick a corner and
    **Small / Medium / Large**. The rendered preview shows the new Pulse logo.
    Branding starts **Off** in every editor session. It adds a new overlay;
