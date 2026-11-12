@@ -8,8 +8,12 @@ from .models import TrimRange
 from .text_overlay import TextOverlay, text_geometry, text_filter
 from .polish import Fade, Zoom, fade_seconds, output_duration, validate_speed, zoom_filter
 
+SHORTS_FORMAT = 'YouTube Shorts (9:16)'
+SHORTS_RESOLUTION = (1080, 1920)
+SHORTS_SCALE = 'scale=1080:1920:flags=lanczos,setsar=1'
 FORMATS = {'Original': None, '16:9 Landscape': (16, 9),
-           '9:16 Vertical': (9, 16), '1:1 Square': (1, 1)}
+           '9:16 Vertical': (9, 16), SHORTS_FORMAT: (9, 16),
+           '1:1 Square': (1, 1)}
 CORNERS = ('Top left', 'Top right', 'Bottom left', 'Bottom right')
 SIZES = {'Small': .12, 'Medium': .18, 'Large': .25}
 
@@ -43,7 +47,7 @@ class Crop:
 def centered_crop(media, preset):
     media.validate()
     if preset not in FORMATS:
-        raise ValueError('Choose Original, Landscape, Vertical, or Square.')
+        raise ValueError('Choose Original, Landscape, Vertical, YouTube Shorts, or Square.')
     ratio = FORMATS[preset]
     if ratio is None:
         return None
@@ -122,6 +126,11 @@ class EditOptions:
             return self.crop.width, self.crop.height
         return (media.width+1)//2*2, (media.height+1)//2*2
 
+    def encoded_size(self, media):
+        """Final encoded dimensions; output_size is the pre-resize editing canvas."""
+        self.validate(media)
+        return SHORTS_RESOLUTION if self.preset == SHORTS_FORMAT else self.output_size(media)
+
     def output_duration(self, source_duration):
         return output_duration(source_duration, self.speed)
 
@@ -153,7 +162,8 @@ def video_filters(media, edits, asset=None, text_resources=None, duration=None, 
         edits.speed != 1.0 or edits.fade.fade_in or edits.fade.fade_out
     )
     if not (privacy or edits.zoom.enabled or edits.text.enabled or edits.branding.enabled or timed):
-        return base, False
+        # A fixed Shorts export size is optional; other formats retain source pixels.
+        return (base + ',' + SHORTS_SCALE if edits.preset == SHORTS_FORMAT else base), False
 
     graph = [f'[{input_label}]{base}[base]']
     current = 'base'
@@ -200,6 +210,12 @@ def video_filters(media, edits, asset=None, text_resources=None, duration=None, 
         if fades:
             graph.append(f'[{current}]{",".join(fades)}[faded]')
             current = 'faded'
+
+    # Resize only after privacy, zoom, text and watermark so their source-space
+    # positions and sizes stay correct when a landscape clip becomes a Short.
+    if edits.preset == SHORTS_FORMAT:
+        graph.append(f'[{current}]{SHORTS_SCALE}[shorts]')
+        current = 'shorts'
 
     tail = 'setpts=PTS-STARTPTS' if sample_fade else 'null'
     graph.append(f'[{current}]{tail}[v]')
