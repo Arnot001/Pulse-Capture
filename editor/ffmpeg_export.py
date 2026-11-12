@@ -4,11 +4,12 @@ from pathlib import Path
 from branding import watermark_path
 from .cuts import CutPlan
 from .music import resolve_music_path
+from .crop_motion import motion_crop_filter
 from .transforms import EditOptions, video_filters
 from .polish import fade_seconds, audio_tempo_filters
 
 
-def _cut_filter_graph(media, trim, cuts):
+def _cut_filter_graph(media, trim, cuts, source_crop=None):
     """Build source-time trim/concat filters and return graph plus output labels."""
     segments = cuts.kept_segments(trim)
     if not segments:
@@ -18,8 +19,11 @@ def _cut_filter_graph(media, trim, cuts):
     video_labels, audio_labels = [], []
     for index, segment in enumerate(segments):
         video = f'cutv{index}'
+        # Motion must run BEFORE source-time cuts. After concat, FFmpeg's t
+        # reflects shortened output time and would no longer match keyframes.
+        crop_before_trim = f'{source_crop},' if source_crop else ''
         graph.append(
-            f'[0:v:0]trim=start={segment.start:.9f}:end={segment.end:.9f},'
+            f'[0:v:0]{crop_before_trim}trim=start={segment.start:.9f}:end={segment.end:.9f},'
             f'setpts=PTS-STARTPTS[{video}]'
         )
         video_labels.append(video)
@@ -108,7 +112,10 @@ def build_export_command(ffmpeg, media, trim, output, edits=None, asset=None,
 
     graph = []
     if active_cuts:
-        cut_graph, video_input, audio_input = _cut_filter_graph(media, trim, cuts)
+        source_crop = (motion_crop_filter(edits.crop, edits.crop_motion)
+                       if edits.crop_motion.keyframes else None)
+        cut_graph, video_input, audio_input = _cut_filter_graph(
+            media, trim, cuts, source_crop)
         graph.extend(cut_graph)
     else:
         video_input = '0:v:0'
@@ -116,7 +123,8 @@ def build_export_command(ffmpeg, media, trim, output, edits=None, asset=None,
 
     filters, visual_complex = video_filters(
         media, edits, asset, text_resources, kept_duration,
-        input_label=video_input, trim=trim, cuts=cuts
+        input_label=video_input, trim=trim, cuts=cuts,
+        skip_crop=active_cuts and bool(edits.crop_motion.keyframes)
     )
 
     if active_cuts:
