@@ -19,7 +19,7 @@ from .privacy_preview import PrivacyPreview
 from .overlay_tools import OverlayTools
 from .music_tools import MusicTools
 from .polish_tools import PolishTools
-from .transforms import EditOptions, Branding, FORMATS, CORNERS, SIZES
+from .transforms import EditOptions, Branding, FORMATS, CORNERS, SIZES, SHORTS_FORMAT
 
 
 class EditorWindow(tk.Toplevel):
@@ -184,7 +184,7 @@ class EditorWindow(tk.Toplevel):
         panel = self.panels['FORMAT']
         self.add_segments(panel, self.format_choice,
                           [(v, v.replace(' ', '\n', 1)) for v in FORMATS], self.format_changed)
-        t.label(panel, 'Choose your shape. Use Crop to move the frame.', 9, t.MUTED).pack(anchor='w')
+        t.label(panel, 'YouTube Shorts exports 1080 × 1920. Use Crop to position the frame.', 9, t.MUTED).pack(anchor='w')
         panel = self.panels['CROP']
         self.add_segments(panel, self.format_choice,
                           [(v, v.replace(' ', '\n', 1)) for v in FORMATS], self.format_changed)
@@ -242,8 +242,12 @@ class EditorWindow(tk.Toplevel):
             self.overlay_tools.refresh()
             self.polish_tools.refresh()
             self.crop_hint.configure(
-                text='Drag the cyan frame to reposition it. The full source stays visible while cropping; use VIEW CROPPED RESULT to check the final frame.'
-                if self.edits.crop else 'Original keeps the full frame. Choose Landscape, Vertical, or Square above to crop.'
+                text=('YouTube Shorts: drag the cyan frame to choose the action. '
+                      'Exports a vertical 1080 × 1920 MP4. Use VIEW CROPPED RESULT to check.'
+                      if self.edits.preset == SHORTS_FORMAT else
+                      'Drag the cyan frame to reposition it. The full source stays visible while cropping; use VIEW CROPPED RESULT to check the final frame.'
+                      if self.edits.crop else
+                      'Original keeps the full frame. Choose Landscape, Vertical, Shorts, or Square above to crop.')
             )
             self.stop_play()
             self.request_frame()
