@@ -61,6 +61,25 @@ class CropMotion:
                 return crop.moved(media, x, y)
         return crop.moved(media, keys[-1].x, keys[-1].y)
 
+    def reframed(self, media, old_crop, new_crop):
+        """Retain each keyframe's tracked centre when the whole crop is resized.
+
+        A crop-size change is global across the clip. Movement keyframes keep
+        their source-time positions, recentered/clamped to the new crop size.
+        """
+        self.validate(media, old_crop)
+        old_crop.validate(media)
+        new_crop.validate(media)
+        dx = (old_crop.width - new_crop.width) / 2
+        dy = (old_crop.height - new_crop.height) / 2
+        keys = []
+        for key in self.keyframes:
+            updated = new_crop.moved(media, key.x + dx, key.y + dy)
+            keys.append(CropKeyframe(key.time, updated.x, updated.y))
+        motion = CropMotion(tuple(keys))
+        motion.validate(media, new_crop)
+        return motion
+
     def at(self, media, crop, time):
         """Create or replace a keyframe at the nearest source frame."""
         if not isinstance(time, (int, float)) or not math.isfinite(time):
