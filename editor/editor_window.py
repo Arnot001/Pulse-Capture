@@ -183,13 +183,17 @@ class EditorWindow(tk.Toplevel):
         return segments
 
     def build_tools(self):
+        # Keep the legacy internal format names for older edits/tests, but show
+        # a clear horizontal + Shorts choice instead of two identical 9:16 tabs.
+        format_choices = [('Original', 'Original'),
+                          ('16:9 Landscape', '16:9\nHorizontal'),
+                          (SHORTS_FORMAT, 'YouTube\nShorts (9:16)'),
+                          ('1:1 Square', '1:1\nSquare')]
         panel = self.panels['FORMAT']
-        self.add_segments(panel, self.format_choice,
-                          [(v, v.replace(' ', '\n', 1)) for v in FORMATS], self.format_changed)
-        t.label(panel, 'YouTube Shorts exports 1080 × 1920. Use Crop to position the frame.', 9, t.MUTED).pack(anchor='w')
+        self.add_segments(panel, self.format_choice, format_choices, self.format_changed)
+        t.label(panel, 'Horizontal is 16:9; YouTube Shorts exports 1080 × 1920 (9:16).', 9, t.MUTED).pack(anchor='w')
         panel = self.panels['CROP']
-        self.add_segments(panel, self.format_choice,
-                          [(v, v.replace(' ', '\n', 1)) for v in FORMATS], self.format_changed)
+        self.add_segments(panel, self.format_choice, format_choices, self.format_changed)
         self.crop_hint = t.label(panel, 'Choose a shape, then drag the cyan frame to keep what matters.', 9, t.MUTED)
         self.crop_hint.pack(anchor='w', pady=(0, 6))
         actions = tk.Frame(panel, bg=t.PANEL)
@@ -277,14 +281,14 @@ class EditorWindow(tk.Toplevel):
             button.configure(state='normal' if shorts and not self.exporter.busy and
                              not self.closing else 'disabled')
         if shorts:
-            message = (f'{count} crop key(s) · Drag the frame at the playhead to add/update a key. '
-                       'The frame moves smoothly between keys.'
+            message = (f'{count} crop key(s) · Drag inside to move; drag corners to resize all keys. '
+                       'Motion follows the saved positions.'
                        if count else
-                       'Shorts: frame the first moment, ADD KEY, then seek and drag to follow the action.')
+                       'Shorts: drag inside to move, corners to resize, then ADD KEY to animate.')
         elif self.edits.crop:
-            message = 'Drag the cyan frame to reposition your crop, then use VIEW RESULT.'
+            message = 'Drag inside to move. Drag a cyan corner to resize; aspect ratio stays locked.'
         else:
-            message = 'Original uses the full frame. Select YouTube Shorts to animate a vertical crop.'
+            message = 'Original uses the full frame. Select Horizontal or YouTube Shorts to crop.'
         self.crop_hint.configure(text=message)
 
     def crop_changed(self, crop):
@@ -293,10 +297,16 @@ class EditorWindow(tk.Toplevel):
         self.stop_play()
         try:
             if self.edits.crop_motion.keyframes:
-                # Once the first keyframe exists, dragging at a new playhead
-                # position creates the next key automatically.
-                keys = self.edits.crop_motion.at(self.media, crop, self.position)
-                proposed = replace(self.edits, crop_motion=keys)
+                # A resize applies to the whole clip; keyframe centres are
+                # retained, then the current playhead receives its resized crop.
+                if (crop.width, crop.height) != (self.edits.crop.width, self.edits.crop.height):
+                    keys = self.edits.crop_motion.reframed(self.media, self.edits.crop, crop)
+                    keys = keys.at(self.media, crop, self.position)
+                    proposed = replace(self.edits, crop=crop, crop_motion=keys)
+                else:
+                    # Dragging at a new playhead position records the movement.
+                    keys = self.edits.crop_motion.at(self.media, crop, self.position)
+                    proposed = replace(self.edits, crop_motion=keys)
             else:
                 proposed = replace(self.edits, crop=crop)
             proposed.validate(self.media)
@@ -363,7 +373,12 @@ class EditorWindow(tk.Toplevel):
         if not self.media or self.exporter.busy:
             return
         self.stop_play()
-        centered = self.edits.with_format(self.media, self.edits.preset).crop
+        current = self.edits.crop_at(self.media, self.position)
+        if current is None:
+            return
+        centered = current.moved(self.media,
+                                (self.media.width-current.width)/2,
+                                (self.media.height-current.height)/2)
         if self.edits.crop_motion.keyframes:
             motion = self.edits.crop_motion.at(self.media, centered, self.position)
             self.edits = replace(self.edits, crop_motion=motion)
