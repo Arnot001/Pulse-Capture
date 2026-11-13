@@ -41,7 +41,11 @@ class RecorderWASAPITests(unittest.TestCase):
             calls = []
             def validate(probe, path, expect_audio):
                 calls.append((str(path), expect_audio))
-                return {'format': {'duration': 2.0}}
+                return {
+                    'format': {'duration': 2.0},
+                    'streams': [{'codec_type': 'video', 'duration': '2.0'},
+                                {'codec_type': 'audio', 'duration': '2.0'}]
+                }
 
             def merge(ffmpeg, video, wav, destination, duration, mic, offset):
                 self.assertTrue(Path(wav).is_file())
