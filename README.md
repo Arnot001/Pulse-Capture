@@ -6,8 +6,9 @@ no account or cloud.
 
 ## Run
 
-Requires Windows 10/11 and Python 3.11+ with Tcl/Tk. There are no third-party
-Python runtime dependencies. Install FFmpeg and FFprobe from a Windows build
+Requires Windows 10/11 and Python 3.11+ with Tcl/Tk. The base recorder has no
+third-party Python runtime dependencies; system playback recording optionally
+uses PyAudioWPatch. Install FFmpeg and FFprobe from a Windows build
 with `gdigrab`, `dshow`, `libx264`, AAC, `drawtext`, and `gblur` support. Both binaries must be on PATH
 or in this project's `vendor` folder. FFmpeg 9.0.2 was verified on the build PC.
 
@@ -26,8 +27,13 @@ Missing or incompatible binaries produce a visible error and disable recording.
    virtual desktop. Window lists visible windows (including minimized apps labelled “restore first”) and records the
    selected handle. Area opens a desktop overlay: drag a rectangle, or press Esc
    to cancel. Reverse drags and monitors with negative coordinates are supported.
-2. Select microphone/input and system-audio devices when available. Uncheck an
-   input for silent capture. **Refresh devices** re-enumerates connected hardware.
+2. Select microphone/input and system-audio devices when available. For
+   Windows playback recording, first run **setup-audio.ps1** once to install
+   the optional PyAudioWPatch package, restart Pulse Capture and **Refresh devices**.
+   System audio then captures the current default Windows speaker/headphone
+   output (including browser or game sound). Select **ON** for System audio.
+   Microphone capture remains optional; both selected inputs are mixed into
+   the exported stereo AAC track. Uncheck both inputs for silent capture.
 3. Choose Standard (H.264 CRF 23) or High (CRF 18), and 30 or 60 FPS.
 4. Optionally enable the **Pulse watermark** and choose one of four corners. It is
    off by default and is burned directly into the saved MP4 when enabled.
@@ -227,23 +233,43 @@ transitions.
 
 ## Audio availability
 
-FFmpeg enumerates DirectShow audio inputs. Regular inputs appear under
-**Mic / Input**; recognized loopback names such as Stereo Mix, What U Hear,
-or virtual-audio-capturer appear under **System audio**. Device aliases retain
-distinct identities for identically named microphones.
+Pulse supports native **Windows WASAPI loopback** for the current Windows
+default speakers or headphones. It does **not** require Stereo Mix, a virtual
+audio cable, a driver change, or an audio API service. WASAPI capture is entirely
+local. On Windows, install the optional dependency once:
 
-This version does **not** implement a WASAPI loopback bridge. If Windows exposes
-no recognizable DirectShow loopback source, System audio is explicitly disabled.
-Screen capture and microphone recording remain usable. Enable a suitable source
-in Windows if your audio driver supports it, then refresh devices. Virtual cable
-inputs with unknown routing remain regular inputs; Pulse does not claim they
-contain system sound. Localized loopback names may also appear as regular inputs.
+```powershell
+.\setup-audio.ps1
+# Equivalent: python -m pip install -r requirements-audio.txt
+```
 
-Enumeration means a device was reported, not that it is currently usable or
-audible. Device-open failures, permission denial, disconnected hardware, and
-FFmpeg errors are displayed. Both audio sources are mixed to one stereo AAC
-track when selected. Check Windows desktop-app microphone access if opening a
-microphone fails. Pulse does not fabricate device availability or audio content.
+Close/reopen Pulse Capture and select **REFRESH DEVICES**. The System Audio
+dropdown should show **Windows playback · [your default playback device]**.
+Switch System Audio to **ON** before recording. Play a YouTube video or a game
+with clearly audible sound, record about 10 seconds, then stop and play the
+saved MP4 to verify. If the loopback endpoint is unavailable, the UI explains
+why rather than claiming it was found. Protected/DRM audio may not be captured.
+
+Regular microphones use FFmpeg DirectShow. The optional Windows playback
+stream is recorded to a temporary local PCM WAV file and merged into the MP4
+only after capture stops; video is copied without re-encoding. If microphone
+and system audio are selected, they are mixed into one stereo AAC track, not
+yet independently adjustable editor tracks. The initial implementation has
+approximate rather than sample-accurate synchronisation; verify spoken words
+against the picture and report noticeable delays. Long captures require
+extra temporary disk space for PCM audio.
+
+An unavailable or interrupted requested audio input fails visibly rather
+than publishing a video falsely marked as a successful audio recording.
+Temporary PCM files are removed on completion or failure. A recording with
+no requested audio remains silent. A DirectShow Stereo Mix source can still
+be used where installed; unknown virtual inputs are not automatically
+classified as system audio.
+
+FFmpeg enumerates DirectShow audio inputs, while PyAudioWPatch enumerates
+the current default Windows playback loopback. Device enumeration alone
+does not prove audible content was recorded. Check Windows microphone
+privacy permissions if a microphone fails to open.
 
 ## Recording behavior and limits
 
@@ -281,7 +307,9 @@ ui/app.py                     App shell and Screen 1
 ui/region_overlay.py          Interactive Tk area selector
 capture/models.py             UI-independent recording configuration
 capture/ffmpeg_backend.py     Discovery, command construction, validation
-capture/audio_devices.py      DirectShow enumeration and classification
+capture/audio_devices.py      DirectShow and WASAPI enumeration
+capture/wasapi_loopback.py    Optional Windows playback audio recording
+capture/system_audio_mux.py   Validated stereo AAC merge after recording
 capture/recorder.py            Threaded process lifecycle and state events
 capture/filenames.py           Collision-safe reservations and publication
 capture/window_picker.py      Native Windows/DPI helpers and enumeration
