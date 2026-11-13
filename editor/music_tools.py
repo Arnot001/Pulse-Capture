@@ -128,6 +128,9 @@ class MusicTools:
             music.validate()
             w.edits = replace(w.edits, music=music)
             self.refresh()
+            if w.playing and w.audio_player and w.audio_on.get():
+                # Hear soundtrack/volume edits immediately at the playhead.
+                w.audio_player.play(w.position, w.trim, w.cuts, w.edits)
             if music.enabled:
                 if music.track == IMPORT_LABEL:
                     message = f'Music ready · {Path(music.imported).name}'

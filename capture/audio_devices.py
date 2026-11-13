@@ -2,7 +2,7 @@
 from dataclasses import dataclass
 import re
 from .ffmpeg_backend import run
-from .wasapi_loopback import DEVICE_ID, discover_default
+from .wasapi_loopback import DEVICE_ID, discover_default, list_playback_devices
 
 
 @dataclass(frozen=True)
@@ -64,9 +64,13 @@ def parse_devices(log):
 def discover_audio(backend):
     # The Windows playback endpoint is not a DirectShow recording input.
     # Report it separately only when a real WASAPI loopback can be opened.
-    display, wasapi_notice = discover_default()
-    system = ((AudioDevice('Windows playback · ' + display, DEVICE_ID, 'loopback'),)
-              if display else ())
+    try:
+        system = tuple(AudioDevice(name, identifier, 'loopback')
+                       for identifier, name in list_playback_devices())
+        wasapi_notice = ''
+    except Exception as exc:
+        system = ()
+        wasapi_notice = str(exc)
     if backend.audio_supported:
         result = run([backend.ffmpeg, '-hide_banner', '-list_devices', 'true',
                       '-f', 'dshow', '-i', 'dummy'])
@@ -81,4 +85,5 @@ def discover_audio(backend):
         notice = 'Windows playback available via WASAPI; microphone needs FFmpeg DirectShow.'
     else:
         notice = 'Windows playback uses WASAPI; microphone uses DirectShow when selected.'
+    # Existing DirectShow "Stereo Mix" devices remain valid alternatives.
     return AudioInventory(system + devices, notice)

@@ -15,8 +15,9 @@ from tests.test_recorder import FakeProcess
 class FakeCapture:
     instances = []
 
-    def __init__(self, path):
+    def __init__(self, path, identifier=DEVICE_ID):
         self.path = Path(path)
+        self.identifier = identifier
         self.started_at = None
         self.error = None
         self.stopped = False

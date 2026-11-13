@@ -8,7 +8,7 @@ import subprocess
 import sys
 from dataclasses import dataclass
 from .models import CaptureOptions
-from .wasapi_loopback import DEVICE_ID
+from .wasapi_loopback import is_wasapi
 
 
 def process_options():
@@ -65,7 +65,7 @@ def build_command(ffmpeg, options: CaptureOptions, output):
 
     # WASAPI is captured independently to a temporary PCM WAV and combined
     # after FFmpeg finishes. Do not pass it to DirectShow as a fake device.
-    dshow_audio = tuple(name for name in options.audio if name != DEVICE_ID)
+    dshow_audio = tuple(name for name in options.audio if not is_wasapi(name))
     for device in dshow_audio:
         args += ['-thread_queue_size', '512', '-f', 'dshow', '-audio_buffer_size', '50',
                  '-i', f'audio={device}']
