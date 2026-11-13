@@ -73,15 +73,20 @@ ready. Editing opens in a separate window.
    position; Play resumes; Stop returns to trim start. Preview is silent and
    sampled, so it may appear less smooth than the export. Source audio is kept
    in the exported video.
-4. Choose **Format**: **Original**, **16:9 Landscape**, **9:16 Vertical**,
-   **YouTube Shorts (9:16)**, or **1:1 Square**. Shorts uses the same adjustable
-   vertical crop and exports an H.264 MP4 at **1080 × 1920**. Other formats keep
-   source-sized pixels without stretching or upscaling.
-5. Choose **Crop** to see the full source with a cyan crop frame. Drag inside
-   the frame to reposition it; arrow keys fine-tune after clicking it.
-   **Centre** recentres it. **View Result** shows the finished composition.
-   Selecting a different format starts a centred crop; **Original** restores the
-   full frame. Changing the trim does not change the crop.
+4. Choose **Format**: **Original**, **16:9 Horizontal**,
+   **YouTube Shorts (9:16)**, or **1:1 Square**. There is one vertical option,
+   not a duplicated 9:16 preset. Shorts exports an H.264 MP4 at
+   **1080 × 1920**. Other formats keep source-sized pixels without stretching
+   or upscaling.
+5. Choose **Crop** to see the full source with a cyan crop frame. **Drag inside**
+   the frame to reposition it; arrow keys fine-tune after clicking it. **Drag
+   any of the four cyan corner handles** to make the crop larger or smaller.
+   The selected aspect ratio stays locked (16:9, 9:16 or 1:1) and the crop
+   cannot extend beyond the recorded frame. **Centre** recentres without
+   changing your chosen crop size. **View Result** shows the finished
+   composition. Selecting a different format resets to its largest centred
+   crop; **Original** restores the full frame. Changing the trim does not
+   change the crop.
 
    **Move the crop during a YouTube Short:** select **YouTube Shorts (9:16)**,
    seek to the first important moment and drag the cyan crop into place.
@@ -94,7 +99,9 @@ ready. Editing opens in a separate window.
    The original file is never altered. Keyframes stay anchored to source time
    across trim changes and removed sections, and the crop moves appropriately
    when video is joined after cuts. Changing away from YouTube Shorts clears
-   the moving-crop keyframes. For privacy, moving crop and source-anchored blur/
+   the moving-crop keyframes. Resizing the crop changes its dimensions
+   throughout the clip while preserving the source positions tracked by the
+   existing keyframes. For privacy, moving crop and source-anchored blur/
    pixelate masks cannot be combined; keep a static crop or remove masks.
    This is manual keyframing, not automatic subject detection.
 6. Optionally choose **Brand**, switch **On**, and pick a corner and
@@ -141,7 +148,7 @@ ready. Editing opens in a separate window.
     punching gaps into the soundtrack, and Clip Speed does not retime the music.
 13. Choose **Finish** for **Fade In / Fade Out**. Each lasts up to 0.5 output
     seconds, shortened for tiny clips, and also fades source audio.
-    **Pulse Promo** applies a centred Vertical crop, Medium Pulse branding at
+    **Pulse Promo** applies a centred 9:16 crop, Medium Pulse branding at
     bottom right, both fades, 1x speed and Zoom Off. It keeps trim, text,
     privacy and music; you can adjust its settings afterward.
 14. Click **Export video**. Rendering runs in the background with real progress
@@ -161,7 +168,9 @@ with even dimensions. YouTube Shorts then scales its vertical crop to
 can upscale and cannot recover detail missing from a landscape recording;
 source footage recorded vertically gives the best clarity. All other presets
 keep their cropped source resolution without stretching or upscaling.
-Crops move in two-pixel steps.
+Crops move in two-pixel steps and resize in exact ratio-preserving, even-pixel
+increments. Making the selected crop smaller means enlarging fewer original
+pixels at export, so very tight crops can look softer.
 All formats keep the first audio track when present; speed defaults to 1x.
 Exports re-encode to H.264/AAC for cuts between keyframes; cut boundaries are
 limited by the source frame spacing. Processing order is trim, remove cuts and join, crop, even-edge
