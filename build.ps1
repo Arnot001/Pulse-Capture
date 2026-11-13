@@ -16,6 +16,12 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'Tests failed; build stopped.' }
     $buildArgs = @('-m', 'PyInstaller', '--noconfirm', '--clean', '--windowed', '--onedir',
                    '--name', 'Pulse Capture', '--icon', 'assets/branding/pulse.ico')
+    # The optional PyAudioWPatch binary extension is imported lazily.
+    # Collect it explicitly when Windows audio support is installed.
+    & $Python -c 'import pyaudiowpatch' 2>$null | Out-Null
+    if ($LASTEXITCODE -eq 0) {
+        $buildArgs += @('--collect-all', 'pyaudiowpatch')
+    }
     if ($BundleFFmpeg) {
         if (-not $FFmpegDirectory) {
             $FFmpegDirectory = Split-Path (Get-Command ffmpeg -ErrorAction Stop).Source
