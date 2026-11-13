@@ -3,6 +3,7 @@ import os
 import unittest
 from tests import test_editor_ui as fixtures
 from editor.transforms import SHORTS_FORMAT
+from ui import theme as t
 
 
 @unittest.skipUnless(os.environ.get('PULSE_RUN_UI_TESTS') == '1',
@@ -67,6 +68,20 @@ class CropMotionUITests(unittest.TestCase):
         self.next_picture(lambda: w.select_tool('FORMAT'))
         self.assertFalse(w.video.source_view)
         self.assertFalse(self.errors)
+
+    def test_formats_display_one_vertical_and_one_horizontal_option(self):
+        w = self.window
+        for panel_name in ('FORMAT', 'CROP'):
+            panel = w.panels[panel_name]
+            segments = next(child for child in panel.winfo_children()
+                            if isinstance(child, t.Segments))
+            self.assertEqual(len(segments.buttons), 4)
+            values = [value for value, button in segments.buttons]
+            labels = [str(button.cget('text')) for value, button in segments.buttons]
+            self.assertEqual(values, ['Original', '16:9 Landscape',
+                                      SHORTS_FORMAT, '1:1 Square'])
+            self.assertNotIn('9:16 Vertical', values)
+            self.assertIn('16:9\nHorizontal', labels)
 
     def test_switching_format_clears_keyframes_and_disables_controls(self):
         w = self.window
