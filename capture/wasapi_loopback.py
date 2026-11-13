@@ -3,9 +3,39 @@ from pathlib import Path
 import threading
 import time
 import wave
+from array import array
 
 DEVICE_ID = 'wasapi:default'
+DEVICE_PREFIX = 'wasapi:index:'
 FRAMES = 1024
+# PCM16 peak below roughly -54 dBFS is effectively silent for ordinary
+# game/browser recordings. An explicit warning is more useful than an
+# incorrectly labelled successful recording.
+MIN_AUDIBLE_PEAK = 65
+
+
+def is_wasapi(identifier):
+    return identifier == DEVICE_ID or (
+        isinstance(identifier, str) and identifier.startswith(DEVICE_PREFIX)
+        and identifier[len(DEVICE_PREFIX):].isdigit()
+    )
+
+
+def list_playback_devices():
+    """Discover Windows render-loopback endpoints, not microphone inputs."""
+    audio = _library()
+    manager = audio.PyAudio()
+    try:
+        result = []
+        default = _device(manager)
+        result.append((DEVICE_ID, 'Windows default · ' + str(default['name'])))
+        for info in manager.get_loopback_device_info_generator():
+            if info.get('isLoopbackDevice') and int(info.get('maxInputChannels', 0)) > 0:
+                identity = DEVICE_PREFIX + str(int(info['index']))
+                result.append((identity, str(info['name'])))
+        return tuple(result)
+    finally:
+        manager.terminate()
 
 
 def _library():
@@ -19,14 +49,20 @@ def _library():
         ) from exc
 
 
-def _device(manager):
-    try:
-        info = manager.get_default_wasapi_loopback()
-    except (OSError, LookupError) as exc:
-        raise RuntimeError(
-            'No WASAPI loopback for your current Windows playback device. '
-            'Select working speakers/headphones and refresh devices.'
-        ) from exc
+def _device(manager, identifier=DEVICE_ID):
+    if identifier != DEVICE_ID:
+        if not is_wasapi(identifier):
+            raise ValueError('Unknown playback device. Refresh audio devices.')
+        index = int(identifier[len(DEVICE_PREFIX):])
+        info = manager.get_device_info_by_index(index)
+    else:
+        try:
+            info = manager.get_default_wasapi_loopback()
+        except (OSError, LookupError) as exc:
+            raise RuntimeError(
+                'No WASAPI loopback for your current Windows playback device. '
+                'Select working speakers/headphones and refresh devices.'
+            ) from exc
     if not info or not info.get('isLoopbackDevice') or int(info.get('maxInputChannels', 0)) < 1:
         raise RuntimeError('Windows did not report a valid system-audio loopback.')
     return info
@@ -47,8 +83,11 @@ def discover_default():
 
 class SystemAudioCapture:
     """A temporary local WAV is merged into the final MP4 on successful stop."""
-    def __init__(self, path):
+    def __init__(self, path, identifier=DEVICE_ID):
+        if not is_wasapi(identifier):
+            raise ValueError('Invalid Windows playback device identifier.')
         self.path = Path(path)
+        self.identifier = identifier
         self._stop = threading.Event()
         self._thread = None
         self._stream = None
@@ -57,6 +96,7 @@ class SystemAudioCapture:
         self.error = None
         self.started_at = None
         self.frames = 0
+        self.peak = 0
 
     def start(self):
         if self._thread:
@@ -64,7 +104,7 @@ class SystemAudioCapture:
         audio = _library()
         self._manager = audio.PyAudio()
         try:
-            info = _device(self._manager)
+            info = _device(self._manager, self.identifier)
             channels = min(2, int(info['maxInputChannels']))
             rate = round(float(info['defaultSampleRate']))
             self._stream = self._manager.open(
@@ -96,6 +136,12 @@ class SystemAudioCapture:
                         raise RuntimeError('Windows audio stopped supplying samples.')
                     output.writeframesraw(samples)
                     self.frames += len(samples) // (channels * 2)
+                    # Signal diagnostic guards against the common failure:
+                    # an audio track exists but its samples are near-silent.
+                    levels = array('h')
+                    levels.frombytes(samples)
+                    if levels:
+                        self.peak = max(self.peak, max(abs(v) for v in levels))
         except Exception as exc:
             if not self._stop.is_set():
                 self.error = f'Windows audio recording failed: {exc}'
@@ -128,3 +174,8 @@ class SystemAudioCapture:
             raise RuntimeError(self.error)
         if self.frames < 1024 or not self.path.is_file():
             raise RuntimeError('Windows audio produced no usable samples.')
+        if self.peak < MIN_AUDIBLE_PEAK:
+            raise RuntimeError(
+                'Windows playback was recorded but the signal was nearly silent. '
+                'Choose the speaker/headphone device playing your video, then try again.'
+            )
