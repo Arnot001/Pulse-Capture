@@ -18,8 +18,8 @@ try {
                    '--name', 'Pulse Capture', '--icon', 'assets/branding/pulse.ico')
     # The optional PyAudioWPatch binary extension is imported lazily.
     # Collect it explicitly when Windows audio support is installed.
-    & $Python -c 'import pyaudiowpatch' 2>$null | Out-Null
-    if ($LASTEXITCODE -eq 0) {
+    $wasapiInstalled = & $Python -c 'import importlib.util; print(int(importlib.util.find_spec("pyaudiowpatch") is not None))'
+    if ($LASTEXITCODE -eq 0 -and $wasapiInstalled -eq '1') {
         $buildArgs += @('--collect-all', 'pyaudiowpatch')
     }
     if ($BundleFFmpeg) {
