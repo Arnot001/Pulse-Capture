@@ -83,11 +83,11 @@ class WASAPITests(unittest.TestCase):
         cmd = build_command('ffmpeg', options, 'recording.mp4')
         self.assertIn('audio=Microphone Array', cmd)
         self.assertNotIn('audio=' + DEVICE_ID, cmd)
-        self.assertEqual(cmd.count('-f'), 2)  # gdigrab, dshow
+        self.assertEqual(cmd.count('-f'), 3)  # gdigrab, dshow, output mp4
         self.assertIn('1:a:0', cmd)
         system_only = build_command('ffmpeg', CaptureOptions(audio=(DEVICE_ID,)), 'out.mp4')
         self.assertIn('-an', system_only)
-        self.assertNotIn('-f', system_only[-5:])
+        self.assertNotIn('audio=' + DEVICE_ID, system_only)
 
     def test_mux_uses_copy_video_and_mixes_two_sources(self):
         cmd = merge_command('ffmpeg', 'base.mp4', 'system.wav', 'merged.mp4',
