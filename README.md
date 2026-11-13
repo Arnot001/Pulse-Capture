@@ -30,7 +30,7 @@ Missing or incompatible binaries produce a visible error and disable recording.
 2. Select microphone/input and system-audio devices when available. For
    Windows playback recording, first run **setup-audio.ps1** once to install
    the optional PyAudioWPatch package, restart Pulse Capture and **Refresh devices**.
-   System audio then captures the current default Windows speaker/headphone
+   System audio then captures the currently selected Windows speaker/headphone
    output (including browser or game sound). Select **ON** for System audio.
    Microphone capture remains optional; both selected inputs are mixed into
    the exported stereo AAC track. Uncheck both inputs for silent capture.
@@ -76,9 +76,12 @@ ready. Editing opens in a separate window.
    Times accept seconds (`12.5`), minutes (`1:23.500`), or hours (`1:02:03`).
    **Reset** restores the full clip. Invalid ranges display a clear explanation.
 3. Use **Play / Pause / Stop** to preview the selection. Pause freezes the
-   position; Play resumes; Stop returns to trim start. Preview is silent and
-   sampled, so it may appear less smooth than the export. Source audio is kept
-   in the exported video.
+   position; Play resumes; Stop returns to trim start. **SOUND ON** previews
+   source audio and your selected soundtrack through Windows speakers/headphones.
+   **MUTED** silences just editor playback, not export. Preview audio follows
+   Trim, Cut, clip speed and the Music volume settings. Requires optional
+   PyAudioWPatch (install via setup-audio.ps1); video frames remain sampled,
+   and fades/sync may differ slightly from the full export.
 4. Choose **Format**: **Original**, **16:9 Horizontal**,
    **YouTube Shorts (9:16)**, or **1:1 Square**. There is one vertical option,
    not a duplicated 9:16 preset. Shorts exports an H.264 MP4 at
@@ -149,7 +152,8 @@ ready. Editing opens in a separate window.
     original-audio volume independently, choose Loop and soundtrack Fade In /
     Fade Out, or import your own MP3/WAV. Built-in tracks are generated locally
     the first time they are needed and contain no third-party audio samples.
-    The editor preview remains silent; the soundtrack is mixed into export.
+    The editor can preview audio audibly when optional audio support is installed;
+    the soundtrack is also mixed into export.
     Music runs in final output time: CUT removes video/source-audio time without
     punching gaps into the soundtrack, and Clip Speed does not retime the music.
 13. Choose **Finish** for **Fade In / Fade Out**. Each lasts up to 0.5 output
@@ -184,7 +188,7 @@ padding, privacy blur/pixelation, zoom, text, Pulse branding, speed, then fades.
 Source audio follows CUT joins and clip speed. When Music is enabled, source
 volume and soundtrack volume are applied independently and mixed to AAC; silent
 source videos gain an audio track from the soundtrack. Preview and export share
-the same visual filters; preview audio remains intentionally silent.
+the same visual filters; Quick Edit preview audio can be enabled with the optional audio dependency.
 
 Brand sizes are proportional to the shorter output edge (12%, 18%, 25%) with a
 small inset and subtle opacity. The recorder and editor share the existing
@@ -244,8 +248,9 @@ local. On Windows, install the optional dependency once:
 ```
 
 Close/reopen Pulse Capture and select **REFRESH DEVICES**. The System Audio
-dropdown should show **Windows playback · [your default playback device]**.
-Switch System Audio to **ON** before recording. Play a YouTube video or a game
+dropdown should list **Windows default** and individual WASAPI playback
+endpoints. Choose the speakers/headphones actually playing the video or game
+and switch System Audio to **ON** before recording. Play a YouTube video or a game
 with clearly audible sound, record about 10 seconds, then stop and play the
 saved MP4 to verify. If the loopback endpoint is unavailable, the UI explains
 why rather than claiming it was found. Protected/DRM audio may not be captured.
@@ -259,8 +264,12 @@ approximate rather than sample-accurate synchronisation; verify spoken words
 against the picture and report noticeable delays. Long captures require
 extra temporary disk space for PCM audio.
 
-An unavailable or interrupted requested audio input fails visibly rather
-than publishing a video falsely marked as a successful audio recording.
+A near-silent WASAPI recording is now flagged as an error (rather than
+publishing an apparently successful AAC track with no audible content).
+If intentional silence is being recorded, turn System Audio off. Selecting
+an individual playback device instead of the default can resolve wrong-output
+captures. An unavailable or interrupted requested audio input fails visibly
+rather than publishing a video falsely marked as a successful audio recording.
 Temporary PCM files are removed on completion or failure. A recording with
 no requested audio remains silent. A DirectShow Stereo Mix source can still
 be used where installed; unknown virtual inputs are not automatically
