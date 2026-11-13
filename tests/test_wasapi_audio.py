@@ -17,7 +17,7 @@ from capture.system_audio_mux import merge_command
 class FakeStream:
     def read(self, size, exception_on_overflow=False):
         time.sleep(.003)
-        return b'\\x00\\x10' * (size * 2)
+        return (4096).to_bytes(2, 'little', signed=True) * (size * 2)
 
     def stop_stream(self):
         pass
