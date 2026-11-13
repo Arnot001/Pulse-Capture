@@ -51,6 +51,10 @@ class CropPreview(tk.Canvas):
                      (left, y1, x1, y2), (x2, y1, left+w, y2)):
             self.create_rectangle(*rect, fill='#060a10', stipple='gray50', outline='', tags='crop')
         self.create_rectangle(x1, y1, x2, y2, outline=t.CYAN, width=3, tags='crop')
+        # Corner handles resize the crop while maintaining its selected ratio.
+        for x, y in ((x1, y1), (x2, y1), (x1, y2), (x2, y2)):
+            self.create_rectangle(x-6, y-6, x+6, y+6, fill=t.CYAN,
+                                  outline=t.TEXT, width=1, tags=('crop', 'crop-handle'))
         for fraction in (1/3, 2/3):
             x, y = x1+(x2-x1)*fraction, y1+(y2-y1)*fraction
             self.create_line(x, y1, x, y2, fill=t.TEXT, dash=(3, 5), tags='crop')
@@ -60,17 +64,27 @@ class CropPreview(tk.Canvas):
         if not (self.enabled and self.active and self.source_view and self.crop and self.bounds()):
             return
         x1, y1, x2, y2 = self.crop_bounds()
+        for corner, x, y in (('top-left', x1, y1), ('top-right', x2, y1),
+                             ('bottom-left', x1, y2), ('bottom-right', x2, y2)):
+            if abs(event.x-x) <= 12 and abs(event.y-y) <= 12:
+                self.focus_set()
+                self.drag = ('resize', event.x, event.y, self.crop, corner)
+                return
         if x1 <= event.x <= x2 and y1 <= event.y <= y2:
             self.focus_set()
-            self.drag = (event.x, event.y, self.crop)
+            self.drag = ('move', event.x, event.y, self.crop, None)
 
     def move(self, event):
         if not self.drag or not self.enabled or not self.active or not self.source_view:
             return
-        x, y, crop = self.drag
+        mode, x, y, crop, corner = self.drag
         _, _, w, h = self.bounds()
-        self.on_crop(crop.moved(self.media, crop.x+(event.x-x)*self.media.width/w,
-                               crop.y+(event.y-y)*self.media.height/h))
+        delta_x = (event.x-x)*self.media.width/w
+        delta_y = (event.y-y)*self.media.height/h
+        if mode == 'resize':
+            self.on_crop(crop.resized(self.media, corner, delta_x, delta_y))
+        else:
+            self.on_crop(crop.moved(self.media, crop.x+delta_x, crop.y+delta_y))
 
     def nudge(self, dx, dy):
         if self.enabled and self.active and self.source_view and self.crop:
