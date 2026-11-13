@@ -544,6 +544,10 @@ class EditorWindow(tk.Toplevel):
 
     def toggle_audio(self):
         self.audio_toggle.configure(text='SOUND ON' if self.audio_on.get() else 'MUTED')
+        if self.playing and self.trim:
+            self.position = self.cuts.source_from_elapsed(self._elapsed_kept(), self.trim)
+            self.play_anchor_elapsed = self.cuts.source_elapsed(self.position, self.trim)
+            self.play_started = time.monotonic()
         if self.audio_player:
             self.audio_player.stop()
             if self.playing and self.audio_on.get():
@@ -574,9 +578,8 @@ class EditorWindow(tk.Toplevel):
     def pause_preview(self):
         if not self.playing:
             return
-        paused = self.position
+        # stop_play samples the audio clock before stopping the output device.
         self.stop_play()
-        self.position = paused
         self.update_timeline()
         self.request_frame()
 
@@ -591,14 +594,25 @@ class EditorWindow(tk.Toplevel):
         else:
             self.play_preview()
 
+    def _elapsed_kept(self):
+        """Map the master audio clock onto the cut-aware source timeline."""
+        delta = time.monotonic() - self.play_started
+        if (self.audio_on.get() and self.audio_player and
+                (self.media.has_audio or self.edits.music.enabled)):
+            audio_delta = self.audio_player.elapsed()
+            if audio_delta is None:
+                # Wait for device/decoder startup: video must not get ahead.
+                return self.play_anchor_elapsed
+            delta = audio_delta
+        return self.play_anchor_elapsed + max(0.0, delta) * self.edits.speed
+
     def stop_play(self, reset=False):
-        if self.audio_player:
-            self.audio_player.stop()
         if self.playing and self.trim:
             total = self.cuts.kept_duration(self.trim)
-            elapsed = min(total, self.play_anchor_elapsed +
-                          (time.monotonic() - self.play_started) * self.edits.speed)
+            elapsed = min(total, self._elapsed_kept())
             self.position = self.cuts.source_from_elapsed(elapsed, self.trim)
+        if self.audio_player:
+            self.audio_player.stop()
         self.playing = False
         if self._play_id:
             self.after_cancel(self._play_id)
@@ -614,8 +628,7 @@ class EditorWindow(tk.Toplevel):
         self._play_id = None
         if self.playing:
             total = self.cuts.kept_duration(self.trim)
-            elapsed = min(total, self.play_anchor_elapsed +
-                          (time.monotonic() - self.play_started) * self.edits.speed)
+            elapsed = min(total, self._elapsed_kept())
             self.position = self.cuts.source_from_elapsed(elapsed, self.trim)
             self.update_timeline()
             if elapsed >= total - 1e-9:

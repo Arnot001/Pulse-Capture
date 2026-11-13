@@ -133,3 +133,31 @@ def validate_output(ffprobe, path, expect_audio=False):
     if expect_audio and not any(s.get('codec_type') == 'audio' for s in streams):
         raise RuntimeError('The requested audio track is missing.')
     return info
+
+
+def validate_audio_coverage(info, *, tolerance_seconds=0.6):
+    """Reject MP4s with an audio track that ends far before the video.
+
+    Track presence alone did not catch a real 30.93s video with 18.77s audio.
+    A small tolerance allows AAC encoder padding and normal rounding.
+    """
+    if not isinstance(info, dict):
+        raise RuntimeError('Could not inspect audio/video timing after export.')
+    streams = info.get('streams') or ()
+    video = next((s for s in streams if s.get('codec_type') == 'video'), None)
+    audio = next((s for s in streams if s.get('codec_type') == 'audio'), None)
+    if not video or not audio:
+        raise RuntimeError('The completed video is missing its required audio or video track.')
+    try:
+        video_length = float(video.get('duration') or info['format']['duration'])
+        audio_length = float(audio['duration'])
+    except (ValueError, TypeError, KeyError) as exc:
+        raise RuntimeError('Could not verify audio/video stream durations.') from exc
+    if video_length <= 0 or audio_length <= 0:
+        raise RuntimeError('One of the saved audio/video streams has zero duration.')
+    allowed = max(tolerance_seconds, video_length * .03)
+    if audio_length < video_length - allowed:
+        raise RuntimeError(
+            f'Audio ended at {audio_length:.2f}s but video runs {video_length:.2f}s. '
+            'The recording/export is out of sync; the source file was preserved.'
+        )

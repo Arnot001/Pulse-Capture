@@ -7,6 +7,7 @@ No audio is stored or uploaded. Video preview remains the existing frame worker.
 from queue import Queue
 import subprocess
 import threading
+import time
 
 from capture.ffmpeg_backend import process_options
 from .cuts import CutPlan
@@ -95,6 +96,9 @@ class AudioPlayback:
         self._closed = False
         self._cancel = threading.Event()
         self._lock = threading.RLock()
+        self._audio_clock_start = None
+        self._audio_failed = False
+        self._play_requested_at = None
 
     def play(self, position, trim, cuts, edits):
         self.stop()
@@ -105,14 +109,32 @@ class AudioPlayback:
                 return
             cancel = threading.Event()
             self._cancel = cancel
+            self._audio_clock_start = None
+            self._audio_failed = False
+            self._play_requested_at = time.monotonic()
             self._worker = threading.Thread(
                 target=self._run, args=(cancel, position, trim, cuts, edits),
                 daemon=True, name='Pulse edit audio preview')
             self._worker.start()
 
+    def elapsed(self):
+        """Seconds on the playback audio clock; None during device startup.
+
+        The video playhead must not race ahead while FFmpeg/PyAudio opens.
+        Playback is timed by the first PCM block handed to the speaker.
+        """
+        with self._lock:
+            if self._audio_clock_start is not None:
+                return max(0.0, time.monotonic() - self._audio_clock_start)
+            if self._audio_failed and self._play_requested_at is not None:
+                # Video preview should remain usable without audio hardware.
+                return max(0.0, time.monotonic() - self._play_requested_at)
+            return None
+
     def stop(self):
         with self._lock:
             self._cancel.set()
+            self._audio_clock_start = None
             process = self._process
             stream = self._stream
             if process and process.poll() is None:
@@ -161,6 +183,9 @@ class AudioPlayback:
                 data = process.stdout.read(BLOCK_BYTES)
                 if not data:
                     break
+                with self._lock:
+                    if self._audio_clock_start is None:
+                        self._audio_clock_start = time.monotonic()
                 stream.write(data)
             if not cancel.is_set():
                 code = process.wait(timeout=2)
@@ -169,6 +194,8 @@ class AudioPlayback:
                                        'Check source or music file.')
         except Exception as exc:
             if not cancel.is_set():
+                with self._lock:
+                    self._audio_failed = True
                 self.errors.put(str(exc))
         finally:
             if process:
