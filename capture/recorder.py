@@ -10,7 +10,7 @@ import threading
 import time
 from .ffmpeg_backend import build_command, process_options, validate_output
 from .filenames import reserve
-from .wasapi_loopback import DEVICE_ID, SystemAudioCapture
+from .wasapi_loopback import is_wasapi, SystemAudioCapture
 from .system_audio_mux import merge_audio
 
 
@@ -108,9 +108,11 @@ class Recorder:
         failure, saved = None, None
         try:
             reservation = reserve(folder)
-            if DEVICE_ID in options.audio:
+            system_device = next((identifier for identifier in options.audio
+                                  if is_wasapi(identifier)), None)
+            if system_device:
                 wav = reservation.partial.with_suffix('.wasapi.wav')
-                system_audio = SystemAudioCapture(wav)
+                system_audio = SystemAudioCapture(wav, system_device)
                 system_audio.start()
             command = build_command(self.backend.ffmpeg, options, reservation.partial)
             video_launch = time.monotonic()
@@ -149,7 +151,7 @@ class Recorder:
                 raise RuntimeError('Recording ended unexpectedly. The partial file was retained.')
             if not self._frames.is_set():
                 raise RuntimeError('Recording stopped before any video frames were captured.')
-            has_microphone = bool(tuple(name for name in options.audio if name != DEVICE_ID))
+            has_microphone = bool(tuple(name for name in options.audio if not is_wasapi(name)))
             info = self._validator(self.backend.ffprobe, reservation.partial, has_microphone)
             if system_audio:
                 system_audio.stop()
