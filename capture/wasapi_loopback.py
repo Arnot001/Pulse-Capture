@@ -101,6 +101,8 @@ class SystemAudioCapture:
         self.started_at = None
         self.frames = 0
         self.peak = 0
+        self.stop_at = None
+        self.rate = None
 
     def start(self):
         if self._thread:
@@ -111,6 +113,7 @@ class SystemAudioCapture:
             info = _device(self._manager, self.identifier)
             channels = min(2, int(info['maxInputChannels']))
             rate = round(float(info['defaultSampleRate']))
+            self.rate = rate
             self._stream = self._manager.open(
                 format=audio.paInt16, channels=channels, rate=rate, input=True,
                 input_device_index=int(info['index']), frames_per_buffer=FRAMES)
@@ -134,18 +137,46 @@ class SystemAudioCapture:
                 output.setframerate(rate)
                 self.started_at = time.monotonic()
                 self._started.set()
+                bytes_per_frame = channels * 2
+
+                def pad_frames(count):
+                    # Avoid materializing a large silence buffer for a long gap.
+                    while count > 0:
+                        step = min(count, rate)
+                        output.writeframesraw(bytes(step * bytes_per_frame))
+                        self.frames += step
+                        count -= step
+
                 while not self._stop.is_set():
                     samples = self._stream.read(FRAMES, exception_on_overflow=False)
+                    received = time.monotonic()
                     if not samples:
                         raise RuntimeError('Windows audio stopped supplying samples.')
+                    if len(samples) % bytes_per_frame:
+                        raise RuntimeError('WASAPI returned misaligned PCM samples.')
+                    block_frames = len(samples) // bytes_per_frame
+                    # WASAPI loopback can temporarily block while an application
+                    # is silent. A plain WAV erases those silent intervals and
+                    # plays later audio too early. Restore missing wall-clock
+                    # time *before* the next block. Ignore normal device jitter.
+                    expected_prior = max(0, round(
+                        (received - self.started_at) * rate) - block_frames)
+                    missing = expected_prior - self.frames
+                    if missing > max(0.12 * rate, 2 * FRAMES):
+                        pad_frames(missing)
                     output.writeframesraw(samples)
-                    self.frames += len(samples) // (channels * 2)
-                    # Signal diagnostic guards against the common failure:
-                    # an audio track exists but its samples are near-silent.
+                    self.frames += block_frames
+                    # Audio-track presence does not prove an audible signal.
                     levels = array('h')
                     levels.frombytes(samples)
                     if levels:
                         self.peak = max(self.peak, max(abs(v) for v in levels))
+                # Also retain silence at the end, when a paused loopback device
+                # delivered no final samples before the user pressed Stop.
+                if self.stop_at is not None:
+                    trailing = round((self.stop_at - self.started_at) * rate) - self.frames
+                    if trailing > 0:
+                        pad_frames(trailing)
         except Exception as exc:
             if not self._stop.is_set():
                 self.error = f'Windows audio recording failed: {exc}'
@@ -153,6 +184,8 @@ class SystemAudioCapture:
             self._started.set()
 
     def stop(self):
+        if self.stop_at is None:
+            self.stop_at = time.monotonic()
         self._stop.set()
         if self._stream:
             try:
@@ -172,6 +205,10 @@ class SystemAudioCapture:
         if self._manager:
             self._manager.terminate()
             self._manager = None
+
+    @property
+    def duration(self):
+        return self.frames / self.rate if self.rate else 0.0
 
     def validate(self):
         if self.error:
