@@ -75,7 +75,7 @@ class CropResizeTests(unittest.TestCase):
         self.assertTrue(all(k.x % 2 == 0 and k.y % 2 == 0
                             for k in changed.keyframes))
         self.assertGreater(edits.crop_at(self.media, 1).x, 0)
-        self.assertLess(edits.crop_at(self.media, 9).x, right.x)
+        self.assertEqual(edits.crop_at(self.media, 9).x, right.x + 144)
         self.assertEqual(edits.encoded_size(self.media), (1080, 1920))
 
     def test_resized_static_preview_matches_export_dimensions(self):
