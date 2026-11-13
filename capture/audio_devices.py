@@ -2,6 +2,7 @@
 from dataclasses import dataclass
 import re
 from .ffmpeg_backend import run
+from .wasapi_loopback import DEVICE_ID, discover_default
 
 
 @dataclass(frozen=True)
@@ -61,10 +62,23 @@ def parse_devices(log):
 
 
 def discover_audio(backend):
-    if not backend.audio_supported:
-        return AudioInventory(notice='This FFmpeg build has no DirectShow audio support. Video capture is available.')
-    result = run([backend.ffmpeg, '-hide_banner', '-list_devices', 'true', '-f', 'dshow', '-i', 'dummy'])
-    # Device enumeration normally exits nonzero because dummy is not an input.
-    devices = parse_devices(result.stderr)
-    notice = '' if devices else 'No audio inputs were reported. Check Windows microphone permissions and reconnect devices.'
-    return AudioInventory(devices, notice)
+    # The Windows playback endpoint is not a DirectShow recording input.
+    # Report it separately only when a real WASAPI loopback can be opened.
+    display, wasapi_notice = discover_default()
+    system = ((AudioDevice('Windows playback · ' + display, DEVICE_ID, 'loopback'),)
+              if display else ())
+    if backend.audio_supported:
+        result = run([backend.ffmpeg, '-hide_banner', '-list_devices', 'true',
+                      '-f', 'dshow', '-i', 'dummy'])
+        devices = parse_devices(result.stderr)
+    else:
+        devices = ()
+    if not devices and not system:
+        notice = wasapi_notice or 'No audio devices found. Reconnect audio hardware.'
+    elif not system:
+        notice = 'Windows playback unavailable: ' + wasapi_notice
+    elif not backend.audio_supported:
+        notice = 'Windows playback available via WASAPI; microphone needs FFmpeg DirectShow.'
+    else:
+        notice = 'Windows playback uses WASAPI; microphone uses DirectShow when selected.'
+    return AudioInventory(system + devices, notice)

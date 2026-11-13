@@ -322,9 +322,9 @@ class CaptureApp(tk.Tk):
                 combo.set('Unavailable')
         notice = inventory.notice
         if not inventory.loopbacks:
-            notice = notice or 'System audio unavailable · No loopback source detected. Screen + mic works.'
+            notice = notice or 'System audio unavailable · No Windows loopback detected. Screen + mic works.'
         else:
-            notice = 'Detected inputs are checked when recording starts. System audio depends on device routing.'
+            notice = notice or 'System audio records your active Windows speakers/headphones.'
         self.audio_notice.configure(text=notice)
         self.refresh_button.configure(state='normal')
         self.record_button.configure(state='normal' if backend else 'disabled')

@@ -3,12 +3,15 @@ from collections import deque
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
+import os
 from queue import Queue
 import subprocess
 import threading
 import time
 from .ffmpeg_backend import build_command, process_options, validate_output
 from .filenames import reserve
+from .wasapi_loopback import DEVICE_ID, SystemAudioCapture
+from .system_audio_mux import merge_audio
 
 
 class State(str, Enum):
@@ -99,12 +102,18 @@ class Recorder:
                 process.wait(timeout=5)
 
     def _record(self, options, folder):
-        reservation, process = None, None
+        reservation, process, system_audio = None, None, None
+        merged = None
         readers, log = [], deque(maxlen=60)
         failure, saved = None, None
         try:
             reservation = reserve(folder)
+            if DEVICE_ID in options.audio:
+                wav = reservation.partial.with_suffix('.wasapi.wav')
+                system_audio = SystemAudioCapture(wav)
+                system_audio.start()
             command = build_command(self.backend.ffmpeg, options, reservation.partial)
+            video_launch = time.monotonic()
             process = self._popen(command, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                                   stderr=subprocess.PIPE, text=True, encoding='utf-8',
                                   errors='replace', bufsize=1, **process_options())
@@ -116,12 +125,16 @@ class Recorder:
             deadline = time.monotonic() + self.startup_timeout
             stop_deadline = None
             while process.poll() is None:
+                if system_audio and system_audio.error and not self._stop.is_set():
+                    raise RuntimeError(system_audio.error)
                 if self._stop.is_set() and stop_deadline is None:
                     try:
                         process.stdin.write('q\n')
                         process.stdin.flush()
                     except (BrokenPipeError, OSError):
                         pass
+                    if system_audio:
+                        system_audio.stop()
                     stop_deadline = time.monotonic() + self.stop_timeout
                 if stop_deadline and time.monotonic() > stop_deadline:
                     raise RuntimeError('FFmpeg did not finish in time. The partial recording was retained.')
@@ -136,12 +149,39 @@ class Recorder:
                 raise RuntimeError('Recording ended unexpectedly. The partial file was retained.')
             if not self._frames.is_set():
                 raise RuntimeError('Recording stopped before any video frames were captured.')
-            self._validator(self.backend.ffprobe, reservation.partial, bool(options.audio))
+            has_microphone = bool(tuple(name for name in options.audio if name != DEVICE_ID))
+            info = self._validator(self.backend.ffprobe, reservation.partial, has_microphone)
+            if system_audio:
+                system_audio.stop()
+                system_audio.validate()
+                if not info:
+                    raise RuntimeError('Cannot determine video duration before merging system audio.')
+                duration = float(info['format']['duration'])
+                merged = reservation.partial.with_suffix('.mixed.mp4')
+                offset = video_launch - system_audio.started_at
+                merge_audio(self.backend.ffmpeg, reservation.partial, system_audio.path,
+                            merged, duration, has_microphone, offset)
+                self._validator(self.backend.ffprobe, merged, True)
+                os.replace(merged, reservation.partial)
             reservation.publish()
             saved = reservation.final
         except Exception as exc:
             failure = str(exc)
         finally:
+            if system_audio:
+                try:
+                    system_audio.stop()
+                except Exception as exc:
+                    failure = failure or f'Could not stop Windows audio: {exc}'
+                try:
+                    system_audio.path.unlink(missing_ok=True)
+                except OSError as exc:
+                    failure = failure or f'Could not remove temporary Windows audio: {exc}'
+            if merged:
+                try:
+                    merged.unlink(missing_ok=True)
+                except OSError:
+                    pass
             if process:
                 try:
                     self._terminate(process)

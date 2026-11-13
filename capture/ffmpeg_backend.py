@@ -8,6 +8,7 @@ import subprocess
 import sys
 from dataclasses import dataclass
 from .models import CaptureOptions
+from .wasapi_loopback import DEVICE_ID
 
 
 def process_options():
@@ -62,13 +63,16 @@ def build_command(ffmpeg, options: CaptureOptions, output):
     target = f'hwnd={options.hwnd}' if options.mode == 'window' else 'desktop'
     args += ['-i', target]
 
-    for device in options.audio:
+    # WASAPI is captured independently to a temporary PCM WAV and combined
+    # after FFmpeg finishes. Do not pass it to DirectShow as a fake device.
+    dshow_audio = tuple(name for name in options.audio if name != DEVICE_ID)
+    for device in dshow_audio:
         args += ['-thread_queue_size', '512', '-f', 'dshow', '-audio_buffer_size', '50',
                  '-i', f'audio={device}']
 
     watermark_index = None
     if options.watermark:
-        watermark_index = 1 + len(options.audio)
+        watermark_index = 1 + len(dshow_audio)
         args += ['-loop', '1', '-framerate', str(options.fps), '-i', str(options.watermark_path)]
 
     filters = []
@@ -85,7 +89,7 @@ def build_command(ffmpeg, options: CaptureOptions, output):
             '[branded]pad=ceil(iw/2)*2:ceil(ih/2)*2[v]',
         ]
 
-    if len(options.audio) == 2:
+    if len(dshow_audio) == 2:
         filters += [
             '[1:a]aresample=async=1:first_pts=0[a1]',
             '[2:a]aresample=async=1:first_pts=0[a2]',
@@ -96,9 +100,9 @@ def build_command(ffmpeg, options: CaptureOptions, output):
         args += ['-filter_complex', ';'.join(filters)]
 
     args += ['-map', '[v]' if options.watermark else '0:v:0']
-    if len(options.audio) == 2:
+    if len(dshow_audio) == 2:
         args += ['-map', '[a]']
-    elif options.audio:
+    elif dshow_audio:
         args += ['-map', '1:a:0', '-af', 'aresample=async=1:first_pts=0']
     else:
         args += ['-an']
@@ -109,7 +113,7 @@ def build_command(ffmpeg, options: CaptureOptions, output):
     args += ['-c:v', 'libx264',
              '-preset', 'veryfast', '-crf', '23' if options.quality == 'Standard' else '18',
              '-pix_fmt', 'yuv420p', '-r', str(options.fps)]
-    if options.audio:
+    if dshow_audio:
         args += ['-c:a', 'aac', '-b:a', '192k', '-ar', '48000', '-ac', '2']
     return args + ['-movflags', '+faststart', '-f', 'mp4', str(output)]
 
