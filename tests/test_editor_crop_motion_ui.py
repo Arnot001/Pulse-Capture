@@ -43,6 +43,31 @@ class CropMotionUITests(unittest.TestCase):
         self.assertEqual(w.edits.crop_motion.keyframes, ())
         self.assertEqual(w.edits.crop, w.video.crop)
 
+    def test_corner_handle_resizes_and_keeps_saved_crop_keys(self):
+        w = self.window
+        w.format_choice.set(SHORTS_FORMAT)
+        self.next_picture(w.format_changed)
+        self.next_picture(lambda: w.select_tool('CROP'))
+        w.add_crop_keyframe()
+        first = w.edits.crop
+        self.next_picture(lambda: w.seek(1))
+        second = first.moved(w.media, first.x + 30, first.y)
+        w.crop_changed(second)
+        self.assertEqual(len(w.edits.crop_motion.keyframes), 2)
+        x1, y1, _, _ = w.video.crop_bounds()
+        w.video.event_generate('<Button-1>', x=round(x1), y=round(y1))
+        self.assertEqual(w.video.drag[0], 'resize')
+        w.video.event_generate('<B1-Motion>', x=round(x1+35), y=round(y1+35))
+        w.video.event_generate('<ButtonRelease-1>')
+        self.root.update()
+        self.assertLess(w.edits.crop.width, first.width)
+        self.assertEqual(len(w.edits.crop_motion.keyframes), 2)
+        self.assertEqual(w.video.crop.width, w.edits.crop.width)
+        self.assertEqual(w.edits.crop.width*16, w.edits.crop.height*9)
+        self.next_picture(lambda: w.select_tool('FORMAT'))
+        self.assertFalse(w.video.source_view)
+        self.assertFalse(self.errors)
+
     def test_switching_format_clears_keyframes_and_disables_controls(self):
         w = self.window
         w.format_choice.set(SHORTS_FORMAT)
