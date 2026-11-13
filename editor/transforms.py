@@ -44,6 +44,42 @@ class Crop:
         return replace(self, x=clamp(x, media.width-self.width),
                        y=clamp(y, media.height-self.height))
 
+    def resized(self, media, corner, x, y):
+        """Resize from one corner, locking ratio and anchoring the opposite corner.
+
+        The smaller of width/height drives the minimum useful crop size. Mouse
+        movement in the dominant axis decides the size, so horizontal-only and
+        vertical-only drags both work. Chroma-safe even source pixels throughout.
+        """
+        self.validate(media)
+        if corner not in ('nw', 'ne', 'sw', 'se'):
+            raise ValueError('Choose a valid crop resize handle.')
+        if not all(isinstance(v, (int, float)) and math.isfinite(v) for v in (x, y)):
+            raise ValueError('Choose a valid crop size.')
+        gcd = math.gcd(self.width, self.height)
+        unit_w, unit_h = self.width // gcd * 2, self.height // gcd * 2
+        west, north = 'w' in corner, 'n' in corner
+        anchor_x = self.x + (self.width if west else 0)
+        anchor_y = self.y + (self.height if north else 0)
+        raw_w = (anchor_x-x) if west else (x-anchor_x)
+        raw_h = (anchor_y-y) if north else (y-anchor_y)
+        current = self.width / unit_w
+        # Choose the dimension changed most, not the larger physical dimension.
+        by_width, by_height = raw_w / unit_w, raw_h / unit_h
+        requested = by_width if abs(by_width-current) >= abs(by_height-current) else by_height
+        limit_w = anchor_x if west else media.width-anchor_x
+        limit_h = anchor_y if north else media.height-anchor_y
+        maximum = min(limit_w // unit_w, limit_h // unit_h)
+        if maximum < 1:
+            raise ValueError('The crop cannot fit inside your video.')
+        minimum = min(maximum, max(1, math.ceil(64 / min(unit_w, unit_h))))
+        units = min(maximum, max(minimum, round(requested)))
+        width, height = units*unit_w, units*unit_h
+        candidate = Crop(anchor_x-width if west else anchor_x,
+                         anchor_y-height if north else anchor_y, width, height)
+        candidate.validate(media)
+        return candidate
+
 
 def centered_crop(media, preset):
     media.validate()
@@ -122,8 +158,10 @@ class EditOptions:
             if not isinstance(self.crop, Crop):
                 raise ValueError('Choose a crop for this format.')
             self.crop.validate(media)
-            if (self.crop.width, self.crop.height) != (expected.width, expected.height):
-                raise ValueError('The crop does not match the selected format.')
+            ratio = FORMATS[self.preset]
+            if (self.crop.width * ratio[1] != self.crop.height * ratio[0] or
+                    self.crop.width > expected.width or self.crop.height > expected.height):
+                raise ValueError('Keep the crop inside the frame and at the selected aspect ratio.')
 
         if self.text.enabled:
             width, height = (self.crop.width, self.crop.height) if self.crop else (media.width, media.height)
