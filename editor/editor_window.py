@@ -15,6 +15,7 @@ from .export_job import ExportJob
 from .media import probe_media
 from .models import TrimRange, format_time, parse_time
 from .preview import Preview
+from .audio_preview import AudioPlayback
 from .timeline import Timeline
 from .privacy_preview import PrivacyPreview
 from .overlay_tools import OverlayTools
@@ -31,7 +32,7 @@ class EditorWindow(tk.Toplevel):
         self.geometry(f'980x{min(850, self.winfo_screenheight()-100)}')
         self.minsize(760, 700)
         self.path, self.backend, self.on_close = Path(path), backend, on_close
-        self.media = self.trim = self.preview = None
+        self.media = self.trim = self.preview = self.audio_player = None
         self.cuts = CutPlan()
         self.exporter = ExportJob(backend)
         self.metadata = Queue()
@@ -53,6 +54,7 @@ class EditorWindow(tk.Toplevel):
         self.panels = {}
         self.brand_segments = []
         self.crop_key_buttons = []
+        self.audio_on = tk.BooleanVar(value=True)
         self.start_text, self.end_text = tk.StringVar(value='0:00.000'), tk.StringVar(value='0:00.000')
         self._build()
         self.protocol('WM_DELETE_WINDOW', self.close)
@@ -171,8 +173,14 @@ class EditorWindow(tk.Toplevel):
         self.stop_button.pack(side='left', padx=(8, 0))
         self.clock = t.label(transport, '0:00.000 / 0:00.000', 11, t.TEXT)
         self.clock.pack(side='left', padx=16)
-        self.preview_note = t.label(transport, 'Silent preview · Export keeps audio', 9, t.MUTED)
+        self.preview_note = t.label(transport, 'Preparing audio preview…', 9, t.MUTED)
         self.preview_note.pack(side='right')
+        self.audio_toggle = tk.Checkbutton(
+            transport, text='SOUND ON', variable=self.audio_on,
+            command=self.toggle_audio, bg=t.BG, fg=t.CYAN,
+            selectcolor=t.CONTROL, activebackground=t.BG,
+            activeforeground=t.TEXT, disabledforeground=t.MUTED, bd=0)
+        self.audio_toggle.pack(side='right', padx=(0, 10))
         self.timeline = Timeline(preview_area, self.seek, self.drag_trim)
         self.timeline.grid(row=2, column=0, sticky='ew')
 
@@ -534,6 +542,13 @@ class EditorWindow(tk.Toplevel):
         self.pause_button.configure(state='normal' if ready and self.playing else 'disabled')
         self.stop_button.configure(state='normal' if ready else 'disabled')
 
+    def toggle_audio(self):
+        self.audio_toggle.configure(text='SOUND ON' if self.audio_on.get() else 'MUTED')
+        if self.audio_player:
+            self.audio_player.stop()
+            if self.playing and self.audio_on.get():
+                self.audio_player.play(self.position, self.trim, self.cuts, self.edits)
+
     def play_preview(self):
         if self.playing or not self.commit_entries():
             return
@@ -547,6 +562,8 @@ class EditorWindow(tk.Toplevel):
             if self.position >= segments[-1].end - 1e-9:
                 self.position = segments[0].start
         self.playing = True
+        if self.audio_on.get() and self.audio_player:
+            self.audio_player.play(self.position, self.trim, self.cuts, self.edits)
         self.play_anchor = self.position
         self.play_anchor_elapsed = self.cuts.source_elapsed(self.position, self.trim)
         self.play_started = time.monotonic()
@@ -575,6 +592,8 @@ class EditorWindow(tk.Toplevel):
             self.play_preview()
 
     def stop_play(self, reset=False):
+        if self.audio_player:
+            self.audio_player.stop()
         if self.playing and self.trim:
             total = self.cuts.kept_duration(self.trim)
             elapsed = min(total, self.play_anchor_elapsed +
@@ -601,6 +620,8 @@ class EditorWindow(tk.Toplevel):
             self.update_timeline()
             if elapsed >= total - 1e-9:
                 self.playing = False
+                if self.audio_player:
+                    self.audio_player.stop()
                 self._update_transport_controls()
             self.request_frame()
 
@@ -617,6 +638,9 @@ class EditorWindow(tk.Toplevel):
             self.note.configure(text=str(exc), fg=t.RED)
 
     def set_busy(self, busy):
+        if busy and self.audio_player:
+            self.audio_player.stop()
+        self.audio_toggle.configure(state='disabled' if busy else 'normal')
         for widget in self.controls:
             widget.configure(state='disabled' if busy else 'normal')
         self.timeline.enabled = not busy
@@ -670,14 +694,24 @@ class EditorWindow(tk.Toplevel):
             elif not self.closing:
                 self.media = media
                 self.video.media = media
-                self.preview_note.configure(text='Silent preview · Audio kept on export' if media.has_audio
-                                            else 'Silent preview · No audio in source')
+                self.preview_note.configure(
+                    text='Original + music audio preview' if media.has_audio
+                    else 'No source audio · Add music to hear a soundtrack')
                 self.preview = Preview(self.backend.ffmpeg, media)
+                self.audio_player = AudioPlayback(self.backend.ffmpeg, media)
                 self.update_trim(TrimRange(0, media.duration))
                 self.set_busy(False)
                 self.request_frame()
         except Empty:
             pass
+        if self.audio_player:
+            try:
+                while True:
+                    problem = self.audio_player.errors.get_nowait()
+                    self.preview_note.configure(text='Audio preview unavailable', fg=t.RED)
+                    self.note.configure(text=problem, fg=t.RED)
+            except Empty:
+                pass
         if self.preview:
             try:
                 frame = self.preview.frames.get_nowait()
@@ -724,6 +758,8 @@ class EditorWindow(tk.Toplevel):
         self.stop_play()
         if self.preview:
             self.preview.close()
+        if self.audio_player:
+            self.audio_player.close()
         if self.exporter.busy:
             self.cancel_export()
         else:
@@ -735,6 +771,8 @@ class EditorWindow(tk.Toplevel):
         self.closed = True
         if self.preview:
             self.preview.close()
+        if self.audio_player:
+            self.audio_player.close()
         for timer in (self._seek_id, self._poll_id, self._play_id):
             if timer:
                 self.after_cancel(timer)
