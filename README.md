@@ -235,6 +235,37 @@ privacy detection, face detection, subtitles, transcription, animation
 keyframes, zoom out, live soundtrack audition, ducking, music automation and
 transitions.
 
+## Audio sync investigation (13 November 2026)
+
+An actual edited MP4 had 30.93 seconds of video but only 18.77 seconds of
+audio. Both tracks started at timestamp zero, so this was not just a constant
+offset. That export must **not** be considered synchronized.
+
+This investigation branch preserves gaps when a Windows WASAPI loopback read
+blocks during silence, uses the first FFmpeg frame progress to estimate video
+start rather than relying on process launch, and refuses to publish output
+when an audio stream ends much earlier than the video. These are guarded
+changes pending a real Windows recording verification; a correct audio track
+duration does not alone prove sounds align with the corresponding picture.
+
+Quick Edit uses the audio playback clock to schedule its frame preview when
+SOUND ON is selected; rendering high-resolution still frames can nevertheless
+be slow. Test a known, sharp visible/audible event and compare the **untouched
+recording** with the edited export before merging.
+
+### Desktop shortcut for the audio test
+
+Use a stable sibling Git worktree, such as
+`Pulse-Capture-source\Pulse-Capture-AudioSync-Test`. From that folder run
+`.\setup-audio-test-shortcut.ps1` to create **Pulse Capture (Audio Sync Test)**
+on the desktop. This does not change any existing shortcut. The test window
+title reads `PULSE // CAPTURE — AUDIO SYNC TEST`.
+
+Once the new build is verified, running
+`.\setup-audio-test-shortcut.ps1 -ReplaceExisting` backs up the existing
+`Pulse Capture.lnk` and points it at this stable worktree. The backup shortcut
+remains on the desktop for immediate rollback.
+
 ## Audio availability
 
 Pulse supports native **Windows WASAPI loopback** for the current Windows
