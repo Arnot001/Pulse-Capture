@@ -60,7 +60,7 @@ class CropTests(unittest.TestCase):
                       EditOptions(crop=Crop(0, 0, 100, 100)),
                       EditOptions('1:1 Square', Crop(-2, 0, 1080, 1080)),
                       EditOptions('1:1 Square', Crop(0, 0, 1081, 1080)),
-                      EditOptions('1:1 Square', Crop(0, 0, 500, 500)),
+                      EditOptions('1:1 Square', Crop(0, 0, 500, 502)),
                       EditOptions('1:1 Square', Crop(1000, 0, 1080, 1080)),
                       EditOptions('1:1 Square', Crop(0.0, 0, 1080, 1080)),
                       EditOptions(branding=Branding(True, 'middle')),
