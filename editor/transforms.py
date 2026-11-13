@@ -4,12 +4,17 @@ import math
 from pathlib import Path
 from .privacy import Privacy, output_mask, privacy_filters, mask_intervals
 from .music import Music
+from .crop_motion import CropMotion, motion_crop_filter
 from .models import TrimRange
 from .text_overlay import TextOverlay, text_geometry, text_filter
 from .polish import Fade, Zoom, fade_seconds, output_duration, validate_speed, zoom_filter
 
+SHORTS_FORMAT = 'YouTube Shorts (9:16)'
+SHORTS_RESOLUTION = (1080, 1920)
+SHORTS_SCALE = 'scale=1080:1920:flags=lanczos,setsar=1'
 FORMATS = {'Original': None, '16:9 Landscape': (16, 9),
-           '9:16 Vertical': (9, 16), '1:1 Square': (1, 1)}
+           '9:16 Vertical': (9, 16), SHORTS_FORMAT: (9, 16),
+           '1:1 Square': (1, 1)}
 CORNERS = ('Top left', 'Top right', 'Bottom left', 'Bottom right')
 SIZES = {'Small': .12, 'Medium': .18, 'Large': .25}
 
@@ -39,11 +44,47 @@ class Crop:
         return replace(self, x=clamp(x, media.width-self.width),
                        y=clamp(y, media.height-self.height))
 
+    def resized(self, media, corner, x, y):
+        """Resize from one corner, locking ratio and anchoring the opposite corner.
+
+        The smaller of width/height drives the minimum useful crop size. Mouse
+        movement in the dominant axis decides the size, so horizontal-only and
+        vertical-only drags both work. Chroma-safe even source pixels throughout.
+        """
+        self.validate(media)
+        if corner not in ('nw', 'ne', 'sw', 'se'):
+            raise ValueError('Choose a valid crop resize handle.')
+        if not all(isinstance(v, (int, float)) and math.isfinite(v) for v in (x, y)):
+            raise ValueError('Choose a valid crop size.')
+        gcd = math.gcd(self.width, self.height)
+        unit_w, unit_h = self.width // gcd * 2, self.height // gcd * 2
+        west, north = 'w' in corner, 'n' in corner
+        anchor_x = self.x + (self.width if west else 0)
+        anchor_y = self.y + (self.height if north else 0)
+        raw_w = (anchor_x-x) if west else (x-anchor_x)
+        raw_h = (anchor_y-y) if north else (y-anchor_y)
+        current = self.width / unit_w
+        # Choose the dimension changed most, not the larger physical dimension.
+        by_width, by_height = raw_w / unit_w, raw_h / unit_h
+        requested = by_width if abs(by_width-current) >= abs(by_height-current) else by_height
+        limit_w = anchor_x if west else media.width-anchor_x
+        limit_h = anchor_y if north else media.height-anchor_y
+        maximum = min(limit_w // unit_w, limit_h // unit_h)
+        if maximum < 1:
+            raise ValueError('The crop cannot fit inside your video.')
+        minimum = min(maximum, max(1, math.ceil(64 / min(unit_w, unit_h))))
+        units = min(maximum, max(minimum, round(requested)))
+        width, height = units*unit_w, units*unit_h
+        candidate = Crop(anchor_x-width if west else anchor_x,
+                         anchor_y-height if north else anchor_y, width, height)
+        candidate.validate(media)
+        return candidate
+
 
 def centered_crop(media, preset):
     media.validate()
     if preset not in FORMATS:
-        raise ValueError('Choose Original, Landscape, Vertical, or Square.')
+        raise ValueError('Choose Original, Landscape, Vertical, YouTube Shorts, or Square.')
     ratio = FORMATS[preset]
     if ratio is None:
         return None
@@ -89,6 +130,7 @@ class EditOptions:
     zoom: Zoom = Zoom()
     speed: float = 1.0
     fade: Fade = Fade()
+    crop_motion: CropMotion = CropMotion()
 
     def validate(self, media):
         expected = centered_crop(media, self.preset)
@@ -99,6 +141,16 @@ class EditOptions:
         self.zoom.validate()
         validate_speed(self.speed)
         self.fade.validate()
+        if not isinstance(self.crop_motion, CropMotion):
+            raise ValueError('Choose valid crop keyframes.')
+        if self.crop_motion.keyframes:
+            if self.preset != SHORTS_FORMAT:
+                raise ValueError('Crop keyframes are available in YouTube Shorts format.')
+            # A source-anchored privacy mask could conceal the wrong area once
+            # the crop moves. Reject rather than silently expose source pixels.
+            if self.privacy.masks:
+                raise ValueError('Clear Privacy masks before using moving crop keyframes.')
+            self.crop_motion.validate(media, self.crop)
         if expected is None:
             if self.crop is not None:
                 raise ValueError('Original must keep the full frame.')
@@ -106,15 +158,22 @@ class EditOptions:
             if not isinstance(self.crop, Crop):
                 raise ValueError('Choose a crop for this format.')
             self.crop.validate(media)
-            if (self.crop.width, self.crop.height) != (expected.width, expected.height):
-                raise ValueError('The crop does not match the selected format.')
+            ratio = FORMATS[self.preset]
+            if (self.crop.width * ratio[1] != self.crop.height * ratio[0] or
+                    self.crop.width > expected.width or self.crop.height > expected.height):
+                raise ValueError('Keep the crop inside the frame and at the selected aspect ratio.')
 
         if self.text.enabled:
             width, height = (self.crop.width, self.crop.height) if self.crop else (media.width, media.height)
             text_geometry(width, height, self.text)
 
     def with_format(self, media, preset):
-        return replace(self, preset=preset, crop=centered_crop(media, preset))
+        return replace(self, preset=preset, crop=centered_crop(media, preset), crop_motion=CropMotion())
+
+    def crop_at(self, media, source_time):
+        """Preview and source-coordinate editing share one sampled crop."""
+        self.validate(media)
+        return self.crop_motion.sample(media, self.crop, source_time)
 
     def output_size(self, media):
         self.validate(media)
@@ -122,20 +181,34 @@ class EditOptions:
             return self.crop.width, self.crop.height
         return (media.width+1)//2*2, (media.height+1)//2*2
 
+    def encoded_size(self, media):
+        """Final encoded dimensions; output_size is the pre-resize editing canvas."""
+        self.validate(media)
+        return SHORTS_RESOLUTION if self.preset == SHORTS_FORMAT else self.output_size(media)
+
     def output_duration(self, source_duration):
         return output_duration(source_duration, self.speed)
 
 
-def video_filters(media, edits, asset=None, text_resources=None, duration=None, preview_time=None, input_label='0:v:0', trim=None, cuts=None, source_position=None):
+def video_filters(media, edits, asset=None, text_resources=None, duration=None, preview_time=None, input_label='0:v:0', trim=None, cuts=None, source_position=None, skip_crop=False):
     """Shared visual order; preview_time samples output time without retiming a still."""
     edits.validate(media)
+    trim = trim or TrimRange(0, media.duration)
     filters = []
-    if edits.crop:
+    if edits.crop and not skip_crop:
         c = edits.crop
-        filters.append(f'crop={c.width}:{c.height}:{c.x}:{c.y}')
+        if edits.crop_motion.keyframes:
+            if source_position is None:
+                filters.append(motion_crop_filter(c, edits.crop_motion, time_offset=trim.start))
+            else:
+                # A still preview is sought at absolute source time; rendering
+                # the sampled crop is identical to the export on this frame.
+                sampled = edits.crop_motion.sample(media, c, source_position)
+                filters.append(f'crop={c.width}:{c.height}:{sampled.x}:{sampled.y}')
+        else:
+            filters.append(f'crop={c.width}:{c.height}:{c.x}:{c.y}')
     filters.append('pad=ceil(iw/2)*2:ceil(ih/2)*2')
     base = ','.join(filters)
-    trim = trim or TrimRange(0, media.duration)
     privacy = []
     for mask in edits.privacy.masks:
         rect = output_mask(mask.rect, media, edits.crop)
@@ -153,7 +226,8 @@ def video_filters(media, edits, asset=None, text_resources=None, duration=None, 
         edits.speed != 1.0 or edits.fade.fade_in or edits.fade.fade_out
     )
     if not (privacy or edits.zoom.enabled or edits.text.enabled or edits.branding.enabled or timed):
-        return base, False
+        # A fixed Shorts export size is optional; other formats retain source pixels.
+        return (base + ',' + SHORTS_SCALE if edits.preset == SHORTS_FORMAT else base), False
 
     graph = [f'[{input_label}]{base}[base]']
     current = 'base'
@@ -200,6 +274,12 @@ def video_filters(media, edits, asset=None, text_resources=None, duration=None, 
         if fades:
             graph.append(f'[{current}]{",".join(fades)}[faded]')
             current = 'faded'
+
+    # Resize only after privacy, zoom, text and watermark so their source-space
+    # positions and sizes stay correct when a landscape clip becomes a Short.
+    if edits.preset == SHORTS_FORMAT:
+        graph.append(f'[{current}]{SHORTS_SCALE}[shorts]')
+        current = 'shorts'
 
     tail = 'setpts=PTS-STARTPTS' if sample_fade else 'null'
     graph.append(f'[{current}]{tail}[v]')

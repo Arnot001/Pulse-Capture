@@ -164,7 +164,9 @@ class PrivacyTools:
             masks.append(mask)
         else:
             masks[self.selected] = mask
-        return replace(edits,privacy=Privacy(tuple(masks)))
+        # Draft masks must not render over a moving crop with static positions.
+        # The save action gives an explicit explanation instead.
+        return edits if edits.crop_motion.keyframes else replace(edits,privacy=Privacy(tuple(masks)))
 
     def save_mask(self, update):
         if not self.ready() or (update and self.selected is None):
@@ -180,7 +182,13 @@ class PrivacyTools:
         else:
             masks.append(mask)
             self.selected = len(masks)-1
-        self.window.edits = replace(self.window.edits,privacy=Privacy(tuple(masks)))
+        proposed = replace(self.window.edits,privacy=Privacy(tuple(masks)))
+        try:
+            proposed.validate(self.window.media)
+        except ValueError as exc:
+            self.window.note.configure(text=str(exc),fg=t.RED)
+            return
+        self.window.edits = proposed
         self.window.note.configure(text='Privacy mask updated.' if update else 'Privacy mask added. Choose NEW for another box.',fg=t.MUTED)
         self.draft_changed()
 

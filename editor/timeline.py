@@ -12,6 +12,7 @@ class Timeline(tk.Canvas):
         self.cuts = None
         self.privacy = None
         self.cut_draft = (None, None)
+        self.crop_keyframes = ()
         self.position = 0
         self.enabled = True
         self.drag = None
@@ -48,6 +49,14 @@ class Timeline(tk.Canvas):
             for mask in self.privacy.masks:
                 self.create_line(self.x(mask.start), 46, self.x(mask.end), 46,
                                  fill=t.CYAN, width=2, tags='privacy-range')
+
+        # Cyan diamonds mark source-time crop keys; click their position
+        # to seek, then reposition the cyan crop frame.
+        for key in self.crop_keyframes:
+            if self.trim.start <= key.time <= self.trim.end:
+                mark = self.x(key.time)
+                self.create_polygon(mark, 41, mark+5, 46, mark, 51, mark-5, 46,
+                                    fill=t.CYAN, outline=t.BG, tags='crop-keyframe')
 
         draft_start, draft_end = self.cut_draft
         for value, label in ((draft_start, 'S'), (draft_end, 'E')):

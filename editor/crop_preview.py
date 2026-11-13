@@ -55,22 +55,38 @@ class CropPreview(tk.Canvas):
             x, y = x1+(x2-x1)*fraction, y1+(y2-y1)*fraction
             self.create_line(x, y1, x, y2, fill=t.TEXT, dash=(3, 5), tags='crop')
             self.create_line(x1, y, x2, y, fill=t.TEXT, dash=(3, 5), tags='crop')
+        # Solid handles are edit guides only; they do not appear in the export.
+        for x, y in ((x1, y1), (x2, y1), (x1, y2), (x2, y2)):
+            self.create_rectangle(x-5, y-5, x+5, y+5, fill=t.CYAN,
+                                  outline=t.BG, width=1, tags='crop')
 
     def begin(self, event):
         if not (self.enabled and self.active and self.source_view and self.crop and self.bounds()):
             return
         x1, y1, x2, y2 = self.crop_bounds()
+        for corner, x, y in (('nw', x1, y1), ('ne', x2, y1),
+                              ('sw', x1, y2), ('se', x2, y2)):
+            if abs(event.x-x) <= 11 and abs(event.y-y) <= 11:
+                self.focus_set()
+                self.drag = ('resize', corner, self.crop)
+                return
         if x1 <= event.x <= x2 and y1 <= event.y <= y2:
             self.focus_set()
-            self.drag = (event.x, event.y, self.crop)
+            self.drag = ('move', (event.x, event.y), self.crop)
 
     def move(self, event):
         if not self.drag or not self.enabled or not self.active or not self.source_view:
             return
-        x, y, crop = self.drag
-        _, _, w, h = self.bounds()
-        self.on_crop(crop.moved(self.media, crop.x+(event.x-x)*self.media.width/w,
-                               crop.y+(event.y-y)*self.media.height/h))
+        mode, anchor, crop = self.drag
+        left, top, w, h = self.bounds()
+        if mode == 'resize':
+            source_x = (event.x-left)*self.media.width/w
+            source_y = (event.y-top)*self.media.height/h
+            self.on_crop(crop.resized(self.media, anchor, source_x, source_y))
+        else:
+            x, y = anchor
+            self.on_crop(crop.moved(self.media, crop.x+(event.x-x)*self.media.width/w,
+                                   crop.y+(event.y-y)*self.media.height/h))
 
     def nudge(self, dx, dy):
         if self.enabled and self.active and self.source_view and self.crop:

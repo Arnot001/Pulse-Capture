@@ -9,6 +9,7 @@ import tkinter as tk
 from tkinter import filedialog, ttk
 from ui import theme as t
 from .cuts import CutPlan
+from .crop_motion import CropMotion
 from .cut_tools import CutTools
 from .export_job import ExportJob
 from .media import probe_media
@@ -19,7 +20,7 @@ from .privacy_preview import PrivacyPreview
 from .overlay_tools import OverlayTools
 from .music_tools import MusicTools
 from .polish_tools import PolishTools
-from .transforms import EditOptions, Branding, FORMATS, CORNERS, SIZES
+from .transforms import EditOptions, Branding, FORMATS, CORNERS, SIZES, SHORTS_FORMAT
 
 
 class EditorWindow(tk.Toplevel):
@@ -51,6 +52,7 @@ class EditorWindow(tk.Toplevel):
         self.brand_size = tk.StringVar(value='Small')
         self.panels = {}
         self.brand_segments = []
+        self.crop_key_buttons = []
         self.start_text, self.end_text = tk.StringVar(value='0:00.000'), tk.StringVar(value='0:00.000')
         self._build()
         self.protocol('WM_DELETE_WINDOW', self.close)
@@ -181,22 +183,36 @@ class EditorWindow(tk.Toplevel):
         return segments
 
     def build_tools(self):
+        # Keep the legacy internal format names for older edits/tests, but show
+        # a clear horizontal + Shorts choice instead of two identical 9:16 tabs.
+        format_choices = [('Original', 'Original'),
+                          ('16:9 Landscape', '16:9\nHorizontal'),
+                          (SHORTS_FORMAT, 'YouTube\nShorts (9:16)'),
+                          ('1:1 Square', '1:1\nSquare')]
         panel = self.panels['FORMAT']
-        self.add_segments(panel, self.format_choice,
-                          [(v, v.replace(' ', '\n', 1)) for v in FORMATS], self.format_changed)
-        t.label(panel, 'Choose your shape. Use Crop to move the frame.', 9, t.MUTED).pack(anchor='w')
+        self.add_segments(panel, self.format_choice, format_choices, self.format_changed)
+        t.label(panel, 'Horizontal is 16:9; YouTube Shorts exports 1080 × 1920 (9:16).', 9, t.MUTED).pack(anchor='w')
         panel = self.panels['CROP']
-        self.add_segments(panel, self.format_choice,
-                          [(v, v.replace(' ', '\n', 1)) for v in FORMATS], self.format_changed)
+        self.add_segments(panel, self.format_choice, format_choices, self.format_changed)
         self.crop_hint = t.label(panel, 'Choose a shape, then drag the cyan frame to keep what matters.', 9, t.MUTED)
         self.crop_hint.pack(anchor='w', pady=(0, 6))
         actions = tk.Frame(panel, bg=t.PANEL)
         actions.pack(fill='x')
-        for label, command in [('CENTRE CROP', self.center_crop),
-                               ('VIEW CROPPED RESULT', lambda: self.select_tool('FORMAT'))]:
+        # Reuse the current crop tool rather than adding another editor tab.
+        for label, command, keyed in (
+                ('CENTRE', self.center_crop, False),
+                ('ADD KEY', self.add_crop_keyframe, True),
+                ('◀ KEY', lambda: self.jump_crop_keyframe(-1), True),
+                ('KEY ▶', lambda: self.jump_crop_keyframe(1), True),
+                ('DELETE KEY', self.delete_crop_keyframe, True),
+                ('CLEAR KEYS', self.clear_crop_keyframes, True),
+                ('VIEW RESULT', lambda: self.select_tool('FORMAT'), False)):
             button = t.button(actions, label, command)
-            button.pack(side='left', padx=(0, 8))
+            button.configure(font=(t.FONT, -9, 'bold'), padx=6, pady=4)
+            button.pack(side='left', padx=(0, 6))
             self.controls.append(button)
+            if keyed:
+                self.crop_key_buttons.append(button)
         panel = self.panels['BRAND']
         row = tk.Frame(panel, bg=t.PANEL)
         row.pack(fill='x')
@@ -241,27 +257,135 @@ class EditorWindow(tk.Toplevel):
             self.video.crop = self.edits.crop
             self.overlay_tools.refresh()
             self.polish_tools.refresh()
-            self.crop_hint.configure(
-                text='Drag the cyan frame to reposition it. The full source stays visible while cropping; use VIEW CROPPED RESULT to check the final frame.'
-                if self.edits.crop else 'Original keeps the full frame. Choose Landscape, Vertical, or Square above to crop.'
-            )
             self.stop_play()
+            self.refresh_crop_guide()
+            self.update_timeline()
             self.request_frame()
         except ValueError as exc:
             self.format_choice.set(self.edits.preset)
             self.note.configure(text=str(exc), fg=t.RED)
 
+    def refresh_crop_guide(self):
+        if not self.media or not hasattr(self, 'video'):
+            return
+        try:
+            self.video.crop = self.edits.crop_at(self.media, self.position)
+        except ValueError as exc:
+            # An invalid draft is reported during editing; never crash Tk.
+            self.video.crop = self.edits.crop
+            self.note.configure(text=str(exc), fg=t.RED)
+        self.video.draw_overlay()
+        count = len(self.edits.crop_motion.keyframes)
+        shorts = self.edits.preset == SHORTS_FORMAT
+        for button in self.crop_key_buttons:
+            button.configure(state='normal' if shorts and not self.exporter.busy and
+                             not self.closing else 'disabled')
+        if shorts:
+            message = (f'{count} crop key(s) · Drag inside to move; drag corners to resize all keys. '
+                       'Motion follows the saved positions.'
+                       if count else
+                       'Shorts: drag inside to move, corners to resize, then ADD KEY to animate.')
+        elif self.edits.crop:
+            message = 'Drag inside to move. Drag a cyan corner to resize; aspect ratio stays locked.'
+        else:
+            message = 'Original uses the full frame. Select Horizontal or YouTube Shorts to crop.'
+        self.crop_hint.configure(text=message)
+
     def crop_changed(self, crop):
         if self.exporter.busy or self.closing:
             return
-        self.edits = replace(self.edits, crop=crop)
-        self.video.crop = crop
-        self.overlay_tools.refresh()
-        self.polish_tools.refresh()
+        self.stop_play()
+        try:
+            if self.edits.crop_motion.keyframes:
+                # A resize applies to the whole clip; keyframe centres are
+                # retained, then the current playhead receives its resized crop.
+                if (crop.width, crop.height) != (self.edits.crop.width, self.edits.crop.height):
+                    keys = self.edits.crop_motion.reframed(self.media, self.edits.crop, crop)
+                    keys = keys.at(self.media, crop, self.position)
+                    proposed = replace(self.edits, crop=crop, crop_motion=keys)
+                else:
+                    # Dragging at a new playhead position records the movement.
+                    keys = self.edits.crop_motion.at(self.media, crop, self.position)
+                    proposed = replace(self.edits, crop_motion=keys)
+            else:
+                proposed = replace(self.edits, crop=crop)
+            proposed.validate(self.media)
+            self.edits = proposed
+            self.refresh_crop_guide()
+            self.update_timeline()
+            self.overlay_tools.refresh()
+            self.polish_tools.refresh()
+        except ValueError as exc:
+            self.note.configure(text=str(exc), fg=t.RED)
+
+    def add_crop_keyframe(self):
+        if not self.media or self.edits.preset != SHORTS_FORMAT or self.exporter.busy:
+            return
+        self.stop_play()
+        try:
+            crop = self.edits.crop_at(self.media, self.position)
+            motion = self.edits.crop_motion.at(self.media, crop, self.position)
+            proposed = replace(self.edits, crop_motion=motion)
+            proposed.validate(self.media)
+            self.edits = proposed
+            self.refresh_crop_guide()
+            self.update_timeline()
+            self.note.configure(text=f'Crop keyframe saved at {format_time(self.position)}.', fg=t.CYAN)
+            self.request_frame()
+        except ValueError as exc:
+            self.note.configure(text=str(exc), fg=t.RED)
+
+    def jump_crop_keyframe(self, direction):
+        if not self.media or not self.edits.crop_motion.keyframes or self.exporter.busy:
+            return
+        margin = .50001 / self.media.fps
+        keys = self.edits.crop_motion.keyframes
+        key = next((k for k in (keys if direction > 0 else reversed(keys))
+                    if (k.time > self.position+margin if direction > 0
+                        else k.time < self.position-margin)), None)
+        if key:
+            self.seek(key.time)
+
+    def delete_crop_keyframe(self):
+        if not self.media or self.exporter.busy or self.edits.preset != SHORTS_FORMAT:
+            return
+        self.stop_play()
+        try:
+            motion = self.edits.crop_motion.remove_at(self.media, self.edits.crop, self.position)
+            self.edits = replace(self.edits, crop_motion=motion)
+            self.refresh_crop_guide()
+            self.update_timeline()
+            self.request_frame()
+        except ValueError as exc:
+            self.note.configure(text=str(exc), fg=t.RED)
+
+    def clear_crop_keyframes(self):
+        if not self.media or self.exporter.busy or self.edits.preset != SHORTS_FORMAT:
+            return
+        self.stop_play()
+        crop = self.edits.crop_at(self.media, self.position)
+        self.edits = replace(self.edits, crop=crop, crop_motion=CropMotion())
+        self.refresh_crop_guide()
+        self.update_timeline()
+        self.request_frame()
 
     def center_crop(self):
-        self.edits = self.edits.with_format(self.media, self.edits.preset)
-        self.video.crop = self.edits.crop
+        if not self.media or self.exporter.busy:
+            return
+        self.stop_play()
+        current = self.edits.crop_at(self.media, self.position)
+        if current is None:
+            return
+        centered = current.moved(self.media,
+                                (self.media.width-current.width)/2,
+                                (self.media.height-current.height)/2)
+        if self.edits.crop_motion.keyframes:
+            motion = self.edits.crop_motion.at(self.media, centered, self.position)
+            self.edits = replace(self.edits, crop_motion=motion)
+        else:
+            self.edits = replace(self.edits, crop=centered)
+        self.refresh_crop_guide()
+        self.update_timeline()
         self.overlay_tools.refresh()
         self.polish_tools.refresh()
         self.request_frame()
@@ -291,6 +415,7 @@ class EditorWindow(tk.Toplevel):
     def request_frame(self):
         if not self.preview or self.closed or self.closing:
             return
+        self.refresh_crop_guide()
         self.token += 1
         token = self.token
         if self._seek_id:
@@ -321,6 +446,8 @@ class EditorWindow(tk.Toplevel):
     def update_timeline(self):
         self.timeline.media, self.timeline.trim, self.timeline.position = self.media, self.trim, self.position
         self.timeline.cuts = self.cuts
+        self.timeline.crop_keyframes = (self.edits.crop_motion.keyframes
+                                        if self.tool.get() == 'CROP' else ())
         self.timeline.cut_draft = (
             self.cut_tools.draft()
             if hasattr(self, 'cut_tools') and self.tool.get() == 'CUT'
@@ -328,6 +455,7 @@ class EditorWindow(tk.Toplevel):
         )
         self.timeline.draw()
         self.clock.configure(text=f'{format_time(self.position)} / {format_time(self.media.duration)}')
+        self.refresh_crop_guide()
 
     def update_selection_label(self):
         if not self.trim:
@@ -501,6 +629,8 @@ class EditorWindow(tk.Toplevel):
         self.overlay_tools.refresh()
         self.music_tools.refresh()
         self.polish_tools.refresh()
+        if self.media:
+            self.refresh_crop_guide()
         self._update_transport_controls()
         self.export_button.configure(state='disabled' if busy else 'normal',
                                      text='EXPORTING…' if busy else 'EXPORT VIDEO  ↗')

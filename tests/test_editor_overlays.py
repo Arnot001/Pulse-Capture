@@ -47,7 +47,9 @@ class PrivacyGeometryTests(unittest.TestCase):
     def test_source_anchor_mapping_after_every_preset(self):
         mask = Rect(720, 120, 100, 80)
         expected = {'Original': mask, '16:9 Landscape': mask,
-                    '9:16 Vertical': Rect(58, 108, 100, 80), '1:1 Square': Rect(300, 120, 100, 80)}
+                    '9:16 Vertical': Rect(58, 108, 100, 80),
+                    'YouTube Shorts (9:16)': Rect(58, 108, 100, 80),
+                    '1:1 Square': Rect(300, 120, 100, 80)}
         for preset in FORMATS:
             edits = EditOptions(privacy=Privacy((PrivacyMask('Blur', mask, 0, self.media.duration),))).with_format(self.media, preset)
             self.assertEqual(edits.privacy.masks[0].rect, mask)
