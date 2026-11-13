@@ -73,15 +73,20 @@ ready. Editing opens in a separate window.
    position; Play resumes; Stop returns to trim start. Preview is silent and
    sampled, so it may appear less smooth than the export. Source audio is kept
    in the exported video.
-4. Choose **Format**: **Original**, **16:9 Landscape**, **9:16 Vertical**,
-   **YouTube Shorts (9:16)**, or **1:1 Square**. Shorts uses the same adjustable
-   vertical crop and exports an H.264 MP4 at **1080 × 1920**. Other formats keep
+4. Choose **Format**: **Original**, **16:9 Horizontal**,
+   **YouTube Shorts (9:16)**, or **1:1 Square**. The old 9:16 Vertical option is
+   still supported internally, but no longer duplicated in the Format/Crop UI.
+   Shorts exports an H.264 MP4 at **1080 × 1920**. Other formats keep
    source-sized pixels without stretching or upscaling.
-5. Choose **Crop** to see the full source with a cyan crop frame. Drag inside
-   the frame to reposition it; arrow keys fine-tune after clicking it.
-   **Centre** recentres it. **View Result** shows the finished composition.
-   Selecting a different format starts a centred crop; **Original** restores the
-   full frame. Changing the trim does not change the crop.
+5. Choose **Crop** to see the full source with a cyan crop frame. Drag **inside**
+   the frame to move it or drag **any cyan corner handle** to make the box
+   smaller or larger. The aspect ratio stays locked to your chosen format, so a
+   Shorts frame remains 9:16 without stretching. A smaller box zooms into the
+   source, while a larger box keeps more of the picture. Click inside and use
+   arrow keys for fine positioning. **Centre** recentres the current box
+   without resetting its size; **View Result** shows the finished composition.
+   Selecting a different format starts a new, centred crop; **Original** restores
+   the full frame. Changing the trim does not change the crop.
 
    **Move the crop during a YouTube Short:** select **YouTube Shorts (9:16)**,
    seek to the first important moment and drag the cyan crop into place.
@@ -94,9 +99,13 @@ ready. Editing opens in a separate window.
    The original file is never altered. Keyframes stay anchored to source time
    across trim changes and removed sections, and the crop moves appropriately
    when video is joined after cuts. Changing away from YouTube Shorts clears
-   the moving-crop keyframes. For privacy, moving crop and source-anchored blur/
-   pixelate masks cannot be combined; keep a static crop or remove masks.
-   This is manual keyframing, not automatic subject detection.
+   the moving-crop keyframes. Resizing a Short changes the frame size for the
+   entire clip, preserving and adjusting saved motion keyframes rather than
+   deleting them. Resize is not itself animated: the positions move between
+   keyframes, while the frame dimensions remain steady.
+   For privacy, moving crop and source-anchored blur/pixelate masks cannot be
+   combined; keep a static crop or remove masks. This is manual keyframing,
+   not automatic subject detection.
 6. Optionally choose **Brand**, switch **On**, and pick a corner and
    **Small / Medium / Large**. The rendered preview shows the new Pulse logo.
    Branding starts **Off** in every editor session. It adds a new overlay;
@@ -155,8 +164,9 @@ is saved beside the source. Cancelling removes this export's temporary file;
 closing the editor or application cancels an active export before closing.
 
 Original keeps the source dimensions (padding an odd edge by one pixel where
-H.264 requires it). The other formats crop to the largest exact-ratio rectangle
-with even dimensions. YouTube Shorts then scales its vertical crop to
+H.264 requires it). Other formats start with the largest exact-ratio rectangle
+with even dimensions; its bounds can then be resized from any corner.
+YouTube Shorts scales its selected vertical crop to
 1080 × 1920 using Lanczos, retaining the original audio when present. This
 can upscale and cannot recover detail missing from a landscape recording;
 source footage recorded vertically gives the best clarity. All other presets
