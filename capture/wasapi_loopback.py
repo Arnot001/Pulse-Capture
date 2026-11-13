@@ -147,36 +147,38 @@ class SystemAudioCapture:
                         self.frames += step
                         count -= step
 
-                while not self._stop.is_set():
-                    samples = self._stream.read(FRAMES, exception_on_overflow=False)
-                    received = time.monotonic()
-                    if not samples:
-                        raise RuntimeError('Windows audio stopped supplying samples.')
-                    if len(samples) % bytes_per_frame:
-                        raise RuntimeError('WASAPI returned misaligned PCM samples.')
-                    block_frames = len(samples) // bytes_per_frame
-                    # WASAPI loopback can temporarily block while an application
-                    # is silent. A plain WAV erases those silent intervals and
-                    # plays later audio too early. Restore missing wall-clock
-                    # time *before* the next block. Ignore normal device jitter.
-                    expected_prior = max(0, round(
-                        (received - self.started_at) * rate) - block_frames)
-                    missing = expected_prior - self.frames
-                    if missing > max(0.12 * rate, 2 * FRAMES):
-                        pad_frames(missing)
-                    output.writeframesraw(samples)
-                    self.frames += block_frames
-                    # Audio-track presence does not prove an audible signal.
-                    levels = array('h')
-                    levels.frombytes(samples)
-                    if levels:
-                        self.peak = max(self.peak, max(abs(v) for v in levels))
-                # Also retain silence at the end, when a paused loopback device
-                # delivered no final samples before the user pressed Stop.
-                if self.stop_at is not None:
-                    trailing = round((self.stop_at - self.started_at) * rate) - self.frames
-                    if trailing > 0:
-                        pad_frames(trailing)
+                try:
+                    while not self._stop.is_set():
+                        samples = self._stream.read(FRAMES, exception_on_overflow=False)
+                        received = time.monotonic()
+                        if not samples:
+                            raise RuntimeError('Windows audio stopped supplying samples.')
+                        if len(samples) % bytes_per_frame:
+                            raise RuntimeError('WASAPI returned misaligned PCM samples.')
+                        block_frames = len(samples) // bytes_per_frame
+                        # WASAPI loopback can temporarily block while an application
+                        # is silent. A plain WAV erases those silent intervals and
+                        # plays later audio too early. Restore missing wall-clock
+                        # time *before* the next block. Ignore normal device jitter.
+                        expected_prior = max(0, round(
+                            (received - self.started_at) * rate) - block_frames)
+                        missing = expected_prior - self.frames
+                        if missing > max(0.12 * rate, 2 * FRAMES):
+                            pad_frames(missing)
+                        output.writeframesraw(samples)
+                        self.frames += block_frames
+                        # Audio-track presence does not prove an audible signal.
+                        levels = array('h')
+                        levels.frombytes(samples)
+                        if levels:
+                            self.peak = max(self.peak, max(abs(v) for v in levels))
+                finally:
+                    # Also retain silence at the end, when a paused loopback device
+                    # delivered no final samples before the user pressed Stop.
+                    if self.stop_at is not None:
+                        trailing = round((self.stop_at - self.started_at) * rate) - self.frames
+                        if trailing > 0:
+                            pad_frames(trailing)
         except Exception as exc:
             if not self._stop.is_set():
                 self.error = f'Windows audio recording failed: {exc}'
