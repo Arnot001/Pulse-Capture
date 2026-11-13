@@ -61,6 +61,23 @@ class CropMotion:
                 return crop.moved(media, x, y)
         return crop.moved(media, keys[-1].x, keys[-1].y)
 
+    def resized(self, media, old_crop, resized_crop):
+        """Keep existing pan keyframes when the shared crop size changes.
+
+        All keys inherit the same change of origin, then clamp to the source
+        boundaries. The frame size remains consistent throughout the clip.
+        """
+        old_crop.validate(media)
+        resized_crop.validate(media)
+        dx, dy = resized_crop.x-old_crop.x, resized_crop.y-old_crop.y
+        updated = []
+        for key in self.keyframes:
+            position = resized_crop.moved(media, key.x+dx, key.y+dy)
+            updated.append(CropKeyframe(key.time, position.x, position.y))
+        motion = CropMotion(tuple(updated))
+        motion.validate(media, resized_crop)
+        return motion
+
     def at(self, media, crop, time):
         """Create or replace a keyframe at the nearest source frame."""
         if not isinstance(time, (int, float)) or not math.isfinite(time):
