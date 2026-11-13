@@ -578,9 +578,8 @@ class EditorWindow(tk.Toplevel):
     def pause_preview(self):
         if not self.playing:
             return
-        paused = self.position
+        # stop_play samples the audio clock before stopping the output device.
         self.stop_play()
-        self.position = paused
         self.update_timeline()
         self.request_frame()
 
