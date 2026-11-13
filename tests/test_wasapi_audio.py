@@ -123,6 +123,35 @@ class WASAPITests(unittest.TestCase):
                 session.stop()
                 session.validate()
 
+    def test_wasapi_stall_keeps_silent_time_in_pcm(self):
+        # Loopback devices sometimes block until the next sound. Previously
+        # this erased the quiet time and pulled sound ahead of the video.
+        class BlockingStream(FakeStream):
+            calls = 0
+
+            def read(self, size, exception_on_overflow=False):
+                self.calls += 1
+                time.sleep(.19 if self.calls == 2 else .023)
+                return (4096).to_bytes(2, 'little', signed=True) * (size * 2)
+
+        class BlockingManager(FakeManager):
+            def open(self, **kwargs):
+                return BlockingStream()
+
+        class BlockingLibrary(FakeLibrary):
+            def PyAudio(self):
+                return BlockingManager()
+
+        with patch('capture.wasapi_loopback._library',
+                   return_value=BlockingLibrary()):
+            with TemporaryDirectory() as folder:
+                session = SystemAudioCapture(Path(folder) / 'delayed.wav')
+                session.start()
+                time.sleep(.29)
+                session.stop()
+                session.validate()
+                self.assertGreaterEqual(session.duration, .26)
+
     def test_silent_system_audio_is_reported_as_failure(self):
         class SilentStream(FakeStream):
             def read(self, size, exception_on_overflow=False):
