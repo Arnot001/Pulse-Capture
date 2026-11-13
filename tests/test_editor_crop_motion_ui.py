@@ -43,6 +43,49 @@ class CropMotionUITests(unittest.TestCase):
         self.assertEqual(w.edits.crop_motion.keyframes, ())
         self.assertEqual(w.edits.crop, w.video.crop)
 
+    def test_resize_corners_and_single_horizontal_preset(self):
+        w = self.window
+        self.next_picture(lambda: w.select_tool('FORMAT'))
+        labels = []
+        def scan(parent):
+            for child in parent.winfo_children():
+                if 'text' in child.keys():
+                    labels.append(str(child.cget('text')))
+                scan(child)
+        scan(w.panels['FORMAT'])
+        self.assertTrue(any('Horizontal' in label for label in labels))
+        self.assertFalse(any('9:16\\nVertical' in label for label in labels))
+        w.format_choice.set(SHORTS_FORMAT)
+        self.next_picture(w.format_changed)
+        self.next_picture(lambda: w.select_tool('CROP'))
+        original = w.edits.crop
+        x1, y1, x2, y2 = w.video.crop_bounds()
+        w.video.event_generate('<Button-1>', x=round(x2), y=round(y2))
+        w.video.event_generate('<B1-Motion>',
+                               x=round(x1+(x2-x1)*.6),
+                               y=round(y1+(y2-y1)*.6))
+        w.video.event_generate('<ButtonRelease-1>')
+        self.root.update()
+        resized = w.edits.crop
+        self.assertLess(resized.width, original.width)
+        self.assertLess(resized.height, original.height)
+        self.assertEqual(resized.width*16, resized.height*9)
+        self.assertEqual(w.video.crop, resized)
+        w.add_crop_keyframe()
+        self.next_picture(lambda: w.seek(1))
+        moved = resized.moved(w.media, resized.x+20, resized.y)
+        w.crop_changed(moved)
+        self.assertEqual(len(w.edits.crop_motion.keyframes), 2)
+        narrower = moved.resized(w.media, 'se', moved.x+moved.width*.75,
+                                moved.y+moved.height*.75)
+        w.crop_changed(narrower)
+        self.assertEqual(w.edits.crop.width, narrower.width)
+        self.assertEqual(w.edits.crop.height, narrower.height)
+        self.assertEqual(len(w.edits.crop_motion.keyframes), 2)
+        w.edits.validate(w.media)
+        self.next_picture(lambda: w.select_tool('FORMAT'))
+        self.assertFalse(w.video.source_view)
+
     def test_switching_format_clears_keyframes_and_disables_controls(self):
         w = self.window
         w.format_choice.set(SHORTS_FORMAT)
