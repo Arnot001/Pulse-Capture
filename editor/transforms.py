@@ -37,12 +37,50 @@ class Crop:
 
     def moved(self, media, x, y):
         self.validate(media)
-        if not all(math.isfinite(v) for v in (x, y)):
+        if not all(isinstance(v, (int, float)) and math.isfinite(v) for v in (x, y)):
             raise ValueError('Choose a valid crop position.')
         def clamp(value, limit):
             return min(limit // 2 * 2, max(0, round(value / 2) * 2))
         return replace(self, x=clamp(x, media.width-self.width),
                        y=clamp(y, media.height-self.height))
+
+    def resized(self, media, corner, delta_x, delta_y):
+        """Resize from a corner, fixing the opposite corner and aspect ratio.
+
+        Relative drag deltas are in source pixels. Every new dimension is
+        chroma-aligned and stays entirely inside the source frame.
+        """
+        self.validate(media)
+        if corner not in ('top-left', 'top-right', 'bottom-left', 'bottom-right'):
+            raise ValueError('Choose a crop corner to resize.')
+        if not all(isinstance(v, (int, float)) and math.isfinite(v)
+                   for v in (delta_x, delta_y)):
+            raise ValueError('Choose a valid crop resize.')
+        left = corner.endswith('left')
+        top = corner.startswith('top')
+        width_delta = (-1 if left else 1) * delta_x
+        height_delta = (-1 if top else 1) * delta_y
+        # Choose the dominant pointer direction so horizontal-only and
+        # vertical-only drags both resize smoothly at a fixed aspect ratio.
+        gcd = math.gcd(self.width, self.height)
+        unit_width, unit_height = 2 * self.width // gcd, 2 * self.height // gcd
+        if abs(width_delta / self.width) >= abs(height_delta / self.height):
+            desired = round((self.width + width_delta) / unit_width)
+        else:
+            desired = round((self.height + height_delta) / unit_height)
+        opposite_x = self.x + self.width if left else self.x
+        opposite_y = self.y + self.height if top else self.y
+        available_width = opposite_x if left else media.width - opposite_x
+        available_height = opposite_y if top else media.height - opposite_y
+        maximum = min(available_width // unit_width, available_height // unit_height)
+        if maximum < 1:
+            raise ValueError('There is not enough room to resize the crop.')
+        multiple = max(1, min(maximum, desired))
+        width, height = unit_width * multiple, unit_height * multiple
+        result = Crop(opposite_x - width if left else opposite_x,
+                      opposite_y - height if top else opposite_y, width, height)
+        result.validate(media)
+        return result
 
 
 def centered_crop(media, preset):
@@ -122,8 +160,9 @@ class EditOptions:
             if not isinstance(self.crop, Crop):
                 raise ValueError('Choose a crop for this format.')
             self.crop.validate(media)
-            if (self.crop.width, self.crop.height) != (expected.width, expected.height):
-                raise ValueError('The crop does not match the selected format.')
+            ratio = FORMATS[self.preset]
+            if self.crop.width * ratio[1] != self.crop.height * ratio[0]:
+                raise ValueError('The crop must keep the selected aspect ratio.')
 
         if self.text.enabled:
             width, height = (self.crop.width, self.crop.height) if self.crop else (media.width, media.height)
