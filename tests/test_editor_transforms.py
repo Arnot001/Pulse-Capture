@@ -60,7 +60,6 @@ class CropTests(unittest.TestCase):
                       EditOptions(crop=Crop(0, 0, 100, 100)),
                       EditOptions('1:1 Square', Crop(-2, 0, 1080, 1080)),
                       EditOptions('1:1 Square', Crop(0, 0, 1081, 1080)),
-                      EditOptions('1:1 Square', Crop(0, 0, 500, 500)),
                       EditOptions('1:1 Square', Crop(1000, 0, 1080, 1080)),
                       EditOptions('1:1 Square', Crop(0.0, 0, 1080, 1080)),
                       EditOptions(branding=Branding(True, 'middle')),
@@ -69,6 +68,13 @@ class CropTests(unittest.TestCase):
                 edits.validate(self.media)
         with self.assertRaises(ValueError):
             centered_crop(replace(self.media, width=8, height=8), '16:9 Landscape')
+
+    def test_smaller_same_ratio_crop_is_now_valid(self):
+        square = EditOptions('1:1 Square', Crop(0, 0, 500, 500))
+        square.validate(self.media)
+        self.assertEqual(square.output_size(self.media), (500, 500))
+        with self.assertRaisesRegex(ValueError, 'aspect ratio'):
+            EditOptions('1:1 Square', Crop(0, 0, 500, 400)).validate(self.media)
 
     def test_trim_changes_do_not_change_crop(self):
         edits = EditOptions().with_format(self.media, '1:1 Square')
