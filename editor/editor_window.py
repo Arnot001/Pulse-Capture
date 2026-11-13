@@ -183,13 +183,18 @@ class EditorWindow(tk.Toplevel):
         return segments
 
     def build_tools(self):
+        # Keep the legacy Vertical setting valid for old edits/tests but show
+        # only one vertical preset. Landscape is labelled Horizontal.
+        format_choices = [
+            (v, '16:9\nHorizontal' if v == '16:9 Landscape'
+             else v.replace(' ', '\n', 1))
+            for v in FORMATS if v != '9:16 Vertical'
+        ]
         panel = self.panels['FORMAT']
-        self.add_segments(panel, self.format_choice,
-                          [(v, v.replace(' ', '\n', 1)) for v in FORMATS], self.format_changed)
-        t.label(panel, 'YouTube Shorts exports 1080 × 1920. Use Crop to position the frame.', 9, t.MUTED).pack(anchor='w')
+        self.add_segments(panel, self.format_choice, format_choices, self.format_changed)
+        t.label(panel, 'Shorts exports 1080 × 1920. Drag crop corners to zoom in or out.', 9, t.MUTED).pack(anchor='w')
         panel = self.panels['CROP']
-        self.add_segments(panel, self.format_choice,
-                          [(v, v.replace(' ', '\n', 1)) for v in FORMATS], self.format_changed)
+        self.add_segments(panel, self.format_choice, format_choices, self.format_changed)
         self.crop_hint = t.label(panel, 'Choose a shape, then drag the cyan frame to keep what matters.', 9, t.MUTED)
         self.crop_hint.pack(anchor='w', pady=(0, 6))
         actions = tk.Frame(panel, bg=t.PANEL)
@@ -280,7 +285,7 @@ class EditorWindow(tk.Toplevel):
             message = (f'{count} crop key(s) · Drag the frame at the playhead to add/update a key. '
                        'The frame moves smoothly between keys.'
                        if count else
-                       'Shorts: frame the first moment, ADD KEY, then seek and drag to follow the action.')
+                       'Shorts: drag the corners to resize. ADD KEY, then seek and drag to follow the action.')
         elif self.edits.crop:
             message = 'Drag the cyan frame to reposition your crop, then use VIEW RESULT.'
         else:
@@ -293,10 +298,17 @@ class EditorWindow(tk.Toplevel):
         self.stop_play()
         try:
             if self.edits.crop_motion.keyframes:
-                # Once the first keyframe exists, dragging at a new playhead
-                # position creates the next key automatically.
-                keys = self.edits.crop_motion.at(self.media, crop, self.position)
-                proposed = replace(self.edits, crop_motion=keys)
+                current = self.edits.crop_at(self.media, self.position)
+                if (crop.width, crop.height) != (current.width, current.height):
+                    # Changing the box size changes framing for the whole
+                    # Short; rebase saved pan positions without losing keys.
+                    keys = self.edits.crop_motion.resized(self.media, current, crop)
+                    proposed = replace(self.edits, crop=crop, crop_motion=keys)
+                else:
+                    # A drag inside the box at a new playhead position
+                    # continues to create or update a position keyframe.
+                    keys = self.edits.crop_motion.at(self.media, crop, self.position)
+                    proposed = replace(self.edits, crop_motion=keys)
             else:
                 proposed = replace(self.edits, crop=crop)
             proposed.validate(self.media)
@@ -363,7 +375,12 @@ class EditorWindow(tk.Toplevel):
         if not self.media or self.exporter.busy:
             return
         self.stop_play()
-        centered = self.edits.with_format(self.media, self.edits.preset).crop
+        if self.edits.crop is None:
+            return
+        centered = self.edits.crop.moved(
+            self.media,
+            (self.media.width-self.edits.crop.width) / 2,
+            (self.media.height-self.edits.crop.height) / 2)
         if self.edits.crop_motion.keyframes:
             motion = self.edits.crop_motion.at(self.media, centered, self.position)
             self.edits = replace(self.edits, crop_motion=motion)
