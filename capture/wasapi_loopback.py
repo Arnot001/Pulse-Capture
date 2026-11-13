@@ -27,8 +27,12 @@ def list_playback_devices():
     manager = audio.PyAudio()
     try:
         result = []
-        default = _device(manager)
-        result.append((DEVICE_ID, 'Windows default · ' + str(default['name'])))
+        try:
+            default = _device(manager)
+            result.append((DEVICE_ID, 'Windows default · ' + str(default['name'])))
+        except (RuntimeError, OSError, LookupError):
+            # The default may be missing while a specific output remains usable.
+            pass
         for info in manager.get_loopback_device_info_generator():
             if info.get('isLoopbackDevice') and int(info.get('maxInputChannels', 0)) > 0:
                 identity = DEVICE_PREFIX + str(int(info['index']))
