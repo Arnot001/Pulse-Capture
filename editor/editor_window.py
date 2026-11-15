@@ -14,7 +14,7 @@ from .cut_tools import CutTools
 from .export_job import ExportJob
 from .media import probe_media
 from .models import TrimRange, format_time, parse_time
-from .preview import Preview
+from .preview import Preview, anticipated_source_position
 from .audio_preview import AudioPlayback
 from .timeline import Timeline
 from .privacy_preview import PrivacyPreview
@@ -41,6 +41,10 @@ class EditorWindow(tk.Toplevel):
         self.play_anchor = 0.0
         self.play_anchor_elapsed = 0.0
         self._waiting_for_play_frame = False
+        # Measured FFmpeg snapshot latency. Each preview decode takes time,
+        # and requesting the *current* playhead frame made video lag audio.
+        self._preview_render_latency = 0.0
+        self._preview_latency_samples = 0
         self.last_export = None
         self.output_folder = self.path.parent
         self._seek_id = self._poll_id = self._play_id = None
@@ -442,7 +446,13 @@ class EditorWindow(tk.Toplevel):
                 # Focus placement must remain visible even at a fade boundary.
                 edits = replace(edits, zoom=replace(edits.zoom, enabled=False),
                                 fade=replace(edits.fade, fade_in=False, fade_out=False))
-            self.preview.request(token, self.position, self.video.winfo_width()-4, self.video.winfo_height()-4,
+            requested_position = self.position
+            if self.playing and not self._waiting_for_play_frame and self._preview_render_latency:
+                requested_position = anticipated_source_position(
+                    self.cuts, self.trim, self._elapsed_kept(),
+                    self.edits.speed, self._preview_render_latency)
+            self.preview.request(token, requested_position,
+                                 self.video.winfo_width()-4, self.video.winfo_height()-4,
                                  edits, self.tool.get() == 'CROP', self.trim, self.cuts)
         self._seek_id = self.after(90 if not self.playing else 1, send)
 
@@ -737,6 +747,16 @@ class EditorWindow(tk.Toplevel):
             try:
                 frame = self.preview.frames.get_nowait()
                 if frame.token == self.token:
+                    if not frame.error and frame.render_seconds > 0:
+                        # First measurement establishes the delay; subsequent
+                        # measurements adapt smoothly to CPU/export effects.
+                        measured = min(3.0, frame.render_seconds + .06)
+                        if self._preview_latency_samples == 0:
+                            self._preview_render_latency = measured
+                        else:
+                            self._preview_render_latency = (
+                                .65 * self._preview_render_latency + .35 * measured)
+                        self._preview_latency_samples += 1
                     if frame.error:
                         self.stop_play()
                         self.video.delete('frame', 'crop', 'privacy', 'privacy-active', 'zoom')
