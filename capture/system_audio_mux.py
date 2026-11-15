@@ -4,8 +4,38 @@ The existing microphone stays in FFmpeg's source MP4. A mixed AAC track is
 published only after a validated, successful merge; the source video is copied.
 """
 from pathlib import Path
+import math
 import subprocess
 from .ffmpeg_backend import process_options
+
+
+def measured_sync_offset(audio_duration, video_duration):
+    """Align WASAPI and video by their common stop rather than FFmpeg startup.
+
+    We start WASAPI before launching gdigrab, but FFmpeg's first progress
+    callback is delayed by encoding. Guessing the first frame's wall-clock
+    time from that callback over-trimmed playback by about 0.9 seconds in
+    actual captures. Both devices receive Stop together, so their *recorded
+    durations* give the amount of earlier audio pre-roll to discard.
+
+    Positive: discard audio pre-roll. Negative: delay late-starting audio.
+    Only accept plausible startup offsets; huge differences indicate a
+    broken clock, not legitimate pre-roll.
+    """
+    try:
+        audio_duration = float(audio_duration)
+        video_duration = float(video_duration)
+    except (ValueError, TypeError) as exc:
+        raise RuntimeError('Cannot measure capture audio/video durations.') from exc
+    if not all(math.isfinite(x) and x > 0 for x in (audio_duration, video_duration)):
+        raise RuntimeError('Invalid audio/video duration while aligning capture.')
+    offset = audio_duration - video_duration
+    if abs(offset) > 8.0:
+        raise RuntimeError(
+            f'Windows audio and video durations differ by {abs(offset):.2f}s. '
+            'The recording was not saved as synchronised.'
+        )
+    return offset
 
 
 def merge_command(ffmpeg, video, wav, destination, duration, microphone, offset=0.0):
