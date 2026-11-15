@@ -3,6 +3,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 import time
 import unittest
+import threading
 from unittest.mock import patch
 
 from capture.audio_devices import discover_audio
@@ -151,6 +152,52 @@ class WASAPITests(unittest.TestCase):
                 session.stop()
                 session.validate()
                 self.assertGreaterEqual(session.duration, .26)
+
+    def test_stop_only_closes_portaudio_on_reader_thread(self):
+        """Prevent crashing Python while a WASAPI read owns the native stream."""
+        closed = []
+        class OwnedStream(FakeStream):
+            owner = None
+
+            def read(self, size, exception_on_overflow=False):
+                self.owner = threading.get_ident()
+                time.sleep(.006)
+                return super().read(size, exception_on_overflow)
+
+            def stop_stream(self):
+                closed.append(('stop', threading.get_ident(), self.owner))
+
+            def close(self):
+                closed.append(('close', threading.get_ident(), self.owner))
+
+        class OwnedManager(FakeManager):
+            stream = None
+
+            def open(self, **kwargs):
+                self.stream = OwnedStream()
+                return self.stream
+
+            def terminate(self):
+                closed.append(('terminate', threading.get_ident(), self.stream.owner))
+                super().terminate()
+
+        class OwnedLibrary(FakeLibrary):
+            def PyAudio(self):
+                return OwnedManager()
+
+        with patch('capture.wasapi_loopback._library', return_value=OwnedLibrary()):
+            with TemporaryDirectory() as folder:
+                session = SystemAudioCapture(Path(folder) / 'owned.wav')
+                session.start()
+                time.sleep(.045)
+                # Called on the test/recorder thread, *not* the native reader.
+                caller = threading.get_ident()
+                session.stop()
+                session.validate()
+                self.assertEqual([kind for kind, _, _ in closed],
+                                 ['stop', 'close', 'terminate'])
+                self.assertTrue(all(actual == reader != caller
+                                    for _, actual, reader in closed))
 
     def test_silent_system_audio_is_reported_as_failure(self):
         class SilentStream(FakeStream):
