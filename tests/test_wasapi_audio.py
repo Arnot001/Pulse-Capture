@@ -101,16 +101,20 @@ class WASAPITests(unittest.TestCase):
     def test_mux_uses_copy_video_and_mixes_two_sources(self):
         cmd = merge_command('ffmpeg', 'base.mp4', 'system.wav', 'merged.mp4',
                             4.2, True, .15)
-        self.assertIn('-ss', cmd)
+        self.assertNotIn('-ss', cmd)
+        self.assertNotIn('-itsoffset', cmd)
         self.assertIn('0:v:0', cmd)
+        self.assertIn('atrim=start=0.150000', ' '.join(cmd))
         self.assertIn('amix=inputs=2', ' '.join(cmd))
+        self.assertIn('apad=whole_dur=4.200000', ' '.join(cmd))
         self.assertIn('copy', cmd)
         self.assertEqual(cmd[-1], 'merged.mp4')
         only = merge_command('ffmpeg', 'base.mp4', 'system.wav', 'merged.mp4',
                              4.2, False, -.1)
-        self.assertIn('-itsoffset', only)
-        self.assertNotIn('-filter_complex', only)
-        self.assertIn('1:a:0', only)
+        self.assertIn('adelay=delays=100:all=1', ' '.join(only))
+        self.assertIn('apad=whole_dur=4.200000', ' '.join(only))
+        self.assertIn('-filter_complex', only)
+        self.assertIn('1:a:0', ' '.join(only))
 
     def test_enumerate_selected_loopback_endpoint(self):
         with patch('capture.wasapi_loopback._library', return_value=FakeLibrary()):
