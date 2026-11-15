@@ -20,6 +20,7 @@ from .timeline import Timeline
 from .privacy_preview import PrivacyPreview
 from .overlay_tools import OverlayTools
 from .music_tools import MusicTools
+from .auto_tools import AutoTools
 from .polish_tools import PolishTools
 from .transforms import EditOptions, Branding, FORMATS, CORNERS, SIZES, SHORTS_FORMAT
 
@@ -114,7 +115,7 @@ class EditorWindow(tk.Toplevel):
 
         tool_area = tk.Frame(bottom, bg=t.BG)
         tool_area.pack(side='top', fill='x', before=self.note, pady=(8, 0))
-        tabs = t.Segments(tool_area, self.tool, [(v, v) for v in ('TRIM', 'CUT', 'FORMAT', 'CROP', 'BRAND', 'TEXT', 'PRIVACY', 'MOTION', 'MUSIC', 'FINISH')], self.show_tool)
+        tabs = t.Segments(tool_area, self.tool, [(v, v) for v in ('AUTO', 'TRIM', 'CUT', 'FORMAT', 'CROP', 'BRAND', 'TEXT', 'PRIVACY', 'MOTION', 'MUSIC', 'FINISH')], self.show_tool)
         tabs.pack(fill='x', pady=(0, 8))
         for _, button in tabs.buttons:
             button.configure(padx=4, pady=5, font=(t.FONT, -8, 'bold'))
@@ -123,7 +124,7 @@ class EditorWindow(tk.Toplevel):
         panel_area = tk.Frame(tool_area, bg=t.PANEL, height=126)
         panel_area.pack(fill='x')
         panel_area.pack_propagate(False)
-        for name in ('TRIM', 'CUT', 'FORMAT', 'CROP', 'BRAND', 'TEXT', 'PRIVACY', 'MOTION', 'MUSIC', 'FINISH'):
+        for name in ('AUTO', 'TRIM', 'CUT', 'FORMAT', 'CROP', 'BRAND', 'TEXT', 'PRIVACY', 'MOTION', 'MUSIC', 'FINISH'):
             self.panels[name] = tk.Frame(panel_area, bg=t.PANEL)
         row = self.panels['TRIM']
         row.pack(fill='both', expand=True, padx=12, pady=10)
@@ -153,6 +154,7 @@ class EditorWindow(tk.Toplevel):
         self.overlay_tools = OverlayTools(self)
         self.music_tools = MusicTools(self)
         self.polish_tools = PolishTools(self)
+        self.auto_tools = AutoTools(self)
         for widget in self.controls:
             widget.configure(state='disabled')
 
@@ -257,6 +259,7 @@ class EditorWindow(tk.Toplevel):
         self.overlay_tools.refresh()
         self.music_tools.refresh()
         self.polish_tools.refresh()
+        self.auto_tools.refresh()
         if self.media and self.trim:
             self.update_timeline()
         self.request_frame()
@@ -684,6 +687,7 @@ class EditorWindow(tk.Toplevel):
         self.overlay_tools.refresh()
         self.music_tools.refresh()
         self.polish_tools.refresh()
+        self.auto_tools.refresh()
         if self.media:
             self.refresh_crop_guide()
         self._update_transport_controls()
@@ -717,6 +721,7 @@ class EditorWindow(tk.Toplevel):
         self._poll_id = None
         if self.closed:
             return
+        self.auto_tools.poll()
         try:
             media, error = self.metadata.get_nowait()
             if error:
@@ -801,6 +806,7 @@ class EditorWindow(tk.Toplevel):
         if self.closed:
             return
         self.closing = True
+        self.auto_tools.close()
         self.stop_play()
         if self.preview:
             self.preview.close()
