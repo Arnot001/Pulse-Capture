@@ -14,7 +14,7 @@ from .cut_tools import CutTools
 from .export_job import ExportJob
 from .media import probe_media
 from .models import TrimRange, format_time, parse_time
-from .preview import Preview
+from .preview import Preview, anticipated_source_position
 from .audio_preview import AudioPlayback
 from .timeline import Timeline
 from .privacy_preview import PrivacyPreview
@@ -40,6 +40,11 @@ class EditorWindow(tk.Toplevel):
         self.position, self.token = 0.0, 0
         self.play_anchor = 0.0
         self.play_anchor_elapsed = 0.0
+        self._waiting_for_play_frame = False
+        # Measured FFmpeg snapshot latency. Each preview decode takes time,
+        # and requesting the *current* playhead frame made video lag audio.
+        self._preview_render_latency = 0.0
+        self._preview_latency_samples = 0
         self.last_export = None
         self.output_folder = self.path.parent
         self._seek_id = self._poll_id = self._play_id = None
@@ -441,7 +446,13 @@ class EditorWindow(tk.Toplevel):
                 # Focus placement must remain visible even at a fade boundary.
                 edits = replace(edits, zoom=replace(edits.zoom, enabled=False),
                                 fade=replace(edits.fade, fade_in=False, fade_out=False))
-            self.preview.request(token, self.position, self.video.winfo_width()-4, self.video.winfo_height()-4,
+            requested_position = self.position
+            if self.playing and not self._waiting_for_play_frame and self._preview_render_latency:
+                requested_position = anticipated_source_position(
+                    self.cuts, self.trim, self._elapsed_kept(),
+                    self.edits.speed, self._preview_render_latency)
+            self.preview.request(token, requested_position,
+                                 self.video.winfo_width()-4, self.video.winfo_height()-4,
                                  edits, self.tool.get() == 'CROP', self.trim, self.cuts)
         self._seek_id = self.after(90 if not self.playing else 1, send)
 
@@ -543,7 +554,12 @@ class EditorWindow(tk.Toplevel):
         self.stop_button.configure(state='normal' if ready else 'disabled')
 
     def toggle_audio(self):
+        self._waiting_for_play_frame = False
         self.audio_toggle.configure(text='SOUND ON' if self.audio_on.get() else 'MUTED')
+        if self.playing and self.trim:
+            self.position = self.cuts.source_from_elapsed(self._elapsed_kept(), self.trim)
+            self.play_anchor_elapsed = self.cuts.source_elapsed(self.position, self.trim)
+            self.play_started = time.monotonic()
         if self.audio_player:
             self.audio_player.stop()
             if self.playing and self.audio_on.get():
@@ -562,8 +578,13 @@ class EditorWindow(tk.Toplevel):
             if self.position >= segments[-1].end - 1e-9:
                 self.position = segments[0].start
         self.playing = True
-        if self.audio_on.get() and self.audio_player:
-            self.audio_player.play(self.position, self.trim, self.cuts, self.edits)
+        # Don't start audio while FFmpeg is still decoding the first displayed
+        # frame. Otherwise the soundtrack races ahead of the *picture* during
+        # preview startup, even if both streams share the same clock.
+        self._waiting_for_play_frame = bool(
+            self.audio_on.get() and self.audio_player and
+            (self.media.has_audio or self.edits.music.enabled)
+        )
         self.play_anchor = self.position
         self.play_anchor_elapsed = self.cuts.source_elapsed(self.position, self.trim)
         self.play_started = time.monotonic()
@@ -574,9 +595,8 @@ class EditorWindow(tk.Toplevel):
     def pause_preview(self):
         if not self.playing:
             return
-        paused = self.position
+        # stop_play samples the audio clock before stopping the output device.
         self.stop_play()
-        self.position = paused
         self.update_timeline()
         self.request_frame()
 
@@ -591,14 +611,26 @@ class EditorWindow(tk.Toplevel):
         else:
             self.play_preview()
 
+    def _elapsed_kept(self):
+        """Map the master audio clock onto the cut-aware source timeline."""
+        delta = time.monotonic() - self.play_started
+        if (self.audio_on.get() and self.audio_player and
+                (self.media.has_audio or self.edits.music.enabled)):
+            audio_delta = self.audio_player.elapsed()
+            if audio_delta is None:
+                # Wait for device/decoder startup: video must not get ahead.
+                return self.play_anchor_elapsed
+            delta = audio_delta
+        return self.play_anchor_elapsed + max(0.0, delta) * self.edits.speed
+
     def stop_play(self, reset=False):
-        if self.audio_player:
-            self.audio_player.stop()
         if self.playing and self.trim:
             total = self.cuts.kept_duration(self.trim)
-            elapsed = min(total, self.play_anchor_elapsed +
-                          (time.monotonic() - self.play_started) * self.edits.speed)
+            elapsed = min(total, self._elapsed_kept())
             self.position = self.cuts.source_from_elapsed(elapsed, self.trim)
+        if self.audio_player:
+            self.audio_player.stop()
+        self._waiting_for_play_frame = False
         self.playing = False
         if self._play_id:
             self.after_cancel(self._play_id)
@@ -614,8 +646,7 @@ class EditorWindow(tk.Toplevel):
         self._play_id = None
         if self.playing:
             total = self.cuts.kept_duration(self.trim)
-            elapsed = min(total, self.play_anchor_elapsed +
-                          (time.monotonic() - self.play_started) * self.edits.speed)
+            elapsed = min(total, self._elapsed_kept())
             self.position = self.cuts.source_from_elapsed(elapsed, self.trim)
             self.update_timeline()
             if elapsed >= total - 1e-9:
@@ -716,6 +747,16 @@ class EditorWindow(tk.Toplevel):
             try:
                 frame = self.preview.frames.get_nowait()
                 if frame.token == self.token:
+                    if not frame.error and frame.render_seconds > 0:
+                        # First measurement establishes the delay; subsequent
+                        # measurements adapt smoothly to CPU/export effects.
+                        measured = min(3.0, frame.render_seconds + .06)
+                        if self._preview_latency_samples == 0:
+                            self._preview_render_latency = measured
+                        else:
+                            self._preview_render_latency = (
+                                .65 * self._preview_render_latency + .35 * measured)
+                        self._preview_latency_samples += 1
                     if frame.error:
                         self.stop_play()
                         self.video.delete('frame', 'crop', 'privacy', 'privacy-active', 'zoom')
@@ -728,6 +769,11 @@ class EditorWindow(tk.Toplevel):
                         self.video.itemconfigure('placeholder', text='')
                         self.video.show_frame(self._photo, frame.source_view, frame.edits, frame.position)
                         if self.playing:
+                            if self._waiting_for_play_frame:
+                                self._waiting_for_play_frame = False
+                                self.play_started = time.monotonic()
+                                self.audio_player.play(self.position, self.trim,
+                                                       self.cuts, self.edits)
                             self._play_id = self.after(60, self.next_frame)
             except Empty:
                 pass

@@ -37,7 +37,7 @@ class CaptureApp(tk.Tk):
     def __init__(self):
         super().__init__()
         self._destroyed = False
-        self.title('PULSE // CAPTURE')
+        self.title('PULSE // CAPTURE — AUDIO SYNC TEST')
         height = min(900, self.winfo_screenheight() - 90)
         self.geometry(f'650x{height}')
         self.minsize(570, 660)

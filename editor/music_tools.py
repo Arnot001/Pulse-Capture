@@ -129,7 +129,12 @@ class MusicTools:
             w.edits = replace(w.edits, music=music)
             self.refresh()
             if w.playing and w.audio_player and w.audio_on.get():
-                # Hear soundtrack/volume edits immediately at the playhead.
+                # Restart the audio clock at this exact playhead position.
+                # Otherwise a track/volume change would rewind the video.
+                import time
+                w.position = w.cuts.source_from_elapsed(w._elapsed_kept(), w.trim)
+                w.play_anchor_elapsed = w.cuts.source_elapsed(w.position, w.trim)
+                w.play_started = time.monotonic()
                 w.audio_player.play(w.position, w.trim, w.cuts, w.edits)
             if music.enabled:
                 if music.track == IMPORT_LABEL:

@@ -235,6 +235,64 @@ privacy detection, face detection, subtitles, transcription, animation
 keyframes, zoom out, live soundtrack audition, ducking, music automation and
 transitions.
 
+## Audio sync investigation (13 November 2026)
+
+An actual edited MP4 had 30.93 seconds of video but only 18.77 seconds of
+audio. Both tracks started at timestamp zero, so this was not just a constant
+offset. That export must **not** be considered synchronized.
+
+This investigation branch preserves gaps when Windows WASAPI loopback
+blocks during silence. A new unedited capture on 15 November showed **32.333s
+video versus 31.433s audio** and dialogue audibly ahead of the picture. The
+previous recorder estimated video startup from FFmpeg's delayed progress
+message and could discard too much audio at the start. It now derives the
+initial audio pre-roll from the **measured WAV and video durations**. Both
+streams receive the same Stop request, so this provides a more dependable
+shared end reference than an asynchronous startup callback. A duration
+difference over 300ms now fails validation instead of being marked saved.
+
+On 15 November another 32.20s recording failed with a 31.60s AAC stream:
+the app then kept only the video-only partial and removed the attempted
+combined MP4 and Windows WAV. This was a second defect. The merge now uses
+audio filters that **pad actual silent PCM samples** for late audio or trim
+early pre-roll, producing a zero-start-time AAC track spanning the video's
+duration. It no longer uses input `-itsoffset` (which changed PTS without
+creating samples). Validation compares `start_time + duration` for each stream,
+not duration alone, and reports audio that starts late separately from audio
+that ends early. On merge/validation failure, Pulse preserves the WAV and
+attempted mixed MP4, with their paths displayed for recovery; original video
+partials remain available too. Failed recordings can consume more disk space.
+
+The revised merge has passed four local synthetic FFmpeg checks (early/late
+audio, microphone on/off) with matching video/audio stream start time 0 and
+end times. These changes are **still a Windows hardware test candidate**, not
+verified final lip sync. Equal stream lengths cannot alone prove that spoken
+words and frames are aligned. Compare an untouched MP4's audible/visible cue
+before editing.
+
+Quick Edit uses the audio playback clock to schedule its frame preview when
+SOUND ON is selected. Because each displayed frame requires a separate FFmpeg
+decode, Quick Edit now measures frame-decoding time and requests the picture
+expected *when that frame will actually appear* rather than one already
+outdated by the decoder. This is preview-only: it does not modify recording
+or exported media timestamps. Preview remains sampled, not a 30 fps player.
+Test a visible/audible event in the **untouched MP4 using a regular player**
+first, then in Quick Edit, then in the exported copy. If the original MP4 is
+out of sync too, preview timing is not the root cause.
+
+### Desktop shortcut for the audio test
+
+Use a stable sibling Git worktree, such as
+`Pulse-Capture-source\Pulse-Capture-AudioSync-Test`. From that folder run
+`.\setup-audio-test-shortcut.ps1` to create **Pulse Capture (Audio Sync Test)**
+on the desktop. This does not change any existing shortcut. The test window
+title reads `PULSE // CAPTURE — AUDIO SYNC TEST`.
+
+Once the new build is verified, running
+`.\setup-audio-test-shortcut.ps1 -ReplaceExisting` backs up the existing
+`Pulse Capture.lnk` and points it at this stable worktree. The backup shortcut
+remains on the desktop for immediate rollback.
+
 ## Audio availability
 
 Pulse supports native **Windows WASAPI loopback** for the current Windows

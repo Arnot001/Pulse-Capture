@@ -1,5 +1,6 @@
 """Binary discovery, pure command construction, and output validation."""
 import json
+import math
 import os
 from pathlib import Path
 import re
@@ -133,3 +134,47 @@ def validate_output(ffprobe, path, expect_audio=False):
     if expect_audio and not any(s.get('codec_type') == 'audio' for s in streams):
         raise RuntimeError('The requested audio track is missing.')
     return info
+
+
+def validate_audio_coverage(info, *, tolerance_seconds=0.3):
+    """Reject MP4s whose audio ends noticeably before their video.
+
+    Track presence alone did not catch a real 30.93s video with 18.77s audio.
+    300ms allows normal AAC/video rounding but rejects the user's repeated
+    0.90s early-audio capture. Don't scale this tolerance up with clip length:
+    a short offset must not become acceptable on longer recordings.
+    """
+    if not isinstance(info, dict):
+        raise RuntimeError('Could not inspect audio/video timing after export.')
+    streams = info.get('streams') or ()
+    video = next((s for s in streams if s.get('codec_type') == 'video'), None)
+    audio = next((s for s in streams if s.get('codec_type') == 'audio'), None)
+    if not video or not audio:
+        raise RuntimeError('The completed video is missing its required audio or video track.')
+    try:
+        video_length = float(video.get('duration') or info['format']['duration'])
+        audio_length = float(audio['duration'])
+        video_start = float(video.get('start_time') or 0)
+        audio_start = float(audio.get('start_time') or 0)
+    except (ValueError, TypeError, KeyError) as exc:
+        raise RuntimeError('Could not verify audio/video stream timings.') from exc
+    if (not all(map(math.isfinite,
+                    (video_length, audio_length, video_start, audio_start)))
+            or video_length <= 0 or audio_length <= 0):
+        raise RuntimeError('Saved audio/video streams have invalid timing metadata.')
+    if audio_start - video_start > tolerance_seconds:
+        raise RuntimeError(
+            f'Audio begins {audio_start-video_start:.2f}s after video. '
+            'The recording/export is out of sync; source files were retained.'
+        )
+    # Stream.duration is its *length*, not its end timestamp. E.g. audio
+    # start_time=.6 and duration=31.6 ends at 32.2; the old check wrongly
+    # called that an early end by comparing durations alone.
+    video_end = video_start + video_length
+    audio_end = audio_start + audio_length
+    if audio_end < video_end - tolerance_seconds:
+        raise RuntimeError(
+            f'Audio ended at {audio_end-video_start:.2f}s but video runs '
+            f'{video_length:.2f}s. The recording/export is out of sync; '
+            'source files were retained.'
+        )

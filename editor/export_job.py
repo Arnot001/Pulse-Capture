@@ -6,7 +6,7 @@ from queue import Queue
 import subprocess
 import threading
 import time
-from capture.ffmpeg_backend import process_options, validate_output
+from capture.ffmpeg_backend import process_options, validate_output, validate_audio_coverage
 from .cuts import CutPlan
 from .ffmpeg_export import build_export_command
 from .filenames import reserve_export
@@ -111,6 +111,10 @@ class ExportJob:
             duration = float(info['format']['duration'])
             if abs(duration - out_duration) > max(.15, 2 / media.fps):
                 raise RuntimeError('The exported length did not match your selection. The original is unchanged.')
+            # A valid MP4 can still contain 19 seconds of audio alongside
+            # 31 seconds of video. Prevent an unsynced export being approved.
+            if (media.has_audio or edits.music.enabled) and info.get('streams'):
+                validate_audio_coverage(info)
             self._check_cancel()
             reservation.publish()
             result = ExportEvent('saved', 1, 'Export complete', reservation.final)

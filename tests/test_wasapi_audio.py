@@ -3,6 +3,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 import time
 import unittest
+import threading
 from unittest.mock import patch
 
 from capture.audio_devices import discover_audio
@@ -100,16 +101,20 @@ class WASAPITests(unittest.TestCase):
     def test_mux_uses_copy_video_and_mixes_two_sources(self):
         cmd = merge_command('ffmpeg', 'base.mp4', 'system.wav', 'merged.mp4',
                             4.2, True, .15)
-        self.assertIn('-ss', cmd)
+        self.assertNotIn('-ss', cmd)
+        self.assertNotIn('-itsoffset', cmd)
         self.assertIn('0:v:0', cmd)
+        self.assertIn('atrim=start=0.150000', ' '.join(cmd))
         self.assertIn('amix=inputs=2', ' '.join(cmd))
+        self.assertIn('apad=whole_dur=4.200000', ' '.join(cmd))
         self.assertIn('copy', cmd)
         self.assertEqual(cmd[-1], 'merged.mp4')
         only = merge_command('ffmpeg', 'base.mp4', 'system.wav', 'merged.mp4',
                              4.2, False, -.1)
-        self.assertIn('-itsoffset', only)
-        self.assertNotIn('-filter_complex', only)
-        self.assertIn('1:a:0', only)
+        self.assertIn('adelay=delays=100:all=1', ' '.join(only))
+        self.assertIn('apad=whole_dur=4.200000', ' '.join(only))
+        self.assertIn('-filter_complex', only)
+        self.assertIn('1:a:0', ' '.join(only))
 
     def test_enumerate_selected_loopback_endpoint(self):
         with patch('capture.wasapi_loopback._library', return_value=FakeLibrary()):
@@ -122,6 +127,90 @@ class WASAPITests(unittest.TestCase):
                 time.sleep(.03)
                 session.stop()
                 session.validate()
+
+    def test_wasapi_stall_keeps_silent_time_in_pcm(self):
+        # Loopback devices sometimes block until the next sound. Previously
+        # this erased the quiet time and pulled sound ahead of the video.
+        class BlockingStream(FakeStream):
+            calls = 0
+
+            def read(self, size, exception_on_overflow=False):
+                self.calls += 1
+                time.sleep(.19 if self.calls == 2 else .023)
+                return (4096).to_bytes(2, 'little', signed=True) * (size * 2)
+
+        class BlockingManager(FakeManager):
+            def open(self, **kwargs):
+                return BlockingStream()
+
+        class BlockingLibrary(FakeLibrary):
+            def PyAudio(self):
+                return BlockingManager()
+
+        with patch('capture.wasapi_loopback._library',
+                   return_value=BlockingLibrary()):
+            with TemporaryDirectory() as folder:
+                session = SystemAudioCapture(Path(folder) / 'delayed.wav')
+                session.start()
+                time.sleep(.29)
+                session.stop()
+                session.validate()
+                self.assertGreaterEqual(session.duration, .26)
+
+    def test_stop_only_closes_portaudio_on_reader_thread(self):
+        """Prevent crashing Python while a WASAPI read owns the native stream."""
+        closed = []
+        class OwnedStream(FakeStream):
+            owner = None
+
+            def read(self, size, exception_on_overflow=False):
+                self.owner = threading.get_ident()
+                time.sleep(.006)
+                return super().read(size, exception_on_overflow)
+
+            def stop_stream(self):
+                closed.append(('stop', threading.get_ident(), self.owner))
+
+            def close(self):
+                closed.append(('close', threading.get_ident(), self.owner))
+
+        class OwnedManager(FakeManager):
+            stream = None
+
+            def __init__(self):
+                super().__init__()
+                self.init_thread = threading.get_ident()
+
+            def open(self, **kwargs):
+                self.stream = OwnedStream()
+                return self.stream
+
+            def terminate(self):
+                self.assert_owner_thread()
+                closed.append(('terminate', threading.get_ident(), self.stream.owner))
+                super().terminate()
+
+            def assert_owner_thread(self):
+                if threading.get_ident() != self.init_thread:
+                    raise AssertionError('PortAudio manager crossed worker threads')
+
+        class OwnedLibrary(FakeLibrary):
+            def PyAudio(self):
+                return OwnedManager()
+
+        with patch('capture.wasapi_loopback._library', return_value=OwnedLibrary()):
+            with TemporaryDirectory() as folder:
+                session = SystemAudioCapture(Path(folder) / 'owned.wav')
+                session.start()
+                time.sleep(.045)
+                # Called on the test/recorder thread, *not* the native reader.
+                caller = threading.get_ident()
+                session.stop()
+                session.validate()
+                self.assertEqual([kind for kind, _, _ in closed],
+                                 ['stop', 'close', 'terminate'])
+                self.assertTrue(all(actual == reader != caller
+                                    for _, actual, reader in closed))
 
     def test_silent_system_audio_is_reported_as_failure(self):
         class SilentStream(FakeStream):

@@ -1,0 +1,70 @@
+"""A/V sync regression cases from a real 30.93s/18.77s Shorts export."""
+import time
+import unittest
+
+from capture.ffmpeg_backend import validate_audio_coverage
+from editor.audio_preview import AudioPlayback
+from editor.models import MediaInfo
+from pathlib import Path
+
+
+def packet_info(video, audio):
+    return {
+        'format': {'duration': str(video)},
+        'streams': [
+            {'codec_type': 'video', 'duration': str(video)},
+            {'codec_type': 'audio', 'duration': str(audio)},
+        ],
+    }
+
+
+class SyncChecks(unittest.TestCase):
+    def test_rejects_real_observed_12_second_missing_audio(self):
+        with self.assertRaisesRegex(RuntimeError, 'Audio ended at 18.77s'):
+            validate_audio_coverage(packet_info(30.933333, 18.773250))
+
+    def test_accepts_normal_aac_encoder_padding(self):
+        validate_audio_coverage(packet_info(30.933333, 30.90))
+        validate_audio_coverage(packet_info(30.933333, 30.70))
+
+    def test_rejects_the_new_real_900ms_deficit(self):
+        # An unedited GTA VI recording: 32.333s video, 31.433s audio.
+        # The previous 3%-of-video allowance silently passed this.
+        with self.assertRaisesRegex(RuntimeError, 'Audio ended at 31.43s'):
+            validate_audio_coverage(packet_info(32.333333, 31.432771))
+
+    def test_late_audio_start_is_reported_as_start_not_early_end(self):
+        info = packet_info(32.2, 31.6)
+        info['streams'][1]['start_time'] = '0.6'
+        with self.assertRaisesRegex(RuntimeError, 'Audio begins 0.60s after video'):
+            validate_audio_coverage(info)
+
+    def test_stream_end_uses_start_plus_duration(self):
+        # A positive start timestamp is NOT itself an early end. The start
+        # check must report the actual problem; ending after video is fine.
+        info = packet_info(4.0, 3.8)
+        info['streams'][1]['start_time'] = '0.2'
+        validate_audio_coverage(info)
+
+    def test_rejects_missing_audio_or_video(self):
+        for info in ({'format': {'duration': '30'}, 'streams': []},
+                     packet_info(30, 0)):
+            with self.subTest(info=info), self.assertRaises(RuntimeError):
+                validate_audio_coverage(info)
+
+    def test_audio_master_clock_waits_for_first_pcm(self):
+        media = MediaInfo(Path('recording.mp4'), 40, 1920, 1080, 30, True)
+        player = AudioPlayback('ffmpeg', media)
+        try:
+            self.assertIsNone(player.elapsed())
+            with player._lock:
+                player._audio_clock_start = time.monotonic() - 2
+            self.assertAlmostEqual(player.elapsed(), 2.0, delta=.1)
+            player.stop()
+            self.assertIsNone(player.elapsed())
+        finally:
+            player.close()
+
+
+if __name__ == '__main__':
+    unittest.main()

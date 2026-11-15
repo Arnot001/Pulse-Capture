@@ -14,6 +14,13 @@ FRAMES = 1024
 MIN_AUDIBLE_PEAK = 65
 
 
+def missing_loopback_frames(received, started, written, block, rate):
+    """Conservatively restore clock gaps without treating normal jitter as loss."""
+    expected_prior = max(0, round((received - started)*rate) - block)
+    missing = expected_prior - written
+    return missing if missing > max(round(.12 * rate), 2 * FRAMES) else 0
+
+
 def is_wasapi(identifier):
     return identifier == DEVICE_ID or (
         isinstance(identifier, str) and identifier.startswith(DEVICE_PREFIX)
@@ -101,77 +108,133 @@ class SystemAudioCapture:
         self.started_at = None
         self.frames = 0
         self.peak = 0
+        self.stop_at = None
+        self.rate = None
 
     def start(self):
         if self._thread:
             raise RuntimeError('Windows audio is already recording.')
-        audio = _library()
-        self._manager = audio.PyAudio()
+        self._thread = threading.Thread(
+            target=self._record, daemon=True, name='Pulse Windows audio')
+        self._thread.start()
+        if not self._started.wait(5):
+            self.stop()
+            raise RuntimeError('Windows audio capture did not start.')
+        if self.error:
+            self.stop()
+            raise RuntimeError(self.error)
+
+    def _record(self):
         try:
+            # PortAudio is initialized, opened, read and closed on this same
+            # thread. No other thread invokes a method on the native device.
+            audio = _library()
+            self._manager = audio.PyAudio()
             info = _device(self._manager, self.identifier)
             channels = min(2, int(info['maxInputChannels']))
             rate = round(float(info['defaultSampleRate']))
+            self.rate = rate
             self._stream = self._manager.open(
                 format=audio.paInt16, channels=channels, rate=rate, input=True,
                 input_device_index=int(info['index']), frames_per_buffer=FRAMES)
-            self._thread = threading.Thread(
-                target=self._record, args=(channels, rate), daemon=True,
-                name='Pulse Windows audio')
-            self._thread.start()
-            if not self._started.wait(5):
-                raise RuntimeError('Windows audio capture did not start.')
-            if self.error:
-                raise RuntimeError(self.error)
-        except Exception:
-            self.stop()
-            raise
-
-    def _record(self, channels, rate):
-        try:
+            if self._stop.is_set():
+                return
             with wave.open(str(self.path), 'wb') as output:
                 output.setnchannels(channels)
                 output.setsampwidth(2)
                 output.setframerate(rate)
                 self.started_at = time.monotonic()
                 self._started.set()
-                while not self._stop.is_set():
-                    samples = self._stream.read(FRAMES, exception_on_overflow=False)
-                    if not samples:
-                        raise RuntimeError('Windows audio stopped supplying samples.')
-                    output.writeframesraw(samples)
-                    self.frames += len(samples) // (channels * 2)
-                    # Signal diagnostic guards against the common failure:
-                    # an audio track exists but its samples are near-silent.
-                    levels = array('h')
-                    levels.frombytes(samples)
-                    if levels:
-                        self.peak = max(self.peak, max(abs(v) for v in levels))
+                bytes_per_frame = channels * 2
+
+                def pad_frames(count):
+                    # Avoid materializing a large silence buffer for a long gap.
+                    while count > 0:
+                        step = min(count, rate)
+                        output.writeframesraw(bytes(step * bytes_per_frame))
+                        self.frames += step
+                        count -= step
+
+                try:
+                    while not self._stop.is_set():
+                        try:
+                            samples = self._stream.read(FRAMES, exception_on_overflow=False)
+                        except Exception:
+                            # Stop can interrupt a blocking WASAPI read; the
+                            # enclosing finally still pads and closes the WAV.
+                            if self._stop.is_set():
+                                break
+                            raise
+                        received = time.monotonic()
+                        if not samples:
+                            raise RuntimeError('Windows audio stopped supplying samples.')
+                        if len(samples) % bytes_per_frame:
+                            raise RuntimeError('WASAPI returned misaligned PCM samples.')
+                        block_frames = len(samples) // bytes_per_frame
+                        # WASAPI loopback can temporarily block while an application
+                        # is silent. A plain WAV erases those silent intervals and
+                        # plays later audio too early. Restore missing wall-clock
+                        # time *before* the next block. Ignore normal device jitter.
+                        missing = missing_loopback_frames(
+                            received, self.started_at, self.frames, block_frames, rate)
+                        if missing:
+                            pad_frames(missing)
+                        output.writeframesraw(samples)
+                        self.frames += block_frames
+                        # Audio-track presence does not prove an audible signal.
+                        levels = array('h')
+                        levels.frombytes(samples)
+                        if levels:
+                            self.peak = max(self.peak, max(abs(v) for v in levels))
+                finally:
+                    # Also retain silence at the end, when a paused loopback device
+                    # delivered no final samples before the user pressed Stop.
+                    if self.stop_at is not None:
+                        trailing = round((self.stop_at - self.started_at) * rate) - self.frames
+                        if trailing > 0:
+                            pad_frames(trailing)
         except Exception as exc:
             if not self._stop.is_set():
                 self.error = f'Windows audio recording failed: {exc}'
         finally:
             self._started.set()
+            # PortAudio native objects belong exclusively to the reader
+            # thread once it starts. Closing them from a second thread while
+            # read() is active can crash Python with Windows 0xC0000005.
+            stream, manager = self._stream, self._manager
+            if stream:
+                try:
+                    stream.stop_stream()
+                    stream.close()
+                except Exception:
+                    pass
+                self._stream = None
+            if manager:
+                try:
+                    manager.terminate()
+                except Exception:
+                    pass
+                self._manager = None
 
     def stop(self):
+        if self.stop_at is None:
+            self.stop_at = time.monotonic()
         self._stop.set()
-        if self._stream:
-            try:
-                self._stream.stop_stream()
-            except Exception:
-                pass
-        if self._thread:
+        # Do NOT call any PortAudio method here. This is the recorder thread
+        # while _record() owns and may still be reading from the native stream.
+        if self._thread and self._thread is not threading.current_thread():
             self._thread.join(timeout=5)
             if self._thread.is_alive():
-                self.error = self.error or 'Windows audio did not stop cleanly.'
-        if self._stream:
-            try:
-                self._stream.close()
-            except Exception:
-                pass
-            self._stream = None
-        if self._manager:
-            self._manager.terminate()
-            self._manager = None
+                # Fail explicitly; leave the blocked daemon as native owner
+                # rather than touching its memory from the wrong thread.
+                self.error = self.error or (
+                    'Windows audio device did not stop. Recording was not saved; '
+                    'close Pulse Capture before trying the device again.'
+                )
+
+    @property
+    def duration(self):
+        return self.frames / self.rate if self.rate else 0.0
 
     def validate(self):
         if self.error:

@@ -1,6 +1,10 @@
 """Tests for edit-station audio: source, cuts, speed and original/Pulse music."""
 from pathlib import Path
 import unittest
+import threading
+import time
+import sys
+from unittest.mock import patch
 
 from editor.audio_preview import audio_preview_command, AudioPlayback
 from editor.cuts import CutPlan, CutRange
@@ -58,6 +62,88 @@ class EditAudioTests(unittest.TestCase):
         self.assertIn('1:a:0', ' '.join(cmd))
         self.assertIn('pipe:1', cmd)
         self.assertIn('-stream_loop', cmd)
+
+    def test_rapid_play_seek_close_uses_single_native_owner(self):
+        """Regression for access violation when Tk stopped a live PortAudio write."""
+        class FakeNative:
+            paInt16 = 8
+            active = 0
+            maximum = 0
+            owners = []
+            violations = []
+
+            class PyAudio:
+                def open(self, **kwargs):
+                    class Stream:
+                        owner = None
+
+                        def write(self, data):
+                            self.owner = threading.get_ident()
+                            time.sleep(.015)
+
+                        def stop_stream(self):
+                            if self.owner and self.owner != threading.get_ident():
+                                FakeNative.violations.append('cross-thread stop')
+
+                        def close(self):
+                            if self.owner and self.owner != threading.get_ident():
+                                FakeNative.violations.append('cross-thread close')
+                            FakeNative.active -= 1
+
+                    FakeNative.active += 1
+                    FakeNative.maximum = max(FakeNative.maximum, FakeNative.active)
+                    return Stream()
+
+                def terminate(self):
+                    pass
+
+        class FakeProcess:
+            def __init__(self, *args, **kwargs):
+                self.terminated = False
+                self.stdout = self
+                self.stderr = self
+
+            def read(self, size):
+                time.sleep(.004)
+                return bytes([1]) * size if not self.terminated else b''
+
+            def poll(self):
+                return -1 if self.terminated else None
+
+            def terminate(self):
+                self.terminated = True
+
+            def kill(self):
+                self.terminated = True
+
+            def communicate(self, timeout=None):
+                return (b'', b'')
+
+            def wait(self, timeout=None):
+                return 0
+
+        player = AudioPlayback('ffmpeg', self.media)
+        with (patch.dict(sys.modules, {'pyaudiowpatch': FakeNative}),
+              patch('editor.audio_preview.subprocess.Popen', FakeProcess),
+              patch('editor.audio_preview.audio_preview_command', return_value=['ffmpeg'])):
+            player.play(1, self.trim, CutPlan(), EditOptions())
+            deadline = time.monotonic() + 2
+            while FakeNative.active == 0 and time.monotonic() < deadline:
+                time.sleep(.005)
+            self.assertEqual(FakeNative.active, 1)
+            # Rapid seek while a native PCM write is in progress used to call
+            # stop_stream() from Tk and start another concurrent PortAudio stream.
+            for position in (2, 3, 4, 5, 6):
+                player.play(position, self.trim, CutPlan(), EditOptions())
+                time.sleep(.005)
+            player.stop()
+            player.close()
+            if player._worker:
+                player._worker.join(timeout=3)
+            self.assertFalse(player._worker and player._worker.is_alive())
+            self.assertEqual(FakeNative.violations, [])
+            self.assertEqual(FakeNative.maximum, 1)
+            self.assertEqual(FakeNative.active, 0)
 
     def test_preview_stop_and_close_are_idempotent(self):
         # No source audio: no background player or device initialization.

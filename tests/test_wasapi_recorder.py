@@ -21,6 +21,8 @@ class FakeCapture:
         self.started_at = None
         self.error = None
         self.stopped = False
+        # Mock audio started 0.75s before the video but they stop together.
+        self.duration = 2.75
         self.__class__.instances.append(self)
 
     def start(self):
@@ -41,12 +43,17 @@ class RecorderWASAPITests(unittest.TestCase):
             calls = []
             def validate(probe, path, expect_audio):
                 calls.append((str(path), expect_audio))
-                return {'format': {'duration': 2.0}}
+                return {
+                    'format': {'duration': 2.0},
+                    'streams': [{'codec_type': 'video', 'duration': '2.0'},
+                                {'codec_type': 'audio', 'duration': '2.0'}]
+                }
 
             def merge(ffmpeg, video, wav, destination, duration, mic, offset):
                 self.assertTrue(Path(wav).is_file())
                 self.assertFalse(mic)
                 self.assertEqual(duration, 2.0)
+                self.assertAlmostEqual(offset, 0.75, places=5)
                 Path(destination).write_bytes(b'video+system-audio')
 
             with patch('capture.recorder.SystemAudioCapture', FakeCapture), \
@@ -65,6 +72,42 @@ class RecorderWASAPITests(unittest.TestCase):
             self.assertTrue(FakeCapture.instances[-1].stopped)
             self.assertEqual(len(list(Path(folder).glob('*.mp4'))), 1)
             self.assertFalse(list(Path(folder).glob('*.wasapi.wav')))
+
+    def test_audio_validation_failure_preserves_wav_and_attempted_mp4(self):
+        """Previously both files were deleted, leaving only video-only partial."""
+        with TemporaryDirectory() as folder:
+            def validate(probe, path, expect_audio):
+                audio_duration = '1.2' if str(path).endswith('.mixed.mp4') else '2.0'
+                return {
+                    'format': {'duration': 2.0},
+                    'streams': [
+                        {'codec_type': 'video', 'start_time': '0', 'duration': '2.0'},
+                        {'codec_type': 'audio', 'start_time': '0',
+                         'duration': audio_duration},
+                    ],
+                }
+
+            def merge(ffmpeg, video, wav, destination, duration, mic, offset):
+                Path(destination).write_bytes(b'incomplete-but-recoverable-audio-merge')
+
+            with (patch('capture.recorder.SystemAudioCapture', FakeCapture),
+                  patch('capture.recorder.merge_audio', side_effect=merge)):
+                recorder = Recorder(Backend('ffmpeg', 'ffprobe', True),
+                                    popen=FakeProcess, validator=validate)
+                recorder.start(CaptureOptions(audio=(DEVICE_ID,)), Path(folder))
+                deadline = time.monotonic() + 3
+                while recorder.state != State.RECORDING and time.monotonic() < deadline:
+                    time.sleep(.01)
+                self.assertEqual(recorder.state, State.RECORDING)
+                recorder.stop()
+                self.assertTrue(recorder.wait(3))
+                self.assertEqual(recorder.state, State.ERROR)
+            folder_path = Path(folder)
+            self.assertEqual(len(list(folder_path.glob('*.wasapi.wav'))), 1)
+            self.assertEqual(len(list(folder_path.glob('*.mixed.mp4'))), 1)
+            self.assertEqual(len(list(folder_path.glob('*.partial.mp4'))), 1)
+            self.assertFalse([p for p in folder_path.glob('*.mp4')
+                              if '.partial.' not in p.name and '.mixed.' not in p.name])
 
     def test_missing_system_audio_cannot_be_reported_saved(self):
         class Broken(FakeCapture):

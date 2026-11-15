@@ -1,0 +1,27 @@
+name: Pulse Capture audio sync smoke
+on:
+  push:
+    branches:
+      - fix/audio-clock-sync-and-launcher-20261113
+  workflow_dispatch:
+
+jobs:
+  audio-sync-tests:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Python 3.13
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Run audio synchronization and editor tests
+        shell: pwsh
+        run: |
+          python -m unittest discover -s tests -p 'test_audio_sync.py' -v
+          python -m unittest discover -s tests -p 'test_system_audio_mux.py' -v
+          python -m unittest discover -s tests -p 'test_wasapi_clock.py' -v
+          python -m unittest discover -s tests -p 'test_wasapi_audio.py' -v
+          python -m unittest discover -s tests -p 'test_wasapi_recorder.py' -v
+          python -m unittest discover -s tests -p 'test_editor_audio_preview.py' -v
+          python -m unittest discover -s tests -p 'test_recorder.py' -v
