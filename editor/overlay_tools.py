@@ -29,8 +29,13 @@ class OverlayTools(PrivacyTools):
             segments = window.add_segments(group, var, choices, self.text_changed)
             for _, button in segments.buttons:
                 button.configure(padx=7, pady=4)
-        t.label(panel, 'Whole clip · Up to 3 lines / 160 characters · Long lines shrink to fit',
-                9, t.MUTED).pack(anchor='w')
+        footer = tk.Frame(panel, bg=t.PANEL)
+        footer.pack(fill='x')
+        t.label(footer, 'Whole clip · 3 lines / 160 characters', 9, t.MUTED).pack(side='left')
+        self.caption_button = t.button(footer, 'TIMED CAPTIONS', self.edit_captions)
+        self.caption_button.configure(pady=1, font=(t.FONT, -9, 'bold'))
+        self.caption_button.pack(side='right')
+        window.controls.append(self.caption_button)
         super().__init__(window)
 
     def text_modified(self, _=None):
@@ -40,8 +45,14 @@ class OverlayTools(PrivacyTools):
 
     def commit_text(self):
         w = self.window
-        w.edits = replace(w.edits, text=TextOverlay(self.text_on.get(), self.input.get('1.0', 'end-1c'),
-                                                  self.text_size.get(), self.text_position.get()))
+        w.edits = replace(w.edits, text=replace(w.edits.text, enabled=self.text_on.get(),
+                         text=self.input.get('1.0', 'end-1c'), size=self.text_size.get(),
+                         position=self.text_position.get()))
+
+    def edit_captions(self):
+        from .caption_tools import CaptionDialog
+        if not self.window.exporter.busy:
+            CaptionDialog(self.window)
 
     def text_changed(self):
         w = self.window
