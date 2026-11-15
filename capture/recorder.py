@@ -184,11 +184,15 @@ class Recorder:
                     system_audio.stop()
                 except Exception as exc:
                     failure = failure or f'Could not stop Windows audio: {exc}'
-                try:
-                    system_audio.path.unlink(missing_ok=True)
-                except OSError as exc:
-                    failure = failure or f'Could not remove temporary Windows audio: {exc}'
-            if merged:
+                # On failure keep the WAV and attempted mixed MP4 so another
+                # 30-second recording isn't lost as a video-only partial.
+                # Delete intermediates only after a validated MP4 was saved.
+                if saved and not failure:
+                    try:
+                        system_audio.path.unlink(missing_ok=True)
+                    except OSError as exc:
+                        failure = failure or f'Could not clean up temporary Windows audio: {exc}'
+            if merged and saved:
                 try:
                     merged.unlink(missing_ok=True)
                 except OSError:
@@ -213,6 +217,13 @@ class Recorder:
                     failure = failure or str(exc)
             if failure:
                 partial = reservation.partial if reservation and reservation.partial.exists() else None
+                retained = []
+                if system_audio and system_audio.path.is_file():
+                    retained.append(f'Windows audio WAV: {system_audio.path}')
+                if merged and merged.is_file():
+                    retained.append(f'Attempted merged MP4: {merged}')
+                if retained:
+                    failure += '\\nPreserved for recovery:\\n' + '\\n'.join(retained)
                 self._set(State.ERROR, failure, partial)
             elif saved:
                 self._set(State.SAVED, path=saved)
