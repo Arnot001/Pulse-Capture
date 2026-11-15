@@ -40,6 +40,7 @@ class EditorWindow(tk.Toplevel):
         self.position, self.token = 0.0, 0
         self.play_anchor = 0.0
         self.play_anchor_elapsed = 0.0
+        self._waiting_for_play_frame = False
         self.last_export = None
         self.output_folder = self.path.parent
         self._seek_id = self._poll_id = self._play_id = None
@@ -543,6 +544,7 @@ class EditorWindow(tk.Toplevel):
         self.stop_button.configure(state='normal' if ready else 'disabled')
 
     def toggle_audio(self):
+        self._waiting_for_play_frame = False
         self.audio_toggle.configure(text='SOUND ON' if self.audio_on.get() else 'MUTED')
         if self.playing and self.trim:
             self.position = self.cuts.source_from_elapsed(self._elapsed_kept(), self.trim)
@@ -566,8 +568,13 @@ class EditorWindow(tk.Toplevel):
             if self.position >= segments[-1].end - 1e-9:
                 self.position = segments[0].start
         self.playing = True
-        if self.audio_on.get() and self.audio_player:
-            self.audio_player.play(self.position, self.trim, self.cuts, self.edits)
+        # Don't start audio while FFmpeg is still decoding the first displayed
+        # frame. Otherwise the soundtrack races ahead of the *picture* during
+        # preview startup, even if both streams share the same clock.
+        self._waiting_for_play_frame = bool(
+            self.audio_on.get() and self.audio_player and
+            (self.media.has_audio or self.edits.music.enabled)
+        )
         self.play_anchor = self.position
         self.play_anchor_elapsed = self.cuts.source_elapsed(self.position, self.trim)
         self.play_started = time.monotonic()
@@ -613,6 +620,7 @@ class EditorWindow(tk.Toplevel):
             self.position = self.cuts.source_from_elapsed(elapsed, self.trim)
         if self.audio_player:
             self.audio_player.stop()
+        self._waiting_for_play_frame = False
         self.playing = False
         if self._play_id:
             self.after_cancel(self._play_id)
@@ -741,6 +749,11 @@ class EditorWindow(tk.Toplevel):
                         self.video.itemconfigure('placeholder', text='')
                         self.video.show_frame(self._photo, frame.source_view, frame.edits, frame.position)
                         if self.playing:
+                            if self._waiting_for_play_frame:
+                                self._waiting_for_play_frame = False
+                                self.play_started = time.monotonic()
+                                self.audio_player.play(self.position, self.trim,
+                                                       self.cuts, self.edits)
                             self._play_id = self.after(60, self.next_frame)
             except Empty:
                 pass
