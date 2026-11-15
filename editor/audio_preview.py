@@ -88,74 +88,103 @@ def audio_preview_command(ffmpeg, media, source_position, trim, cuts=None,
 
 
 class AudioPlayback:
-    """Background audio-only player. Never calls Tk from worker threads."""
+    """Serialize native audio lifetime on exactly one owner thread.
+
+    The Tk thread may request play/stop/seek and terminate the FFmpeg *child*
+    process to wake a blocked pipe, but it never calls PortAudio stream methods.
+    A new playback starts only after the previous session's stream is closed.
+    """
+
     def __init__(self, ffmpeg, media):
         self.ffmpeg, self.media = ffmpeg, media
         self.errors = Queue()
-        self._worker = self._process = self._stream = None
-        self._closed = False
-        self._cancel = threading.Event()
         self._lock = threading.RLock()
+        self._wake = threading.Condition(self._lock)
+        self._worker = None
+        self._process = None
+        self._closed = False
+        self._pending = None
+        self._active_cancel = None
         self._audio_clock_start = None
         self._audio_failed = False
         self._play_requested_at = None
 
+    def _interrupt_locked(self):
+        if self._active_cancel is not None:
+            self._active_cancel.set()
+        # Terminating a child process is safe here. Only the worker touches
+        # native PortAudio methods, and the worker alone closes its streams.
+        process = self._process
+        if process is not None and process.poll() is None:
+            try:
+                process.terminate()
+            except OSError:
+                pass
+
     def play(self, position, trim, cuts, edits):
-        self.stop()
-        if not self.media.has_audio and not edits.music.enabled:
-            return
-        with self._lock:
+        with self._wake:
             if self._closed:
                 return
-            cancel = threading.Event()
-            self._cancel = cancel
+            self._interrupt_locked()
             self._audio_clock_start = None
             self._audio_failed = False
             self._play_requested_at = time.monotonic()
-            self._worker = threading.Thread(
-                target=self._run, args=(cancel, position, trim, cuts, edits),
-                daemon=True, name='Pulse edit audio preview')
-            self._worker.start()
+            self._pending = (position, trim, cuts, edits) if (
+                self.media.has_audio or edits.music.enabled) else None
+            if self._pending and (self._worker is None or not self._worker.is_alive()):
+                self._worker = threading.Thread(
+                    target=self._run, daemon=True, name='Pulse edit audio output')
+                self._worker.start()
+            self._wake.notify_all()
 
     def elapsed(self):
-        """Seconds on the playback audio clock; None during device startup.
-
-        The video playhead must not race ahead while FFmpeg/PyAudio opens.
-        Playback is timed by the first PCM block handed to the speaker.
-        """
         with self._lock:
             if self._audio_clock_start is not None:
                 return max(0.0, time.monotonic() - self._audio_clock_start)
             if self._audio_failed and self._play_requested_at is not None:
-                # Video preview should remain usable without audio hardware.
                 return max(0.0, time.monotonic() - self._play_requested_at)
             return None
 
     def stop(self):
-        with self._lock:
-            self._cancel.set()
+        with self._wake:
+            self._pending = None
+            self._interrupt_locked()
             self._audio_clock_start = None
-            process = self._process
-            stream = self._stream
-            if process and process.poll() is None:
-                try:
-                    process.terminate()
-                except OSError:
-                    pass
-            if stream:
-                try:
-                    stream.stop_stream()
-                except Exception:
-                    pass
+            self._play_requested_at = None
+            self._wake.notify_all()
 
     def close(self):
-        self.stop()
-        with self._lock:
+        with self._wake:
             self._closed = True
+            self._pending = None
+            self._interrupt_locked()
+            self._audio_clock_start = None
+            self._wake.notify_all()
+        # Never join here from the Tk thread while PortAudio might be busy;
+        # the worker owns and releases its native resources in finally.
 
-    def _run(self, cancel, position, trim, cuts, edits):
+    def _run(self):
+        while True:
+            with self._wake:
+                self._wake.wait_for(lambda: self._closed or self._pending is not None)
+                if self._closed:
+                    return
+                request = self._pending
+                self._pending = None
+                cancel = threading.Event()
+                self._active_cancel = cancel
+            self._run_session(cancel, *request)
+            with self._wake:
+                if self._active_cancel is cancel:
+                    self._active_cancel = None
+                if self._closed:
+                    return
+
+    def _run_session(self, cancel, position, trim, cuts, edits):
         process = stream = manager = None
         try:
+            if cancel.is_set():
+                return
             try:
                 import pyaudiowpatch as pyaudio
             except (ImportError, OSError) as exc:
@@ -168,24 +197,29 @@ class AudioPlayback:
             manager = pyaudio.PyAudio()
             if cancel.is_set():
                 return
+            # Only this worker may open, write, stop, close and terminate
+            # PortAudio; even a rapid seek cannot run two streams concurrently.
             stream = manager.open(format=pyaudio.paInt16, channels=2,
                                   rate=SAMPLE_RATE, output=True,
                                   frames_per_buffer=BLOCK_BYTES // 4)
+            if cancel.is_set():
+                return
             process = subprocess.Popen(command, stdin=subprocess.DEVNULL,
                                        stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                                        **process_options())
             with self._lock:
+                self._process = process
                 if cancel.is_set():
                     process.terminate()
                     return
-                self._process, self._stream = process, stream
             while not cancel.is_set():
                 data = process.stdout.read(BLOCK_BYTES)
-                if not data:
+                if not data or cancel.is_set():
                     break
                 with self._lock:
-                    if self._audio_clock_start is None:
+                    if self._active_cancel is cancel and self._audio_clock_start is None:
                         self._audio_clock_start = time.monotonic()
+                # Never hold the shared lock while the native device writes.
                 stream.write(data)
             if not cancel.is_set():
                 code = process.wait(timeout=2)
@@ -195,17 +229,22 @@ class AudioPlayback:
         except Exception as exc:
             if not cancel.is_set():
                 with self._lock:
-                    self._audio_failed = True
+                    if self._active_cancel is cancel:
+                        self._audio_failed = True
                 self.errors.put(str(exc))
         finally:
             if process:
                 if process.poll() is None:
-                    process.kill()
+                    try:
+                        process.kill()
+                    except OSError:
+                        pass
                 try:
                     process.communicate(timeout=2)
                 except subprocess.TimeoutExpired:
                     process.kill()
                     process.communicate()
+            # Never touch the stream or its manager outside this worker.
             if stream:
                 try:
                     stream.stop_stream()
@@ -213,7 +252,10 @@ class AudioPlayback:
                 except Exception:
                     pass
             if manager:
-                manager.terminate()
+                try:
+                    manager.terminate()
+                except Exception:
+                    pass
             with self._lock:
-                if self._cancel is cancel:
-                    self._process = self._stream = None
+                if self._process is process:
+                    self._process = None
