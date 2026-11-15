@@ -1,5 +1,6 @@
 """Binary discovery, pure command construction, and output validation."""
 import json
+import math
 import os
 from pathlib import Path
 import re
@@ -153,12 +154,27 @@ def validate_audio_coverage(info, *, tolerance_seconds=0.3):
     try:
         video_length = float(video.get('duration') or info['format']['duration'])
         audio_length = float(audio['duration'])
+        video_start = float(video.get('start_time') or 0)
+        audio_start = float(audio.get('start_time') or 0)
     except (ValueError, TypeError, KeyError) as exc:
-        raise RuntimeError('Could not verify audio/video stream durations.') from exc
-    if video_length <= 0 or audio_length <= 0:
-        raise RuntimeError('One of the saved audio/video streams has zero duration.')
-    if audio_length < video_length - tolerance_seconds:
+        raise RuntimeError('Could not verify audio/video stream timings.') from exc
+    if (not all(map(math.isfinite,
+                    (video_length, audio_length, video_start, audio_start)))
+            or video_length <= 0 or audio_length <= 0):
+        raise RuntimeError('Saved audio/video streams have invalid timing metadata.')
+    if audio_start - video_start > tolerance_seconds:
         raise RuntimeError(
-            f'Audio ended at {audio_length:.2f}s but video runs {video_length:.2f}s. '
-            'The recording/export is out of sync; the source file was preserved.'
+            f'Audio begins {audio_start-video_start:.2f}s after video. '
+            'The recording/export is out of sync; source files were retained.'
+        )
+    # Stream.duration is its *length*, not its end timestamp. E.g. audio
+    # start_time=.6 and duration=31.6 ends at 32.2; the old check wrongly
+    # called that an early end by comparing durations alone.
+    video_end = video_start + video_length
+    audio_end = audio_start + audio_length
+    if audio_end < video_end - tolerance_seconds:
+        raise RuntimeError(
+            f'Audio ended at {audio_end-video_start:.2f}s but video runs '
+            f'{video_length:.2f}s. The recording/export is out of sync; '
+            'source files were retained.'
         )
