@@ -30,6 +30,7 @@ try {
     if (-not $SkipTests) {
         $patterns = @(
             'test_audio_sync.py',
+            'test_system_audio_mux.py',
             'test_wasapi_clock.py',
             'test_wasapi_audio.py',
             'test_wasapi_recorder.py',
