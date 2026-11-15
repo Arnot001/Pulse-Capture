@@ -12,7 +12,7 @@ from .ffmpeg_backend import (build_command, process_options, validate_output,
                              validate_audio_coverage)
 from .filenames import reserve
 from .wasapi_loopback import is_wasapi, SystemAudioCapture
-from .system_audio_mux import merge_audio
+from .system_audio_mux import merge_audio, measured_sync_offset
 
 
 class State(str, Enum):
@@ -176,20 +176,14 @@ class Recorder:
                 if not info:
                     raise RuntimeError('Cannot determine video duration before merging system audio.')
                 duration = float(info['format']['duration'])
-                # If capture audio was shortened by stalls (rather than
-                # padded with silence), never silently speed it up to fit.
-                # This previously produced Shorts with audio finishing over
-                # twelve seconds before the picture.
-                recorded_audio = getattr(system_audio, 'duration', duration)
-                allowed = max(1.0, duration * .04)
-                offset = (self._video_origin or video_launch) - system_audio.started_at
-                aligned_audio = recorded_audio - max(0.0, offset)
-                if duration - aligned_audio > allowed:
-                    raise RuntimeError(
-                        f'System audio captured only {aligned_audio:.2f}s for a '
-                        f'{duration:.2f}s video. Recording clocks diverged; '
-                        'the unsynced partial was kept for diagnostics.'
-                    )
+                # WASAPI starts ahead of FFmpeg. Estimating FFmpeg's first
+                # frame from its delayed progress callback over-trimmed a
+                # real 32.33s recording by 0.90s, moving speech ahead of
+                # the picture. Compare the measured source audio and video
+                # durations instead: both receive the same Stop signal.
+                if not system_audio.duration:
+                    raise RuntimeError('No usable WASAPI audio duration for synchronisation.')
+                offset = measured_sync_offset(system_audio.duration, duration)
                 merged = reservation.partial.with_suffix('.mixed.mp4')
                 merge_audio(self.backend.ffmpeg, reservation.partial, system_audio.path,
                             merged, duration, has_microphone, offset)
