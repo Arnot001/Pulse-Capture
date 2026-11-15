@@ -14,6 +14,13 @@ FRAMES = 1024
 MIN_AUDIBLE_PEAK = 65
 
 
+def missing_loopback_frames(received, started, written, block, rate):
+    """Conservatively restore clock gaps without treating normal jitter as loss."""
+    expected_prior = max(0, round((received - started)*rate) - block)
+    missing = expected_prior - written
+    return missing if missing > max(round(.12 * rate), 2 * FRAMES) else 0
+
+
 def is_wasapi(identifier):
     return identifier == DEVICE_ID or (
         isinstance(identifier, str) and identifier.startswith(DEVICE_PREFIX)
@@ -149,7 +156,14 @@ class SystemAudioCapture:
 
                 try:
                     while not self._stop.is_set():
-                        samples = self._stream.read(FRAMES, exception_on_overflow=False)
+                        try:
+                            samples = self._stream.read(FRAMES, exception_on_overflow=False)
+                        except Exception:
+                            # Stop can interrupt a blocking WASAPI read; the
+                            # enclosing finally still pads and closes the WAV.
+                            if self._stop.is_set():
+                                break
+                            raise
                         received = time.monotonic()
                         if not samples:
                             raise RuntimeError('Windows audio stopped supplying samples.')
@@ -160,10 +174,9 @@ class SystemAudioCapture:
                         # is silent. A plain WAV erases those silent intervals and
                         # plays later audio too early. Restore missing wall-clock
                         # time *before* the next block. Ignore normal device jitter.
-                        expected_prior = max(0, round(
-                            (received - self.started_at) * rate) - block_frames)
-                        missing = expected_prior - self.frames
-                        if missing > max(0.12 * rate, 2 * FRAMES):
+                        missing = missing_loopback_frames(
+                            received, self.started_at, self.frames, block_frames, rate)
+                        if missing:
                             pad_frames(missing)
                         output.writeframesraw(samples)
                         self.frames += block_frames
