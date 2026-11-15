@@ -105,7 +105,7 @@ class EditAudioTests(unittest.TestCase):
 
             def read(self, size):
                 time.sleep(.004)
-                return b'\\x01' * size if not self.terminated else b''
+                return bytes([1]) * size if not self.terminated else b''
 
             def poll(self):
                 return -1 if self.terminated else None
@@ -123,9 +123,9 @@ class EditAudioTests(unittest.TestCase):
                 return 0
 
         player = AudioPlayback('ffmpeg', self.media)
-        with patch.dict(sys.modules, {'pyaudiowpatch': FakeNative}), \\
-             patch('editor.audio_preview.subprocess.Popen', FakeProcess), \\
-             patch('editor.audio_preview.audio_preview_command', return_value=['ffmpeg']):
+        with (patch.dict(sys.modules, {'pyaudiowpatch': FakeNative}),
+              patch('editor.audio_preview.subprocess.Popen', FakeProcess),
+              patch('editor.audio_preview.audio_preview_command', return_value=['ffmpeg'])):
             player.play(1, self.trim, CutPlan(), EditOptions())
             deadline = time.monotonic() + 2
             while FakeNative.active == 0 and time.monotonic() < deadline:
