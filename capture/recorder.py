@@ -44,9 +44,6 @@ class Recorder:
         self._frames = threading.Event()
         self._worker = None
         self._process = None
-        self._fps = 30
-        self._video_launch = None
-        self._video_origin = None
 
     @property
     def busy(self):
@@ -65,8 +62,6 @@ class Recorder:
             self._stop.clear()
             self._frames.clear()
             self.started_at = None
-            self._fps = options.fps
-            self._video_origin = None
             self._set(State.STARTING)
             self._worker = threading.Thread(target=self._record, args=(options, folder), daemon=True)
             self._worker.start()
@@ -87,16 +82,6 @@ class Recorder:
             key, _, value = line.strip().partition('=')
             if key == 'frame' and value.strip().isdigit() and int(value) > 0:
                 with self._lock:
-                    if self._video_origin is None and self._video_launch is not None:
-                        # Progress is reported *after* frames were encoded.
-                        # Estimate when the first video frame was captured from
-                        # frame count, rather than treating process launch as
-                        # the beginning of the video.
-                        frames = int(value)
-                        self._video_origin = max(
-                            self._video_launch,
-                            time.monotonic() - max(0, frames-1) / self._fps
-                        )
                     self._frames.set()
                     if self.state == State.STARTING and not self._stop.is_set():
                         self.started_at = time.monotonic()
@@ -131,8 +116,6 @@ class Recorder:
                 system_audio = SystemAudioCapture(wav, system_device)
                 system_audio.start()
             command = build_command(self.backend.ffmpeg, options, reservation.partial)
-            video_launch = time.monotonic()
-            self._video_launch = video_launch
             process = self._popen(command, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                                   stderr=subprocess.PIPE, text=True, encoding='utf-8',
                                   errors='replace', bufsize=1, **process_options())
