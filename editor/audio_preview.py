@@ -160,8 +160,15 @@ class AudioPlayback:
             self._interrupt_locked()
             self._audio_clock_start = None
             self._wake.notify_all()
-        # Never join here from the Tk thread while PortAudio might be busy;
-        # the worker owns and releases its native resources in finally.
+            worker = self._worker
+        # On editor close (not ordinary seek), give the *owning worker* time to
+        # finish native cleanup before the Windows Python process can exit.
+        # Joining releases the lock and never closes the stream cross-thread.
+        if worker and worker is not threading.current_thread():
+            worker.join(timeout=2)
+        if worker and worker.is_alive():
+            self.errors.put('Audio device is still closing. '
+                            'Keep Pulse Capture open briefly before exiting.')
 
     def _run(self):
         while True:
