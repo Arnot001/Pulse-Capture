@@ -6,7 +6,8 @@ if (-not $env:PULSE_FFMPEG -and (Test-Path (Join-Path $old 'vendor\ffmpeg.exe'))
 }
 Push-Location $PSScriptRoot
 try {
-    & (Get-Command python -ErrorAction Stop).Source pulse_capture.py
+    # Dump Python thread stacks on fatal native faults (e.g. 0xC0000005).
+    & (Get-Command python -ErrorAction Stop).Source -X faulthandler pulse_capture.py
     if ($LASTEXITCODE -ne 0) {
         Write-Warning "Pulse Capture exited with code $LASTEXITCODE."
         Read-Host 'Press Enter to close'
