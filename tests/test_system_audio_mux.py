@@ -19,16 +19,31 @@ class SyncOffsetTests(unittest.TestCase):
         self.assertAlmostEqual(wav - offset, video, places=6)
         command = merge_command('ffmpeg', 'video.mp4', 'source.wav',
                                 'result.mp4', video, False, offset)
-        self.assertIn('-ss', command)
-        self.assertEqual(command[command.index('-ss')+1], '0.700000')
+        self.assertNotIn('-ss', command)
+        self.assertIn('atrim=start=0.700000', ' '.join(command))
+        self.assertIn('apad=whole_dur=32.333333', ' '.join(command))
+        self.assertIn('atrim=duration=32.333333', ' '.join(command))
 
     def test_negative_offset_delays_late_starting_audio(self):
         offset = measured_sync_offset(19.6, 20)
         self.assertAlmostEqual(offset, -.4, places=6)
         command = merge_command('ffmpeg', 'video.mp4', 'source.wav',
                                 'result.mp4', 20, False, offset)
-        self.assertIn('-itsoffset', command)
-        self.assertEqual(command[command.index('-itsoffset')+1], '0.400000')
+        self.assertNotIn('-itsoffset', command)
+        self.assertIn('adelay=delays=400:all=1', ' '.join(command))
+        self.assertIn('apad=whole_dur=20.000000', ' '.join(command))
+        self.assertIn('asetpts=PTS-STARTPTS', ' '.join(command))
+
+    def test_late_audio_is_padded_to_full_video_length(self):
+        # A 32.2s video plus a 31.6s WAV must output a 32.2s
+        # zero-based AAC stream, never a timestamp-shifted 31.6s track.
+        offset = measured_sync_offset(31.6, 32.2)
+        command = merge_command('ffmpeg', 'video.mp4', 'short.wav',
+                                'merged.mp4', 32.2, False, offset)
+        graph = command[command.index('-filter_complex')+1]
+        self.assertIn('adelay=delays=600:all=1', graph)
+        self.assertIn('apad=whole_dur=32.200000', graph)
+        self.assertIn('atrim=duration=32.200000', graph)
 
     def test_equal_spans_do_not_force_audio_shift(self):
         self.assertEqual(measured_sync_offset(30, 30), 0)
