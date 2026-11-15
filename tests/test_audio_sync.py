@@ -33,6 +33,19 @@ class SyncChecks(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, 'Audio ended at 31.43s'):
             validate_audio_coverage(packet_info(32.333333, 31.432771))
 
+    def test_late_audio_start_is_reported_as_start_not_early_end(self):
+        info = packet_info(32.2, 31.6)
+        info['streams'][1]['start_time'] = '0.6'
+        with self.assertRaisesRegex(RuntimeError, 'Audio begins 0.60s after video'):
+            validate_audio_coverage(info)
+
+    def test_stream_end_uses_start_plus_duration(self):
+        # A positive start timestamp is NOT itself an early end. The start
+        # check must report the actual problem; ending after video is fine.
+        info = packet_info(4.0, 3.8)
+        info['streams'][1]['start_time'] = '0.2'
+        validate_audio_coverage(info)
+
     def test_rejects_missing_audio_or_video(self):
         for info in ({'format': {'duration': '30'}, 'streams': []},
                      packet_info(30, 0)):
