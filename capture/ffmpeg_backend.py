@@ -135,11 +135,13 @@ def validate_output(ffprobe, path, expect_audio=False):
     return info
 
 
-def validate_audio_coverage(info, *, tolerance_seconds=0.6):
-    """Reject MP4s with an audio track that ends far before the video.
+def validate_audio_coverage(info, *, tolerance_seconds=0.3):
+    """Reject MP4s whose audio ends noticeably before their video.
 
     Track presence alone did not catch a real 30.93s video with 18.77s audio.
-    A small tolerance allows AAC encoder padding and normal rounding.
+    300ms allows normal AAC/video rounding but rejects the user's repeated
+    0.90s early-audio capture. Don't scale this tolerance up with clip length:
+    a short offset must not become acceptable on longer recordings.
     """
     if not isinstance(info, dict):
         raise RuntimeError('Could not inspect audio/video timing after export.')
@@ -155,8 +157,7 @@ def validate_audio_coverage(info, *, tolerance_seconds=0.6):
         raise RuntimeError('Could not verify audio/video stream durations.') from exc
     if video_length <= 0 or audio_length <= 0:
         raise RuntimeError('One of the saved audio/video streams has zero duration.')
-    allowed = max(tolerance_seconds, video_length * .03)
-    if audio_length < video_length - allowed:
+    if audio_length < video_length - tolerance_seconds:
         raise RuntimeError(
             f'Audio ended at {audio_length:.2f}s but video runs {video_length:.2f}s. '
             'The recording/export is out of sync; the source file was preserved.'
