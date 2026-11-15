@@ -25,7 +25,13 @@ class SyncChecks(unittest.TestCase):
 
     def test_accepts_normal_aac_encoder_padding(self):
         validate_audio_coverage(packet_info(30.933333, 30.90))
-        validate_audio_coverage(packet_info(30.933333, 30.5))
+        validate_audio_coverage(packet_info(30.933333, 30.70))
+
+    def test_rejects_the_new_real_900ms_deficit(self):
+        # An unedited GTA VI recording: 32.333s video, 31.433s audio.
+        # The previous 3%-of-video allowance silently passed this.
+        with self.assertRaisesRegex(RuntimeError, 'Audio ended at 31.43s'):
+            validate_audio_coverage(packet_info(32.333333, 31.432771))
 
     def test_rejects_missing_audio_or_video(self):
         for info in ({'format': {'duration': '30'}, 'streams': []},
