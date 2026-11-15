@@ -134,6 +134,15 @@ class SystemAudioCapture:
                 raise RuntimeError(self.error)
         except Exception:
             self.stop()
+            # If a read worker exists, it is the sole PortAudio owner.
+            # If initialization failed before a worker started, we own it here.
+            if self._thread is None:
+                if self._stream:
+                    self._stream.close()
+                    self._stream = None
+                if self._manager:
+                    self._manager.terminate()
+                    self._manager = None
             raise
 
     def _record(self, channels, rate):
@@ -197,29 +206,39 @@ class SystemAudioCapture:
                 self.error = f'Windows audio recording failed: {exc}'
         finally:
             self._started.set()
+            # PortAudio native objects belong exclusively to the reader
+            # thread once it starts. Closing them from a second thread while
+            # read() is active can crash Python with Windows 0xC0000005.
+            stream, manager = self._stream, self._manager
+            if stream:
+                try:
+                    stream.stop_stream()
+                    stream.close()
+                except Exception:
+                    pass
+                self._stream = None
+            if manager:
+                try:
+                    manager.terminate()
+                except Exception:
+                    pass
+                self._manager = None
 
     def stop(self):
         if self.stop_at is None:
             self.stop_at = time.monotonic()
         self._stop.set()
-        if self._stream:
-            try:
-                self._stream.stop_stream()
-            except Exception:
-                pass
-        if self._thread:
+        # Do NOT call any PortAudio method here. This is the recorder thread
+        # while _record() owns and may still be reading from the native stream.
+        if self._thread and self._thread is not threading.current_thread():
             self._thread.join(timeout=5)
             if self._thread.is_alive():
-                self.error = self.error or 'Windows audio did not stop cleanly.'
-        if self._stream:
-            try:
-                self._stream.close()
-            except Exception:
-                pass
-            self._stream = None
-        if self._manager:
-            self._manager.terminate()
-            self._manager = None
+                # Fail explicitly; leave the blocked daemon as native owner
+                # rather than touching its memory from the wrong thread.
+                self.error = self.error or (
+                    'Windows audio device did not stop. Recording was not saved; '
+                    'close Pulse Capture before trying the device again.'
+                )
 
     @property
     def duration(self):
