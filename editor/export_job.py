@@ -28,12 +28,13 @@ class ExportCancelled(Exception):
 
 
 class ExportJob:
-    def __init__(self, backend, *, popen=subprocess.Popen, validator=validate_output):
+    def __init__(self, backend, *, popen=subprocess.Popen, validator=validate_output, verify_short=False):
         self.backend, self._popen, self._validator = backend, popen, validator
         self.events = Queue()
         self.busy = False
         self._cancel = threading.Event()
         self._worker = None
+        self.verify_short = verify_short
 
     def start(self, media, trim, folder=None, edits=None, cuts=None):
         if self.busy:
@@ -111,6 +112,15 @@ class ExportJob:
             duration = float(info['format']['duration'])
             if abs(duration - out_duration) > max(.15, 2 / media.fps):
                 raise RuntimeError('The exported length did not match your selection. The original is unchanged.')
+            if self.verify_short:
+                from .auto_verify import verify_short
+                self.events.put(ExportEvent('validating', .99, 'Decoding the complete Short and checking audio and black frames…'))
+                try:
+                    verify_short(self.backend, reservation.partial, out_duration,
+                                 media.has_audio or edits.music.enabled, self._cancel)
+                except Exception:
+                    self._check_cancel()
+                    raise
             self._check_cancel()
             reservation.publish()
             result = ExportEvent('saved', 1, 'Export complete', reservation.final)

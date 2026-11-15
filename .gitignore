@@ -5,3 +5,7 @@ build/
 dist/
 *.spec
 vendor/*.exe
+.auto-models/
+auto-edit-output/
+.env
+.env.*

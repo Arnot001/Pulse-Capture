@@ -1,0 +1,4 @@
+# Optional local CPU speech captions; no audio is sent to a service.
+# faster-whisper 1.2.1 passes a keyword removed in PyAV 19.
+faster-whisper==1.2.1
+av==18.1.0

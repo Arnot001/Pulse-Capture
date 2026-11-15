@@ -128,6 +128,15 @@ class EditOptions:
         if self.text.enabled:
             width, height = (self.crop.width, self.crop.height) if self.crop else (media.width, media.height)
             text_geometry(width, height, self.text)
+        for caption in self.text.captions:
+            if caption.end > media.duration + .0005:
+                raise ValueError('Keep captions inside the source video.')
+            width, height = self.output_size_unchecked(media)
+            text_geometry(width, height, TextOverlay(True, caption.text, self.text.size,
+                          caption.position, safe_area=self.text.safe_area))
+
+    def output_size_unchecked(self, media):
+        return (self.crop.width, self.crop.height) if self.crop else (media.width, media.height)
 
     def with_format(self, media, preset):
         return replace(self, preset=preset, crop=centered_crop(media, preset), crop_motion=CropMotion())
@@ -187,7 +196,7 @@ def video_filters(media, edits, asset=None, text_resources=None, duration=None, 
     timed = duration is not None and (
         edits.speed != 1.0 or edits.fade.fade_in or edits.fade.fade_out
     )
-    if not (privacy or edits.zoom.enabled or edits.text.enabled or edits.branding.enabled or timed):
+    if not (privacy or edits.zoom.enabled or edits.text.visible or edits.branding.enabled or timed):
         # A fixed Shorts export size is optional; other formats retain source pixels.
         return (base + ',' + SHORTS_SCALE if edits.preset == SHORTS_FORMAT else base), False
 
@@ -204,8 +213,8 @@ def video_filters(media, edits, asset=None, text_resources=None, duration=None, 
         current = 'zoomed'
 
     width, height = edits.output_size(media)
-    if edits.text.enabled:
-        graph.append(f'[{current}]{text_filter(width, height, edits.text, text_resources)}[text]')
+    if edits.text.visible:
+        graph.append(f'[{current}]{text_filter(width, height, edits.text, text_resources, trim, cuts, source_position)}[text]')
         current = 'text'
 
     if edits.branding.enabled:

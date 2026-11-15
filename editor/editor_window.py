@@ -24,7 +24,7 @@ from .transforms import EditOptions, Branding, FORMATS, CORNERS, SIZES, SHORTS_F
 
 
 class EditorWindow(tk.Toplevel):
-    def __init__(self, parent, path, backend, on_close=None):
+    def __init__(self, parent, path, backend, on_close=None, auto_candidate=None):
         super().__init__(parent)
         self.title('PULSE // CAPTURE — QUICK EDIT')
         self.configure(bg=t.BG)
@@ -33,7 +33,10 @@ class EditorWindow(tk.Toplevel):
         self.path, self.backend, self.on_close = Path(path), backend, on_close
         self.media = self.trim = self.preview = None
         self.cuts = CutPlan()
-        self.exporter = ExportJob(backend)
+        self.auto_candidate = auto_candidate
+        self.auto_dialog = None
+        self.auto_children = set()
+        self.exporter = ExportJob(backend, verify_short=auto_candidate is not None)
         self.metadata = Queue()
         self.closed = self.closing = self.playing = False
         self.position, self.token = 0.0, 0
@@ -71,6 +74,10 @@ class EditorWindow(tk.Toplevel):
         t.label(header, 'PULSE', 21, bold=True).pack(side='left')
         t.label(header, ' // CAPTURE', 15, t.CYAN).pack(side='left')
         t.label(header, 'QUICK EDIT', 10, t.MUTED, True).pack(side='right')
+        self.auto_button = t.button(header, 'Auto Edit', self.open_auto_edit)
+        self.auto_button.configure(pady=5, state='disabled')
+        self.auto_button.pack(side='right', padx=16)
+        self.controls.append(self.auto_button)
         intro = tk.Frame(self, bg=t.BG)
         intro.pack(fill='x', padx=28, pady=(0, 12))
         self.source_label = t.label(intro, self.path.name, 9, t.MUTED, anchor='w')
@@ -181,6 +188,29 @@ class EditorWindow(tk.Toplevel):
         segments.pack(fill='x', pady=(0, 6))
         self.controls.extend(b for _, b in segments.buttons)
         return segments
+
+    def open_auto_edit(self):
+        if not self.media or self.exporter.busy or self.closing:
+            return
+        self.stop_play()
+        if self.auto_dialog and not self.auto_dialog.closed:
+            self.auto_dialog.lift()
+            return
+        from .auto_tools import AutoEditDialog
+        self.auto_dialog = AutoEditDialog(self)
+
+    def load_auto_candidate(self):
+        from .auto_plan import editor_state
+        short, transcript, mode = self.auto_candidate
+        trim, cuts, edits = editor_state(short, self.media, transcript)
+        self.cuts, self.edits = cuts, edits
+        self.format_choice.set(edits.preset)
+        self.position = trim.start
+        self.update_trim(trim)
+        self.select_tool('FORMAT')
+        self.title(f'PULSE · {mode} · {short["title"]}')
+        self.source_label.configure(text=f'{mode} · {short["title"]} · Review before publishing')
+        self.note.configure(text='Review the whole Short; adjust Crop, Cut or Text before exporting.', fg=t.CYAN)
 
     def build_tools(self):
         panel = self.panels['FORMAT']
@@ -660,6 +690,12 @@ class EditorWindow(tk.Toplevel):
                 self.preview = Preview(self.backend.ffmpeg, media)
                 self.update_trim(TrimRange(0, media.duration))
                 self.set_busy(False)
+                if self.auto_candidate:
+                    try:
+                        self.load_auto_candidate()
+                    except ValueError as exc:
+                        self.note.configure(text=f'Auto Edit plan could not be loaded: {exc}', fg=t.RED)
+                        self.export_button.configure(state='disabled')
                 self.request_frame()
         except Empty:
             pass
@@ -697,7 +733,8 @@ class EditorWindow(tk.Toplevel):
                         self.note.configure(text=event.message, fg=t.RED if event.kind == 'error' else t.MUTED)
         except Empty:
             pass
-        if self.closing and not self.exporter.busy:
+        if self.closing and not self.exporter.busy and not self.auto_children and not (
+                self.auto_dialog and not self.auto_dialog.closed):
             self.finish_close()
             return
         self._poll_id = self.after(60, self.poll)
@@ -709,9 +746,13 @@ class EditorWindow(tk.Toplevel):
         self.stop_play()
         if self.preview:
             self.preview.close()
+        for child in list(self.auto_children):
+            child.close()
+        if self.auto_dialog and not self.auto_dialog.closed:
+            self.auto_dialog.close()
         if self.exporter.busy:
             self.cancel_export()
-        else:
+        elif not self.auto_children and not (self.auto_dialog and not self.auto_dialog.closed):
             self.finish_close()
 
     def finish_close(self):
