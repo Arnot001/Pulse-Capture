@@ -223,7 +223,7 @@ class Recorder:
                 if merged and merged.is_file():
                     retained.append(f'Attempted merged MP4: {merged}')
                 if retained:
-                    failure += '\\nPreserved for recovery:\\n' + '\\n'.join(retained)
+                    failure += '\nPreserved for recovery:\n' + '\n'.join(retained)
                 self._set(State.ERROR, failure, partial)
             elif saved:
                 self._set(State.SAVED, path=saved)
