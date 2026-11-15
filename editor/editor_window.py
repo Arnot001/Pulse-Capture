@@ -795,6 +795,7 @@ class EditorWindow(tk.Toplevel):
                         self.note.configure(text=f'EXPORTED ✓  {event.path.name}', fg=t.GREEN)
                     else:
                         self.note.configure(text=event.message, fg=t.RED if event.kind == 'error' else t.MUTED)
+                    self.auto_tools.export_completed(event)
         except Empty:
             pass
         if self.closing and not self.exporter.busy:
