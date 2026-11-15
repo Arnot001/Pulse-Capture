@@ -241,12 +241,20 @@ An actual edited MP4 had 30.93 seconds of video but only 18.77 seconds of
 audio. Both tracks started at timestamp zero, so this was not just a constant
 offset. That export must **not** be considered synchronized.
 
-This investigation branch preserves gaps when a Windows WASAPI loopback read
-blocks during silence, uses the first FFmpeg frame progress to estimate video
-start rather than relying on process launch, and refuses to publish output
-when an audio stream ends much earlier than the video. These are guarded
-changes pending a real Windows recording verification; a correct audio track
-duration does not alone prove sounds align with the corresponding picture.
+This investigation branch preserves gaps when Windows WASAPI loopback
+blocks during silence. A new unedited capture on 15 November showed **32.333s
+video versus 31.433s audio** and dialogue audibly ahead of the picture. The
+previous recorder estimated video startup from FFmpeg's delayed progress
+message and could discard too much audio at the start. It now derives the
+initial audio pre-roll from the **measured WAV and video durations**. Both
+streams receive the same Stop request, so this provides a more dependable
+shared end reference than an asynchronous startup callback. A duration
+difference over 300ms now fails validation instead of being marked saved.
+
+This correction has passed synthetic FFmpeg input-trim/track-duration checks,
+but it remains a **Windows hardware test candidate**, not verified final sync.
+Equal stream lengths cannot by themselves prove that spoken words and frames
+are aligned. Compare an untouched MP4's visible/audible cue before editing.
 
 Quick Edit uses the audio playback clock to schedule its frame preview when
 SOUND ON is selected. Because each displayed frame requires a separate FFmpeg
