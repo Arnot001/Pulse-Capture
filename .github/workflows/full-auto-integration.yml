@@ -1,0 +1,35 @@
+name: Full Auto Editor integration
+on:
+  push:
+    branches:
+      - feature/full-auto-integrated-audio-20261115
+  workflow_dispatch:
+
+jobs:
+  python-and-editor-regressions:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Compile Python modules
+        shell: pwsh
+        run: python -m compileall -q capture editor tests ui
+      - name: Auto Editor original unit tests
+        shell: pwsh
+        run: python -m unittest discover -s tests -p 'test_auto_edit.py' -v
+      - name: Audio recorder and playback regression tests
+        shell: pwsh
+        run: |
+          python -m unittest discover -s tests -p 'test_audio_sync.py' -v
+          python -m unittest discover -s tests -p 'test_wasapi_recorder.py' -v
+          python -m unittest discover -s tests -p 'test_wasapi_audio.py' -v
+          python -m unittest discover -s tests -p 'test_editor_audio_preview.py' -v
+      - name: Quick Edit regression tests
+        shell: pwsh
+        run: |
+          python -m unittest discover -s tests -p 'test_editor_crop_motion.py' -v
+          python -m unittest discover -s tests -p 'test_editor_crop_resize.py' -v
+          python -m unittest discover -s tests -p 'test_editor_overlays.py' -v
