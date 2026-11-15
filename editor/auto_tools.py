@@ -21,6 +21,8 @@ class AutoTools:
         self.busy = False
         self.cancel = threading.Event()
         self._closed = False
+        self.batch = None
+        self.batch_ok = 0
         panel = window.panels['AUTO']
         upper = tk.Frame(panel, bg=t.PANEL)
         upper.pack(fill='x')
@@ -37,6 +39,9 @@ class AutoTools:
         self.scan_button = t.button(upper, '⚡ FIND HIGHLIGHTS', self.scan, accent=True)
         self.scan_button.configure(padx=10, pady=5)
         self.scan_button.pack(side='left')
+        self.export_all_button = t.button(upper, 'EXPORT ALL', self.export_all)
+        self.export_all_button.configure(padx=8, pady=5, state='disabled')
+        self.export_all_button.pack(side='left', padx=(8, 0))
 
         picks = tk.Frame(panel, bg=t.PANEL)
         picks.pack(fill='x', pady=(8, 4))
@@ -53,8 +58,11 @@ class AutoTools:
 
     def refresh(self):
         ready = bool(self.window.media and not self.window.exporter.busy
-                     and not self.window.closing and not self._closed)
+                     and not self.window.closing and not self._closed
+                     and self.batch is None)
         self.scan_button.configure(state='normal' if ready and not self.busy else 'disabled')
+        self.export_all_button.configure(
+            state='normal' if ready and not self.busy and self.suggestions else 'disabled')
         for n, button in enumerate(self.picks):
             button.configure(state='normal' if ready and n < len(self.suggestions) else 'disabled')
         self.style_picker.configure(state='readonly' if ready and not self.busy else 'disabled')
@@ -108,17 +116,18 @@ class AutoTools:
         except Empty:
             pass
 
-    def apply(self, index):
+    def apply(self, index, *, confirm=True):
         w = self.window
-        if not w.media or w.exporter.busy or w.closing or index >= len(self.suggestions):
-            return
+        if (not w.media or w.exporter.busy or w.closing
+                or index >= len(self.suggestions)):
+            return False
         clip = self.suggestions[index]
         # Do not erase user cuts or animated crop keys without permission.
-        if (w.cuts.ranges or w.edits.crop_motion.keyframes) and not messagebox.askyesno(
+        if confirm and (w.cuts.ranges or w.edits.crop_motion.keyframes) and not messagebox.askyesno(
                 'Replace cuts / crop keys?',
                 'This Short needs a new time range and a clean cut plan. '
                 'Reset existing cuts and crop keyframes for this suggestion?', parent=w):
-            return
+            return False
         try:
             candidate = w.edits.with_format(w.media, SHORTS_FORMAT)
             candidate.validate(w.media)
@@ -138,9 +147,69 @@ class AutoTools:
             w.note.configure(
                 text=f'Auto #{index+1}: {clip.reason}. Adjust crop/captions, then EXPORT VIDEO.',
                 fg=t.CYAN)
+            return True
         except ValueError as exc:
             w.note.configure(text='Auto suggestion could not be applied: ' + str(exc), fg=t.RED)
+            return False
+
+    def export_all(self):
+        """Use Quick Edit's existing non-overwriting exporter for each suggestion."""
+        w = self.window
+        if (not self.suggestions or self.batch is not None or self.busy
+                or w.exporter.busy or w.closing):
+            return
+        approved = messagebox.askyesno(
+            'Export suggested Shorts?',
+            f'Export {len(self.suggestions)} suggested 9:16 Short(s) using the '
+            'current edit effects and centered crops? Review each result before '
+            'posting. Any current cuts/crop keys will be reset for each clip.',
+            parent=w)
+        if not approved:
+            return
+        self.batch = list(range(len(self.suggestions)))
+        self.batch_ok = 0
+        self.refresh()
+        self._export_next()
+
+    def _export_next(self):
+        if self._closed or self.batch is None:
+            return
+        if not self.batch:
+            self.batch = None
+            self.message.configure(
+                text=f'Exported {self.batch_ok} suggested Short(s). Review each MP4 before posting.',
+                fg=t.CYAN)
+            self.refresh()
+            return
+        index = self.batch.pop(0)
+        if not self.apply(index, confirm=False):
+            self.batch = None
+            self.message.configure(text='Auto batch stopped: could not prepare clip.', fg=t.RED)
+            self.refresh()
+            return
+        self.message.configure(
+            text=f'Exporting Short {index+1}/{len(self.suggestions)}…',
+            fg=t.CYAN)
+        self.window.export()
+        if not self.window.exporter.busy:
+            self.batch = None
+            self.message.configure(text='Auto batch stopped: export could not start.', fg=t.RED)
+            self.refresh()
+
+    def export_completed(self, event):
+        if self.batch is None or self._closed:
+            return
+        if event.kind == 'saved':
+            self.batch_ok += 1
+            self.window.after(0, self._export_next)
+        else:
+            self.batch = None
+            self.message.configure(
+                text=f'Auto batch stopped after {self.batch_ok} export(s): {event.message}',
+                fg=t.RED)
+            self.refresh()
 
     def close(self):
         self._closed = True
+        self.batch = None
         self.cancel.set()
