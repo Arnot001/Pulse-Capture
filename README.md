@@ -64,6 +64,34 @@ fades. The built-ins are synthesized locally from Pulse-owned recipes and use no
 third-party audio samples. The workflow below describes this development branch.
 See `V06_PRIVACY_VERIFICATION.md` for Privacy verification and limits.
 
+## Auto Edit — local highlight shortlist (development beta)
+
+Quick Edit now has an **AUTO** tab. Choose **Gaming**, **News/Preview**,
+or **Funny Moments**, select **1–3 Shorts**, and click **FIND HIGHLIGHTS**.
+Pulse Capture analyzes the first 10 minutes of source footage with its
+existing FFmpeg executable: low-resolution scene changes and per-second
+audio activity. It ranks separate ~28-second clips where possible, using
+20–35 seconds as the target range. Long or quiet footage may have fewer
+distinct candidates. The scene/audio ranker is a **heuristic**, not semantic
+understanding of the game or a guarantee that every suggested moment is good.
+
+Click one of the proposed times to load that trim in **YouTube Shorts
+(9:16)** format. You can then adjust the crop, captions/text, soundtrack and
+other edits before exporting. Alternatively click **EXPORT ALL** and confirm
+to process the suggestions sequentially through Quick Edit's existing,
+non-overwriting MP4 exporter. Exports keep the working source audio and use
+the normal Quick Edit format/export code; the original video is not modified.
+On an export failure the remaining automatic exports stop.
+
+No paid APIs or extra Python packages are required for this first version.
+**Automatic spoken-word transcription, timed captions, smart face tracking
+and content-aware commentary are not included yet.** The older Auto Edit
+module (`editor/auto_*.py`, `caption_tools.py`) existed as uncommitted work
+on a different computer and was not present on GitHub; this new shortlist
+feature does not pretend to be that previously developed advanced module.
+The earlier local files can be integrated later without altering the stable
+audio capture pipeline.
+
 ## Quick Edit
 
 Click **Quick Edit** after recording to open the latest video. You can also
