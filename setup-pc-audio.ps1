@@ -22,8 +22,10 @@ try {
     & $python -m pip install -r (Join-Path $checkout 'requirements-audio.txt')
     if ($LASTEXITCODE -ne 0) { throw 'The Windows audio dependency installation failed.' }
 
-    & $python -c 'import pyaudiowpatch; print("WASAPI AUDIO READY")'
+    # Keep the -c payload free of nested quotes for Windows PowerShell 5.1.
+    & $python -c 'import pyaudiowpatch'
     if ($LASTEXITCODE -ne 0) { throw 'PyAudioWPatch is not importable. Check which Python interpreter is being used.' }
+    Write-Host 'WASAPI AUDIO READY'
 
     if (-not $SkipTests) {
         $patterns = @(
