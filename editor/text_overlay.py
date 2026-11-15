@@ -154,7 +154,7 @@ def text_filter(width, height, text, resources, trim=None, cuts=None, source_pos
         filters.append(_drawtext(width, height, text, resources, resources.path))
     if text.captions and (resources is None or len(resources.caption_paths) != len(text.captions)):
         raise ValueError('Caption resources are unavailable.')
-    for caption, path in zip(text.captions, resources.caption_paths):
+    for caption, path in zip(text.captions, resources.caption_paths if resources else ()):
         overlay = TextOverlay(True, caption.text, text.size, caption.position, safe_area=text.safe_area)
         draw = _drawtext(width, height, overlay, resources, path)
         if source_position is not None:
