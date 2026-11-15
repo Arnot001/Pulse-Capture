@@ -251,10 +251,24 @@ streams receive the same Stop request, so this provides a more dependable
 shared end reference than an asynchronous startup callback. A duration
 difference over 300ms now fails validation instead of being marked saved.
 
-This correction has passed synthetic FFmpeg input-trim/track-duration checks,
-but it remains a **Windows hardware test candidate**, not verified final sync.
-Equal stream lengths cannot by themselves prove that spoken words and frames
-are aligned. Compare an untouched MP4's visible/audible cue before editing.
+On 15 November another 32.20s recording failed with a 31.60s AAC stream:
+the app then kept only the video-only partial and removed the attempted
+combined MP4 and Windows WAV. This was a second defect. The merge now uses
+audio filters that **pad actual silent PCM samples** for late audio or trim
+early pre-roll, producing a zero-start-time AAC track spanning the video's
+duration. It no longer uses input `-itsoffset` (which changed PTS without
+creating samples). Validation compares `start_time + duration` for each stream,
+not duration alone, and reports audio that starts late separately from audio
+that ends early. On merge/validation failure, Pulse preserves the WAV and
+attempted mixed MP4, with their paths displayed for recovery; original video
+partials remain available too. Failed recordings can consume more disk space.
+
+The revised merge has passed four local synthetic FFmpeg checks (early/late
+audio, microphone on/off) with matching video/audio stream start time 0 and
+end times. These changes are **still a Windows hardware test candidate**, not
+verified final lip sync. Equal stream lengths cannot alone prove that spoken
+words and frames are aligned. Compare an untouched MP4's audible/visible cue
+before editing.
 
 Quick Edit uses the audio playback clock to schedule its frame preview when
 SOUND ON is selected. Because each displayed frame requires a separate FFmpeg
