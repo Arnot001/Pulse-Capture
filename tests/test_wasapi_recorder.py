@@ -21,6 +21,8 @@ class FakeCapture:
         self.started_at = None
         self.error = None
         self.stopped = False
+        # Mock audio started 0.75s before the video but they stop together.
+        self.duration = 2.75
         self.__class__.instances.append(self)
 
     def start(self):
@@ -51,6 +53,7 @@ class RecorderWASAPITests(unittest.TestCase):
                 self.assertTrue(Path(wav).is_file())
                 self.assertFalse(mic)
                 self.assertEqual(duration, 2.0)
+                self.assertAlmostEqual(offset, 0.75, places=5)
                 Path(destination).write_bytes(b'video+system-audio')
 
             with patch('capture.recorder.SystemAudioCapture', FakeCapture), \
