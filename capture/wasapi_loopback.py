@@ -114,9 +114,22 @@ class SystemAudioCapture:
     def start(self):
         if self._thread:
             raise RuntimeError('Windows audio is already recording.')
-        audio = _library()
-        self._manager = audio.PyAudio()
+        self._thread = threading.Thread(
+            target=self._record, daemon=True, name='Pulse Windows audio')
+        self._thread.start()
+        if not self._started.wait(5):
+            self.stop()
+            raise RuntimeError('Windows audio capture did not start.')
+        if self.error:
+            self.stop()
+            raise RuntimeError(self.error)
+
+    def _record(self):
         try:
+            # PortAudio is initialized, opened, read and closed on this same
+            # thread. No other thread invokes a method on the native device.
+            audio = _library()
+            self._manager = audio.PyAudio()
             info = _device(self._manager, self.identifier)
             channels = min(2, int(info['maxInputChannels']))
             rate = round(float(info['defaultSampleRate']))
@@ -124,29 +137,8 @@ class SystemAudioCapture:
             self._stream = self._manager.open(
                 format=audio.paInt16, channels=channels, rate=rate, input=True,
                 input_device_index=int(info['index']), frames_per_buffer=FRAMES)
-            self._thread = threading.Thread(
-                target=self._record, args=(channels, rate), daemon=True,
-                name='Pulse Windows audio')
-            self._thread.start()
-            if not self._started.wait(5):
-                raise RuntimeError('Windows audio capture did not start.')
-            if self.error:
-                raise RuntimeError(self.error)
-        except Exception:
-            self.stop()
-            # If a read worker exists, it is the sole PortAudio owner.
-            # If initialization failed before a worker started, we own it here.
-            if self._thread is None:
-                if self._stream:
-                    self._stream.close()
-                    self._stream = None
-                if self._manager:
-                    self._manager.terminate()
-                    self._manager = None
-            raise
-
-    def _record(self, channels, rate):
-        try:
+            if self._stop.is_set():
+                return
             with wave.open(str(self.path), 'wb') as output:
                 output.setnchannels(channels)
                 output.setsampwidth(2)
