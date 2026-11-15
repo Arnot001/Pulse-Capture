@@ -1,23 +1,27 @@
+# Install optional offline English transcription into the same Python used by
+# the existing desktop shortcut. No separate venv and no change to working audio.
 $ErrorActionPreference = 'Stop'
 Push-Location $PSScriptRoot
 try {
-    if (-not (Test-Path -LiteralPath '.venv\Scripts\python.exe')) {
-        python -m venv .venv
-        if ($LASTEXITCODE -ne 0) { throw 'Could not create the project virtual environment.' }
+    $python = Join-Path $env:LOCALAPPDATA 'Programs\Python\Python313\python.exe'
+    if (-not (Test-Path -LiteralPath $python)) {
+        $python = (Get-Command python -ErrorAction Stop).Source
     }
-    & '.\.venv\Scripts\python.exe' -m pip install -r requirements-auto.txt
+    if ($python -like '*\WindowsApps\*') {
+        throw 'Microsoft Store Python alias detected. Use the installed Python 3.13 executable.'
+    }
+    & $python --version
+    if ($LASTEXITCODE -ne 0) { throw 'Python could not be started.' }
+    Write-Host 'Installing optional offline speech libraries into desktop Python...'
+    & $python -m pip install -r (Join-Path $PSScriptRoot 'requirements-auto.txt')
     if ($LASTEXITCODE -ne 0) { throw 'Could not install local speech recognition.' }
-    # Verify the exact decoder version: PyAV 19 breaks faster-whisper 1.2.1.
-    & '.\.venv\Scripts\python.exe' -c "import av; from faster_whisper import WhisperModel; assert av.__version__ == '18.1.0', av.__version__; print('Local Whisper decoder OK: PyAV ' + av.__version__)"
-    if ($LASTEXITCODE -ne 0) { throw 'Local speech dependency check failed.' }
-    # Download model weights only once; do not replace an existing model.
-    if (-not (Test-Path -LiteralPath '.auto-models\base.en\model.bin')) {
-        & '.\.venv\Scripts\python.exe' -c "from faster_whisper.utils import download_model; download_model('base.en', output_dir='.auto-models/base.en')"
-        if ($LASTEXITCODE -ne 0) { throw 'Could not download the speech model.' }
-    } else {
-        Write-Output 'Existing local speech model retained.'
-    }
-    Write-Output 'Local English speech captions are ready. Start Pulse Capture with .\launch.ps1.'
-} finally {
+    # Import-only avoids quoted Python -c strings getting mangled by Windows PS.
+    & $python -c 'import av; import faster_whisper'
+    if ($LASTEXITCODE -ne 0) { throw 'Local Whisper decoder is not importable.' }
+    & $python (Join-Path $PSScriptRoot 'scripts\prepare_auto_model.py')
+    if ($LASTEXITCODE -ne 0) { throw 'Could not prepare local English speech model.' }
+    Write-Host 'AUTO EDIT SPEECH READY. Restart Pulse Capture using your existing desktop shortcut.' -ForegroundColor Green
+}
+finally {
     Pop-Location
 }
