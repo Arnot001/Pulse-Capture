@@ -28,12 +28,13 @@ class ExportCancelled(Exception):
 
 
 class ExportJob:
-    def __init__(self, backend, *, popen=subprocess.Popen, validator=validate_output):
+    def __init__(self, backend, *, popen=subprocess.Popen, validator=validate_output, verify_short=False):
         self.backend, self._popen, self._validator = backend, popen, validator
         self.events = Queue()
         self.busy = False
         self._cancel = threading.Event()
         self._worker = None
+        self.verify_short = verify_short
 
     def start(self, media, trim, folder=None, edits=None, cuts=None):
         if self.busy:
@@ -115,6 +116,13 @@ class ExportJob:
             # 31 seconds of video. Prevent an unsynced export being approved.
             if (media.has_audio or edits.music.enabled) and info.get('streams'):
                 validate_audio_coverage(info)
+            if self.verify_short:
+                from .auto_verify import verify_short
+                self.events.put(ExportEvent(
+                    'validating', .99,
+                    'Decoding complete Short and checking audio and black frames…'))
+                verify_short(self.backend, reservation.partial, out_duration,
+                             media.has_audio or edits.music.enabled, self._cancel)
             self._check_cancel()
             reservation.publish()
             result = ExportEvent('saved', 1, 'Export complete', reservation.final)
