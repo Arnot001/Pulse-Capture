@@ -3,6 +3,7 @@ from dataclasses import dataclass
 from queue import Queue, Full, Empty
 import subprocess
 import threading
+import time
 from capture.ffmpeg_backend import process_options
 from branding import watermark_path
 from .cuts import CutPlan
@@ -19,6 +20,21 @@ class Frame:
     error: str = ''
     source_view: bool = True
     edits: EditOptions | None = None
+    render_seconds: float = 0.0
+
+
+def anticipated_source_position(cuts, trim, source_elapsed, speed, render_seconds):
+    """Predict picture time when a decoded preview frame will reach the canvas.
+
+    A single frame requires a fresh FFmpeg decode. If we ask for the exact
+    *current* audio time, that picture is already old when it gets displayed.
+    Work in the cut-aware output timeline so jumps and playback speeds remain
+    correct. This affects preview only; export timestamps are untouched.
+    """
+    if not (0 < speed <= 16):
+        raise ValueError('Invalid preview speed.')
+    latency = min(3.0, max(0.0, float(render_seconds)))
+    return cuts.source_from_elapsed(source_elapsed + speed * latency, trim)
 
 
 def preview_command(ffmpeg, media, position, width, height, edits=None, source_view=True, text_resources=None, trim=None, cuts=None):
@@ -85,6 +101,7 @@ class Preview:
                 token, position, width, height, edits, source_view, trim, cuts = self._pending
                 self._pending = None
             process = resources = None
+            request_started = time.monotonic()
             try:
                 if not source_view:
                     resources = TextResources((edits or EditOptions()).text)
@@ -103,7 +120,9 @@ class Preview:
                     raise RuntimeError('Preview took too long. Try another point in the video.')
                 if process.returncode or not data.startswith(b'P6'):
                     raise RuntimeError('Could not load this preview frame. ' + error.decode('utf-8', 'replace')[-300:])
-                frame = Frame(token, position, data, source_view=source_view, edits=edits)
+                frame = Frame(token, position, data, source_view=source_view,
+                              edits=edits,
+                              render_seconds=time.monotonic() - request_started)
             except Exception as exc:
                 frame = Frame(token, position, error=str(exc))
             finally:
