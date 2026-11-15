@@ -249,9 +249,14 @@ changes pending a real Windows recording verification; a correct audio track
 duration does not alone prove sounds align with the corresponding picture.
 
 Quick Edit uses the audio playback clock to schedule its frame preview when
-SOUND ON is selected; rendering high-resolution still frames can nevertheless
-be slow. Test a known, sharp visible/audible event and compare the **untouched
-recording** with the edited export before merging.
+SOUND ON is selected. Because each displayed frame requires a separate FFmpeg
+decode, Quick Edit now measures frame-decoding time and requests the picture
+expected *when that frame will actually appear* rather than one already
+outdated by the decoder. This is preview-only: it does not modify recording
+or exported media timestamps. Preview remains sampled, not a 30 fps player.
+Test a visible/audible event in the **untouched MP4 using a regular player**
+first, then in Quick Edit, then in the exported copy. If the original MP4 is
+out of sync too, preview timing is not the root cause.
 
 ### Desktop shortcut for the audio test
 
