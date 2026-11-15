@@ -173,13 +173,22 @@ class WASAPITests(unittest.TestCase):
         class OwnedManager(FakeManager):
             stream = None
 
+            def __init__(self):
+                super().__init__()
+                self.init_thread = threading.get_ident()
+
             def open(self, **kwargs):
                 self.stream = OwnedStream()
                 return self.stream
 
             def terminate(self):
+                self.assert_owner_thread()
                 closed.append(('terminate', threading.get_ident(), self.stream.owner))
                 super().terminate()
+
+            def assert_owner_thread(self):
+                if threading.get_ident() != self.init_thread:
+                    raise AssertionError('PortAudio manager crossed worker threads')
 
         class OwnedLibrary(FakeLibrary):
             def PyAudio(self):
