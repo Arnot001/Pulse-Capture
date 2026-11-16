@@ -157,11 +157,22 @@ class SystemAudioCapture:
 
                 try:
                     while not self._stop.is_set():
+                        # A muted or idle WASAPI endpoint may never deliver a
+                        # full blocking read. Query buffered frames first so
+                        # Stop can finish promptly during total silence.
+                        # Both calls stay on this stream's native owner thread.
                         try:
-                            samples = self._stream.read(FRAMES, exception_on_overflow=False)
+                            available = self._stream.get_read_available()
+                            if available < 0:
+                                raise RuntimeError('Windows audio buffer query failed.')
+                            if not available:
+                                self._stop.wait(.01)
+                                continue
+                            samples = self._stream.read(min(FRAMES, available),
+                                                        exception_on_overflow=False)
                         except Exception:
-                            # Stop can interrupt a blocking WASAPI read; the
-                            # enclosing finally still pads and closes the WAV.
+                            # Stop may race the last read; the WAV is padded to
+                            # its measured stop time in the finally block.
                             if self._stop.is_set():
                                 break
                             raise
@@ -242,7 +253,10 @@ class SystemAudioCapture:
         if self.frames < 1024 or not self.path.is_file():
             raise RuntimeError('Windows audio produced no usable samples.')
         if self.peak < MIN_AUDIBLE_PEAK:
-            raise RuntimeError(
-                'Windows playback was recorded but the signal was nearly silent. '
-                'Choose the speaker/headphone device playing your video, then try again.'
-            )
+            # Silence is valid content. Preserve the video and a clock-aligned
+            # silent AAC track, but warn that system mute/device routing can
+            # prevent actual program audio from reaching loopback.
+            return ('Windows audio was silent or nearly silent. The video was '
+                    'saved, but check Windows mute and the selected speaker '
+                    'device if you expected sound.')
+        return ''
