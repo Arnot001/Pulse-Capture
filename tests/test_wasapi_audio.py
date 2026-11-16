@@ -16,6 +16,9 @@ from capture.system_audio_mux import merge_command
 
 
 class FakeStream:
+    def get_read_available(self):
+        return 1024
+
     def read(self, size, exception_on_overflow=False):
         time.sleep(.003)
         return (4096).to_bytes(2, 'little', signed=True) * (size * 2)
@@ -212,24 +215,64 @@ class WASAPITests(unittest.TestCase):
                 self.assertTrue(all(actual == reader != caller
                                     for _, actual, reader in closed))
 
-    def test_silent_system_audio_is_reported_as_failure(self):
-        class SilentStream(FakeStream):
+    def test_entirely_muted_loopback_stops_promptly_and_saves_silence(self):
+        """WASAPI may provide zero buffers indefinitely while muted."""
+        class MutedStream(FakeStream):
+            def get_read_available(self):
+                return 0
+
             def read(self, size, exception_on_overflow=False):
-                return bytes(size * 4)
-        class SilentManager(FakeManager):
+                raise AssertionError('A muted device must never enter a blocking read')
+
+        class MutedManager(FakeManager):
             def open(self, **kwargs):
-                return SilentStream()
-        class SilentLibrary(FakeLibrary):
+                return MutedStream()
+
+        class MutedLibrary(FakeLibrary):
             def PyAudio(self):
-                return SilentManager()
-        with patch('capture.wasapi_loopback._library', return_value=SilentLibrary()):
+                return MutedManager()
+
+        with patch('capture.wasapi_loopback._library', return_value=MutedLibrary()):
             with TemporaryDirectory() as folder:
-                session = SystemAudioCapture(Path(folder) / 'silent.wav')
+                session = SystemAudioCapture(Path(folder) / 'muted.wav')
                 session.start()
-                time.sleep(.02)
+                time.sleep(.14)
+                begun = time.monotonic()
                 session.stop()
-                with self.assertRaisesRegex(RuntimeError, 'nearly silent'):
-                    session.validate()
+                self.assertLess(time.monotonic() - begun, .5)
+                self.assertIn('silent', session.validate())
+                self.assertGreaterEqual(session.duration, .10)
+                self.assertFalse(session._thread.is_alive())
+
+    def test_muted_tail_retains_clock_time_without_blocking(self):
+        """Audible first buffer then total mute must keep the silent tail."""
+        class FirstSoundThenMute(FakeStream):
+            def __init__(self):
+                self.reads = 0
+
+            def get_read_available(self):
+                return 1024 if self.reads == 0 else 0
+
+            def read(self, size, exception_on_overflow=False):
+                self.reads += 1
+                return super().read(size, exception_on_overflow)
+
+        class MutingManager(FakeManager):
+            def open(self, **kwargs):
+                return FirstSoundThenMute()
+
+        class MutingLibrary(FakeLibrary):
+            def PyAudio(self):
+                return MutingManager()
+
+        with patch('capture.wasapi_loopback._library', return_value=MutingLibrary()):
+            with TemporaryDirectory() as folder:
+                session = SystemAudioCapture(Path(folder) / 'muted-tail.wav')
+                session.start()
+                time.sleep(.18)
+                session.stop()
+                self.assertEqual(session.validate(), '')
+                self.assertGreaterEqual(session.duration, .14)
 
     def test_invalid_loopback_is_rejected(self):
         class Wrong(FakeManager):

@@ -109,6 +109,43 @@ class RecorderWASAPITests(unittest.TestCase):
             self.assertFalse([p for p in folder_path.glob('*.mp4')
                               if '.partial.' not in p.name and '.mixed.' not in p.name])
 
+    def test_silent_wasapi_audio_saves_mp4_with_warning(self):
+        """Fully muted playback must not discard a valid screen recording."""
+        class SilentCapture(FakeCapture):
+            def validate(self):
+                super().validate()
+                return 'Windows audio was silent; check system mute.'
+
+        with TemporaryDirectory() as folder:
+            def validate(probe, path, expect_audio):
+                return {
+                    'format': {'duration': 2.0},
+                    'streams': [{'codec_type': 'video', 'start_time': '0', 'duration': '2.0'},
+                                {'codec_type': 'audio', 'start_time': '0', 'duration': '2.0'}]
+                }
+
+            def merge(ffmpeg, video, wav, destination, duration, mic, offset):
+                Path(destination).write_bytes(b'screen video with silent AAC')
+
+            with patch('capture.recorder.SystemAudioCapture', SilentCapture), \
+                 patch('capture.recorder.merge_audio', side_effect=merge):
+                recorder = Recorder(Backend('ffmpeg', 'ffprobe', True),
+                                    popen=FakeProcess, validator=validate)
+                recorder.start(CaptureOptions(audio=(DEVICE_ID,)), Path(folder))
+                deadline = time.monotonic() + 3
+                while recorder.state != State.RECORDING and time.monotonic() < deadline:
+                    time.sleep(.01)
+                self.assertEqual(recorder.state, State.RECORDING)
+                recorder.stop()
+                self.assertTrue(recorder.wait(3))
+                self.assertEqual(recorder.state, State.SAVED)
+                events = []
+                while not recorder.events.empty():
+                    events.append(recorder.events.get())
+                self.assertIn('silent', events[-1].message)
+                self.assertTrue(events[-1].path.is_file())
+                self.assertFalse(list(Path(folder).glob('*.partial.mp4')))
+
     def test_missing_system_audio_cannot_be_reported_saved(self):
         class Broken(FakeCapture):
             def start(self):

@@ -106,7 +106,7 @@ class Recorder:
         reservation, process, system_audio = None, None, None
         merged = None
         readers, log = [], deque(maxlen=60)
-        failure, saved = None, None
+        failure, saved, audio_warning = None, None, ''
         try:
             reservation = reserve(folder)
             system_device = next((identifier for identifier in options.audio
@@ -155,7 +155,7 @@ class Recorder:
             info = self._validator(self.backend.ffprobe, reservation.partial, has_microphone)
             if system_audio:
                 system_audio.stop()
-                system_audio.validate()
+                audio_warning = system_audio.validate()
                 if not info:
                     raise RuntimeError('Cannot determine video duration before merging system audio.')
                 duration = float(info['format']['duration'])
@@ -226,4 +226,4 @@ class Recorder:
                     failure += '\nPreserved for recovery:\n' + '\n'.join(retained)
                 self._set(State.ERROR, failure, partial)
             elif saved:
-                self._set(State.SAVED, path=saved)
+                self._set(State.SAVED, message=audio_warning, path=saved)
