@@ -425,7 +425,9 @@ class CaptureApp(tk.Tk):
                 self.last_file = event.path
                 self.quick_edit_button.configure(state='normal')
                 self.after_idle(lambda: self.canvas.yview_moveto(1) if not self._destroyed else None)
-                self.message.configure(text=f'SAVED ✓  {event.path.name}', fg=t.GREEN)
+                self.message.configure(
+                    text=f'SAVED ✓  {event.path.name}' + (f'\n⚠ {event.message}' if event.message else ''),
+                    fg=t.MUTED if event.message else t.GREEN)
             elif state == State.ERROR:
                 suffix = f'\nPartial file: {event.path}' if event.path else ''
                 self.show_error(event.message + suffix)
