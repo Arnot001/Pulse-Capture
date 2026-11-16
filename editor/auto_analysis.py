@@ -234,7 +234,8 @@ def local_plan(analysis, media, options, transcript=()):
         opening = [s for s in window if s['time'] < start+3]
         if not window or sum(s['brightness'] < .035 for s in window)/len(window) > .15:
             continue
-        weight = {'Gaming': (2.5, .4), 'News/Preview': (1.4, .3), 'Funny Moments': (1.5, .7)}[options.style]
+        weight = {'Gaming': (2.5, .4), 'News/Preview': (1.4, .3), 'Funny Moments': (1.5, .7),
+                  'Comedy / Roast': (1.5, .7)}[options.style]
         def activity(group):
             return sum(weight[0]*s['motion']+.5*s['scene']+weight[1]*s['audio'] for s in group)/max(1, len(group))
         score = activity(window)+.6*activity(opening)

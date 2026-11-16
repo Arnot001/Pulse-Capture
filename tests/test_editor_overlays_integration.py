@@ -11,7 +11,7 @@ from unittest.mock import patch
 from capture.ffmpeg_backend import run
 from editor.media import probe_media
 from editor.models import TrimRange
-from editor.transforms import EditOptions, Branding, FORMATS
+from editor.transforms import EditOptions, Branding, FORMATS, FULL_FRAME_FORMAT, full_frame_geometry
 from editor.privacy import PrivacyMask, Rect, Privacy, output_mask
 from editor.text_overlay import TextOverlay, TextResources
 from editor.export_job import ExportJob
@@ -61,13 +61,22 @@ class RealOverlayTests(unittest.TestCase):
             base = EditOptions().with_format(media, preset)
             if base.crop:
                 base = replace(base, crop=base.crop.moved(media, 140, 20))
-            width, height = base.output_size(media)
+            width, height = base.encoded_size(media)
             clean = self.rgb(self.export(media, base))
             for mode in ('Blur', 'Pixelate'):
                 with self.subTest(preset=preset, mode=mode):
                     edits = replace(base, privacy=Privacy((PrivacyMask(mode, mask, 0, media.duration),)))
                     hidden = self.rgb(self.export(media, edits))
                     rect = output_mask(mask, media, base.crop)
+                    if preset == FULL_FRAME_FORMAT:
+                        x, y, fw, fh = full_frame_geometry(media)
+                        sx, sy = fw/media.width, fh/media.height
+                    else:
+                        x = y = 0
+                        bw, bh = base.output_size(media)
+                        sx, sy = width/bw, height/bh
+                    rect = Rect(round(x+rect.x*sx), round(y+rect.y*sy),
+                                round(rect.width*sx), round(rect.height*sy))
                     indexes = [(y*width+x)*3 for y in range(rect.y+8, rect.bottom-8)
                                for x in range(rect.x+8, rect.right-8)]
                     before, after = [clean[i] for i in indexes], [hidden[i] for i in indexes]
@@ -77,6 +86,13 @@ class RealOverlayTests(unittest.TestCase):
                     self.assertLess(sum(abs(clean[i]-hidden[i]) for i in outside)/len(outside), 8)
                     # Preview at native dimensions agrees with the encoded export (compression tolerance).
                     cmd = preview_command(self.ffmpeg, media, .5, width, height, edits, False)
+                    # Preview normally caps decoded frames at 720px high. For this
+                    # pixel test, sample the shared graph at encoded resolution.
+                    flag = '-filter_complex' if '-filter_complex' in cmd else '-vf'
+                    at = cmd.index(flag)+1
+                    cmd[at] = cmd[at].replace(
+                        f'scale={min(1280, width)}:{min(720, height)}:force_original_aspect_ratio=decrease',
+                        f'scale={width}:{height}:force_original_aspect_ratio=decrease')
                     cmd[cmd.index('ppm')] = 'rawvideo'
                     cmd[cmd.index('image2pipe')] = 'rawvideo'
                     cmd[-1:-1] = ['-pix_fmt', 'rgb24']

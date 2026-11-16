@@ -11,7 +11,8 @@ class CaptionDialog(tk.Toplevel):
     def __init__(self, window):
         super().__init__(window)
         self.window = window
-        self.title('Timed captions · source timestamps')
+        pulse = bool(getattr(window, 'pulse_candidate', None))
+        self.title('Timed captions · output timestamps' if pulse else 'Timed captions · source timestamps')
         self.configure(bg=t.BG)
         self.geometry('620x440')
         self.transient(window)
@@ -37,7 +38,8 @@ class CaptionDialog(tk.Toplevel):
         for label, command in (('ADD', lambda: self.save(False)), ('UPDATE', lambda: self.save(True)),
                                ('REMOVE', self.remove), ('DONE', self.destroy)):
             t.button(actions, label, command).pack(side='left', padx=(0, 8))
-        self.note = t.label(self, 'Caption times stay anchored to the original video.', 10, t.MUTED, wraplength=580)
+        self.note = t.label(self, 'Caption times refer to the assembled Pulse output.' if pulse else
+                            'Caption times stay anchored to the original video.', 10, t.MUTED, wraplength=580)
         self.note.pack(fill='x', padx=16, pady=12)
         self.refresh()
 

@@ -46,7 +46,7 @@ class RealFormatTests(unittest.TestCase):
         path = events[-1].path
         info = validate_output(self.probe, path, media.has_audio)
         video = next(s for s in info['streams'] if s['codec_type'] == 'video')
-        self.assertEqual((video['width'], video['height']), edits.output_size(media))
+        self.assertEqual((video['width'], video['height']), edits.encoded_size(media))
         self.assertEqual(any(s['codec_type'] == 'audio' for s in info['streams']), media.has_audio)
         self.assertAlmostEqual(float(info['format']['duration']), 2, delta=.1)
         decoded = run([self.ffmpeg, '-v', 'error', '-i', str(path), '-f', 'null', '-'], 30)

@@ -1,6 +1,7 @@
 """Privacy drawing on the rendered result, mapped back to source pixels."""
 from .crop_preview import CropPreview
 from .privacy import source_viewport, rectangle_from_points
+from .transforms import FULL_FRAME_FORMAT, full_frame_geometry
 from ui import theme as t
 
 
@@ -19,6 +20,7 @@ class PrivacyPreview(CropPreview):
         self.active_masks = ()
         self.display_crop = None
         self.display_zoomed = False
+        self.display_full_frame = False
         self.gesture = self.candidate = None
         self.bind('<ButtonRelease-1>', self.finish)
 
@@ -26,6 +28,7 @@ class PrivacyPreview(CropPreview):
         self.active_masks = tuple((i,m) for i,m in enumerate(edits.privacy.masks) if m.active(position)) if edits else ()
         self.display_crop = edits.crop_at(self.media, position) if edits else None
         self.display_zoomed = bool(edits and edits.zoom.enabled)
+        self.display_full_frame = bool(edits and edits.preset == FULL_FRAME_FORMAT and not source_view)
         super().show_frame(photo, source_view)
 
     def ready(self):
@@ -39,15 +42,22 @@ class PrivacyPreview(CropPreview):
         v = self.viewport()
         return (v.width+1)//2*2, (v.height+1)//2*2
 
-    def source_point(self, x, y):
+    def content_bounds(self):
         left, top, w, h = self.bounds()
+        if self.display_full_frame:
+            x, y, width, height = full_frame_geometry(self.media)
+            return left+x*w/1080, top+y*h/1920, width*w/1080, height*h/1920
+        return left, top, w, h
+
+    def source_point(self, x, y):
+        left, top, w, h = self.content_bounds()
         width, height = self.dimensions()
         v = self.viewport()
         return (max(v.x, min(v.right, v.x+(x-left)*width/w)),
                 max(v.y, min(v.bottom, v.y+(y-top)*height/h)))
 
     def screen_rect(self, rect):
-        left, top, w, h = self.bounds()
+        left, top, w, h = self.content_bounds()
         width, height = self.dimensions()
         v = self.viewport()
         return (left+(rect.x-v.x)*w/width, top+(rect.y-v.y)*h/height,
@@ -120,7 +130,7 @@ class PrivacyPreview(CropPreview):
             return super().begin(event)
         if not self.ready():
             return
-        left, top, w, h = self.bounds()
+        left, top, w, h = self.content_bounds()
         if not (left <= event.x <= left+w and top <= event.y <= top+h):
             return
         self.focus_set()

@@ -48,7 +48,7 @@ class AutoJob:
     def save_plan(self, plan, mode, usage, cached=False):
         validate_plan(plan, self.media, self.options)
         for short in plan['shorts']:
-            editor_state(short, self.media, self.transcript)
+            editor_state(short, self.media, self.transcript, style=self.options.style)
         payload = {'version': 1, 'source': str(self.media.path.resolve()), 'source_sha256': self.analysis['digest'],
                    'analysis_file': str(self.analysis_folder/'analysis.json'), 'options': asdict(self.options),
                    'mode': mode, 'plan': plan, 'transcript': self.transcript, 'transcript_note': self.transcript_note,

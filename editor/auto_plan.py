@@ -7,9 +7,9 @@ from .crop_motion import CropKeyframe, CropMotion
 from .cuts import CutPlan, CutRange
 from .models import TrimRange
 from .text_overlay import TextOverlay, Caption
-from .transforms import EditOptions, SHORTS_FORMAT
+from .transforms import EditOptions, SHORTS_FORMAT, FULL_FRAME_FORMAT
 
-STYLES = ('Gaming', 'News/Preview', 'Funny Moments')
+STYLES = ('Gaming', 'News/Preview', 'Funny Moments', 'Comedy / Roast')
 PLAN_VERSION = 1
 
 
@@ -78,7 +78,12 @@ def overlap_seconds(a, b):
                for x in a['shots'] for y in b['shots'])
 
 
-def validate_plan(plan, media, options):
+def validate_plan(plan, media, options=None):
+    if isinstance(plan, dict) and 'format' in plan:
+        from .pulse_plan import validate_pulse_plan
+        return validate_pulse_plan(plan, media)
+    if options is None:
+        raise ValueError('Legacy Auto Edit plans require target options.')
     options.validate()
     media.validate()
     check_schema(plan, PLAN_SCHEMA)
@@ -135,15 +140,22 @@ def wrap_caption(value):
     return '\n'.join(lines)
 
 
-def editor_state(short, media, transcript=()):
+def editor_state(short, media, transcript=(), *, assembled_media=None, style=None):
     """Source-time plans become existing trims, cuts, crop keys and captions."""
+    if isinstance(short, dict) and 'format' in short:
+        from .pulse_plan import pulse_editor_state
+        validate_plan(short, media)
+        return pulse_editor_state(short, assembled_media)
     shots = short['shots']
     trim = TrimRange(shots[0]['start'], shots[-1]['end'])
     cuts = CutPlan(tuple(CutRange(a['end'], b['start']) for a, b in zip(shots, shots[1:])
                          if b['start'] > a['end']))
-    edits = EditOptions().with_format(media, SHORTS_FORMAT)
+    full_frame = style in ('News/Preview', 'Comedy / Roast')
+    edits = EditOptions().with_format(media, FULL_FRAME_FORMAT if full_frame else SHORTS_FORMAT)
     keys = {}
     for shot in shots:
+        if full_frame:
+            break
         for at, x, y in ((shot['start'], shot['focus_x'], shot['focus_y']),
                          (max(shot['start'], shot['end']-1/media.fps),
                           shot['end_focus_x'], shot['end_focus_y'])):

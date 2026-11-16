@@ -59,6 +59,12 @@ class AutoEditDialog(tk.Toplevel):
         self.settings_button = t.button(self, 'MODEL & BUDGET SETTINGS', self.settings)
         self.settings_button.configure(pady=3, font=(t.FONT, -10, 'bold'))
         self.settings_button.pack(anchor='w', padx=22)
+        import_row = tk.Frame(self, bg=t.BG)
+        import_row.pack(fill='x', padx=22, pady=(10, 0))
+        self.import_button = t.button(import_row, 'IMPORT PULSE PLAN', self.import_plan, accent=True)
+        self.import_button.pack(side='left')
+        self.template_button = t.button(import_row, 'NEW PLAN / SOURCE ID', lambda: self.import_plan(True))
+        self.template_button.pack(side='left', padx=8)
         actions = tk.Frame(self, bg=t.BG)
         actions.pack(fill='x', padx=22, pady=12)
         self.analyse_button = t.button(actions, 'ANALYSE SOURCE', self.prepare, accent=True)
@@ -84,6 +90,13 @@ class AutoEditDialog(tk.Toplevel):
         self._poll = self.after(80, self.poll)
         for var in (self.count, self.style, self.minimum, self.maximum):
             var.trace_add('write', self.invalidate)
+
+    def import_plan(self, template=False):
+        from .pulse_tools import open_plan_dialog
+        try:
+            open_plan_dialog(self.window, template=template)
+        except (ValueError, OSError) as exc:
+            self.status.configure(text=str(exc), fg=t.RED)
 
     def invalidate(self, *_):
         if not self.busy:
@@ -225,7 +238,8 @@ class AutoEditDialog(tk.Toplevel):
         payload = payload or self.payload
         candidate = EditorWindow(self.window, self.window.path, self.window.backend,
                                  self.window.auto_children.discard,
-                                 auto_candidate=(short, payload['transcript'], payload['mode']))
+                                 auto_candidate=(short, payload['transcript'], payload['mode'],
+                                                 payload.get('options', {}).get('style', 'News/Preview')))
         self.window.auto_children.add(candidate)
         candidate.lift()
 

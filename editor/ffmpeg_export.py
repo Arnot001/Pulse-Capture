@@ -193,3 +193,121 @@ def build_export_command(ffmpeg, media, trim, output, edits=None, asset=None,
     args += ['-c:v', 'libx264', '-preset', 'fast', '-crf', '20', '-pix_fmt', 'yuv420p',
              '-map_metadata', '-1', '-movflags', '+faststart', '-f', 'mp4', str(output)]
     return args
+
+
+def build_plan_segment_command(ffmpeg, media, item, output, framing, text_resources=None):
+    """Compile a validated timeline element through the existing visual pipeline.
+
+    Intermediate elements have identical dimensions, CFR and audio layout so
+    source audio can be concatenated/replayed without clock discontinuities.
+    Paths are application-owned, never values taken from plan JSON.
+    """
+    from dataclasses import replace
+    from .models import TrimRange
+    from .polish import Zoom
+    from .pulse_plan import element_duration
+    from .text_overlay import TextOverlay, _drawtext
+    from .transforms import FULL_FRAME_FORMAT, SHORTS_FORMAT
+
+    duration = element_duration(item)
+    silent = item['kind'] != 'shot' or not media.has_audio
+    if item['kind'] == 'title':
+        text = TextOverlay(True, item['text'], position='Centre', safe_area=True)
+        draw = _drawtext(1080, 1920, text, text_resources, text_resources.path)
+        # The requested title font size is validated against the safe canvas.
+        import re
+        size = item.get('font_size', 64)
+        draw = re.sub(r'fontsize=\d+', f'fontsize={size}', draw)
+        animation = item.get('animation', 'fade')
+        ramp = min(.2, duration/3)
+        if animation == 'fade':
+            draw += f":alpha='min(1,min(t/{ramp:.9f},({duration:.9f}-t)/{ramp:.9f}))'"
+        elif animation == 'slide':
+            draw = draw.replace('x=(w-text_w)/2', f"x='(w-text_w)/2-w*max(0,1-t/{ramp:.9f})'")
+        elif animation == 'pop':
+            draw = draw.replace(f'fontsize={size}', f"fontsize='{size}*(0.7+0.3*min(1,t/{ramp:.9f}))'")
+        elif animation == 'typewriter':
+            from .text_overlay import filter_path
+            parts = []
+            reveal = min(.6, duration*.6)
+            for index in range(1, len(item['text'])+1):
+                path = text_resources.path.parent / f'reveal-{index}.txt'
+                path.write_text(item['text'][:index], encoding='utf-8')
+                partial = draw.replace(filter_path(text_resources.path), filter_path(path))
+                start = (index-1)*reveal/len(item['text'])
+                end = index*reveal/len(item['text']) if index < len(item['text']) else duration
+                parts.append(partial + f":enable='gte(t,{start:.9f})*lt(t,{end:.9f})'")
+            draw = ','.join(parts)
+        args = [str(ffmpeg), '-hide_banner', '-v', 'error', '-nostdin', '-n',
+                '-f', 'lavfi', '-i', 'color=c=0x101820:s=1080x1920:r=30',
+                '-f', 'lavfi', '-i', 'anullsrc=r=48000:cl=stereo',
+                '-vf', draw, '-map', '0:v:0', '-map', '1:a:0',
+                '-c:v', 'libx264', '-preset', 'fast', '-crf', '18', '-pix_fmt', 'yuv420p',
+                '-c:a', 'aac', '-b:a', '192k', '-t', f'{duration:.9f}', '-movflags', '+faststart', str(output)]
+        return args
+
+    preset = FULL_FRAME_FORMAT if framing == 'full_frame' else SHORTS_FORMAT
+    edits = EditOptions().with_format(media, preset)
+    if 'zoom' in item:
+        zoom = item['zoom']
+        edits = replace(edits, zoom=Zoom(True, zoom['factor'], zoom['x'], zoom['y']))
+    if item['kind'] == 'shot':
+        trim = TrimRange(item['start'], item['end'])
+        edits = replace(edits, speed=item.get('speed', 1))
+    else:
+        trim = TrimRange(item['source_time'], item['source_time']+1/media.fps)
+    args = build_export_command(ffmpeg, media, trim, output, edits)
+    # Freeze just the selected first decoded frame; deliberately silent audio.
+    if item['kind'] == 'freeze':
+        tail = f'trim=end_frame=1,setpts=PTS-STARTPTS,tpad=stop_mode=clone:stop_duration={duration:.9f},fps=30'
+        if '-vf' in args:
+            at = args.index('-vf')+1
+            args[at] += ',' + tail
+        else:
+            at = args.index('-filter_complex')+1
+            args[at] = args[at].replace('[v]', '[freezeinput]') + f';[freezeinput]{tail}[v]'
+    if silent:
+        # Remove the original audio mapping/options before binding generated silence.
+        if '-an' in args:
+            args.remove('-an')
+        if '0:a:0' in args:
+            at = args.index('0:a:0')-1
+            del args[at:at+2]
+        for flag in ('-af', '-c:a', '-b:a'):
+            if flag in args:
+                at = args.index(flag)
+                del args[at:at+2]
+        at = args.index('-i')+2
+        args[at:at] = ['-f', 'lavfi', '-i', 'anullsrc=r=48000:cl=stereo']
+        args[-1:-1] = ['-map', '1:a:0', '-c:a', 'aac', '-b:a', '192k']
+    audio_tail = f'volume={item.get("volume", 1):g},apad,atrim=duration={duration:.9f}'
+    if '-af' in args:
+        args[args.index('-af')+1] += ',' + audio_tail
+    else:
+        args[-1:-1] = ['-af', audio_tail]
+    args[-1:-1] = ['-r', '30', '-fps_mode', 'cfr', '-ar', '48000', '-ac', '2', '-t', f'{duration:.9f}']
+    return args
+
+
+def build_plan_join_command(ffmpeg, left, right, output, elapsed, transition, duration):
+    """Join normalized elements with a named, bounded transition and matching audio."""
+    seconds = transition.get('duration', 0)
+    graph = ['[0:v]settb=AVTB,setpts=PTS-STARTPTS,format=yuv420p[v0]',
+             '[1:v]settb=AVTB,setpts=PTS-STARTPTS,format=yuv420p[v1]',
+             '[0:a]asetpts=PTS-STARTPTS[a0]', '[1:a]asetpts=PTS-STARTPTS[a1]']
+    if transition.get('type', 'cut') == 'cut':
+        graph.append('[v0][a0][v1][a1]concat=n=2:v=1:a=1[v][a]')
+    else:
+        # A YUV black frame has luma 16 and chroma 128, not zero planes.
+        black = 'if(eq(PLANE,0),16,128)'
+        name = ('fade' if transition['type'] == 'dissolve' else
+                f"custom:expr='if(lte(P,0.5),(B-({black}))*(1-2*P)+({black}),"
+                f"(A-({black}))*(2*P-1)+({black}))'")
+        graph += [f'[v0][v1]xfade=transition={name}:duration={seconds:.9f}:offset={elapsed-seconds:.9f}[v]',
+                  f'[a0][a1]acrossfade=d={seconds:.9f}:c1=tri:c2=tri[a]']
+    return [str(ffmpeg), '-hide_banner', '-v', 'error', '-nostdin', '-n',
+            '-i', str(left), '-i', str(right), '-filter_complex_threads', '1',
+            '-filter_complex', ';'.join(graph), '-map', '[v]', '-map', '[a]',
+            '-c:v', 'libx264', '-preset', 'fast', '-crf', '18', '-pix_fmt', 'yuv420p',
+            '-r', '30', '-fps_mode', 'cfr', '-c:a', 'aac', '-b:a', '192k',
+            '-ar', '48000', '-ac', '2', '-t', f'{duration:.9f}', '-movflags', '+faststart', str(output)]

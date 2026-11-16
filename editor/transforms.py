@@ -10,13 +10,22 @@ from .text_overlay import TextOverlay, text_geometry, text_filter
 from .polish import Fade, Zoom, fade_seconds, output_duration, validate_speed, zoom_filter
 
 SHORTS_FORMAT = 'YouTube Shorts (9:16)'
+FULL_FRAME_FORMAT = 'Shorts Full Frame'
 SHORTS_RESOLUTION = (1080, 1920)
 SHORTS_SCALE = 'scale=1080:1920:flags=lanczos,setsar=1'
-FORMATS = {'Original': None, '16:9 Landscape': (16, 9),
+FORMATS = {'Original': None, FULL_FRAME_FORMAT: None, '16:9 Landscape': (16, 9),
            '9:16 Vertical': (9, 16), SHORTS_FORMAT: (9, 16),
            '1:1 Square': (1, 1)}
 CORNERS = ('Top left', 'Top right', 'Bottom left', 'Bottom right')
 SIZES = {'Small': .12, 'Medium': .18, 'Large': .25}
+
+
+def full_frame_geometry(media):
+    """Chroma-safe fitted picture bounds on the portrait canvas (also for UI)."""
+    width, height = (media.width+1)//2*2, (media.height+1)//2*2
+    scale = min(1080/width, 1920/height)
+    fitted_w, fitted_h = int(width*scale)//2*2, int(height*scale)//2*2
+    return (1080-fitted_w)//4*2, (1920-fitted_h)//4*2, fitted_w, fitted_h
 
 
 @dataclass(frozen=True)
@@ -164,7 +173,7 @@ class EditOptions:
                 raise ValueError('Keep the crop inside the frame and at the selected aspect ratio.')
 
         if self.text.enabled:
-            width, height = (self.crop.width, self.crop.height) if self.crop else (media.width, media.height)
+            width, height = self.output_size_unchecked(media)
             text_geometry(width, height, self.text)
         for caption in self.text.captions:
             if caption.end > media.duration + .0005:
@@ -174,6 +183,8 @@ class EditOptions:
                           caption.position, safe_area=self.text.safe_area))
 
     def output_size_unchecked(self, media):
+        if self.preset == FULL_FRAME_FORMAT:
+            return SHORTS_RESOLUTION
         return (self.crop.width, self.crop.height) if self.crop else (media.width, media.height)
 
     def with_format(self, media, preset):
@@ -186,6 +197,8 @@ class EditOptions:
 
     def output_size(self, media):
         self.validate(media)
+        if self.preset == FULL_FRAME_FORMAT:
+            return SHORTS_RESOLUTION
         if self.crop:
             return self.crop.width, self.crop.height
         return (media.width+1)//2*2, (media.height+1)//2*2
@@ -193,7 +206,7 @@ class EditOptions:
     def encoded_size(self, media):
         """Final encoded dimensions; output_size is the pre-resize editing canvas."""
         self.validate(media)
-        return SHORTS_RESOLUTION if self.preset == SHORTS_FORMAT else self.output_size(media)
+        return SHORTS_RESOLUTION if self.preset in (SHORTS_FORMAT, FULL_FRAME_FORMAT) else self.output_size(media)
 
     def output_duration(self, source_duration):
         return output_duration(source_duration, self.speed)
@@ -234,7 +247,11 @@ def video_filters(media, edits, asset=None, text_resources=None, duration=None, 
     timed = duration is not None and (
         edits.speed != 1.0 or edits.fade.fade_in or edits.fade.fade_out
     )
+    full_frame = ('scale=1080:1920:force_original_aspect_ratio=decrease:force_divisible_by=2:flags=lanczos,'
+                  'pad=1080:1920:(ow-iw)/2:(oh-ih)/2:color=0x101820,setsar=1')
     if not (privacy or edits.zoom.enabled or edits.text.visible or edits.branding.enabled or timed):
+        if edits.preset == FULL_FRAME_FORMAT:
+            return base + ',' + full_frame, False
         # A fixed Shorts export size is optional; other formats retain source pixels.
         return (base + ',' + SHORTS_SCALE if edits.preset == SHORTS_FORMAT else base), False
 
@@ -249,6 +266,11 @@ def video_filters(media, edits, asset=None, text_resources=None, duration=None, 
     if zoom:
         graph.append(f'[{current}]{zoom}[zoomed]')
         current = 'zoomed'
+
+    # Fit the entire picture before output-space titles, captions and branding.
+    if edits.preset == FULL_FRAME_FORMAT:
+        graph.append(f'[{current}]{full_frame}[fullframe]')
+        current = 'fullframe'
 
     width, height = edits.output_size(media)
     if edits.text.visible:

@@ -21,11 +21,11 @@ from .privacy_preview import PrivacyPreview
 from .overlay_tools import OverlayTools
 from .music_tools import MusicTools
 from .polish_tools import PolishTools
-from .transforms import EditOptions, Branding, FORMATS, CORNERS, SIZES, SHORTS_FORMAT
+from .transforms import EditOptions, Branding, FORMATS, CORNERS, SIZES, SHORTS_FORMAT, FULL_FRAME_FORMAT
 
 
 class EditorWindow(tk.Toplevel):
-    def __init__(self, parent, path, backend, on_close=None, auto_candidate=None):
+    def __init__(self, parent, path, backend, on_close=None, auto_candidate=None, pulse_candidate=None):
         super().__init__(parent)
         self.title('PULSE // CAPTURE — QUICK EDIT')
         self.configure(bg=t.BG)
@@ -35,6 +35,7 @@ class EditorWindow(tk.Toplevel):
         self.media = self.trim = self.preview = self.audio_player = None
         self.cuts = CutPlan()
         self.auto_candidate = auto_candidate
+        self.pulse_candidate = pulse_candidate
         self.auto_dialog = None
         self.auto_children = set()
         self.exporter = ExportJob(backend, verify_short=auto_candidate is not None)
@@ -85,6 +86,10 @@ class EditorWindow(tk.Toplevel):
         self.auto_button.configure(pady=5, state='disabled')
         self.auto_button.pack(side='right', padx=16)
         self.controls.append(self.auto_button)
+        if self.pulse_candidate:
+            recipe_button = t.button(header, 'EDIT PULSE PLAN', self.open_pulse_plan)
+            recipe_button.pack(side='right', padx=4)
+            self.controls.append(recipe_button)
         intro = tk.Frame(self, bg=t.BG)
         intro.pack(fill='x', padx=28, pady=(0, 12))
         self.source_label = t.label(intro, self.path.name, 9, t.MUTED, anchor='w')
@@ -214,8 +219,9 @@ class EditorWindow(tk.Toplevel):
 
     def load_auto_candidate(self):
         from .auto_plan import editor_state
-        short, transcript, mode = self.auto_candidate
-        trim, cuts, edits = editor_state(short, self.media, transcript)
+        short, transcript, mode = self.auto_candidate[:3]
+        style = self.auto_candidate[3] if len(self.auto_candidate) > 3 else None
+        trim, cuts, edits = editor_state(short, self.media, transcript, style=style)
         self.cuts, self.edits = cuts, edits
         self.format_choice.set(edits.preset)
         self.position = trim.start
@@ -226,16 +232,33 @@ class EditorWindow(tk.Toplevel):
         self.note.configure(text='Review the whole Short; adjust Crop, Cut or Text before exporting.',
                             fg=t.CYAN)
 
+    def open_pulse_plan(self):
+        from .pulse_tools import open_plan_dialog
+        plan, source = self.pulse_candidate
+        open_plan_dialog(self, plan=plan, media=source)
+
+    def load_pulse_candidate(self):
+        from .auto_plan import editor_state
+        plan, source = self.pulse_candidate
+        trim, self.cuts, self.edits = editor_state(plan, source, assembled_media=self.media)
+        self.format_choice.set(self.edits.preset)
+        self.update_trim(trim)
+        self.select_tool('TEXT')
+        self.title(f'PULSE · Pulse Plan · {plan["title"]}')
+        self.source_label.configure(text=f'{plan["title"]} · Assembled review · Original: {source.path.name}')
+        self.note.configure(text='Review the whole Short. Edit captions in Text; use EDIT PULSE PLAN to revise shots and title cards.', fg=t.CYAN)
+
     def build_tools(self):
         # Keep the legacy internal format names for older edits/tests, but show
         # a clear horizontal + Shorts choice instead of two identical 9:16 tabs.
         format_choices = [('Original', 'Original'),
+                          (FULL_FRAME_FORMAT, 'Shorts\nFull Frame'),
                           ('16:9 Landscape', '16:9\nHorizontal'),
-                          (SHORTS_FORMAT, 'YouTube\nShorts (9:16)'),
+                          (SHORTS_FORMAT, 'Shorts\nCrop to Fill'),
                           ('1:1 Square', '1:1\nSquare')]
         panel = self.panels['FORMAT']
         self.add_segments(panel, self.format_choice, format_choices, self.format_changed)
-        t.label(panel, 'Horizontal is 16:9; YouTube Shorts exports 1080 × 1920 (9:16).', 9, t.MUTED).pack(anchor='w')
+        t.label(panel, 'Full Frame keeps the whole picture on a dark 1080 × 1920 canvas.', 9, t.MUTED).pack(anchor='w')
         panel = self.panels['CROP']
         self.add_segments(panel, self.format_choice, format_choices, self.format_changed)
         self.crop_hint = t.label(panel, 'Choose a shape, then drag the cyan frame to keep what matters.', 9, t.MUTED)
@@ -768,6 +791,12 @@ class EditorWindow(tk.Toplevel):
                         self.load_auto_candidate()
                     except ValueError as exc:
                         self.note.configure(text=f'Auto Edit plan could not be loaded: {exc}', fg=t.RED)
+                        self.export_button.configure(state='disabled')
+                if self.pulse_candidate:
+                    try:
+                        self.load_pulse_candidate()
+                    except ValueError as exc:
+                        self.note.configure(text=f'Pulse plan could not be loaded: {exc}', fg=t.RED)
                         self.export_button.configure(state='disabled')
                 self.request_frame()
         except Empty:
