@@ -3,6 +3,7 @@ on:
   push:
     branches:
       - feature/full-auto-integrated-audio-20261115
+      - fix/wasapi-mute-safe-stop-20261116
   workflow_dispatch:
 
 jobs:
@@ -26,6 +27,7 @@ jobs:
           python -m unittest discover -s tests -p 'test_audio_sync.py' -v
           python -m unittest discover -s tests -p 'test_wasapi_recorder.py' -v
           python -m unittest discover -s tests -p 'test_wasapi_audio.py' -v
+          python -m unittest discover -s tests -p 'test_wasapi_recorder.py' -v
           python -m unittest discover -s tests -p 'test_editor_audio_preview.py' -v
       - name: Quick Edit regression tests
         shell: pwsh
