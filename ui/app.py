@@ -19,14 +19,12 @@ from . import theme as t
 
 
 def choose_quick_edit_path(parent, last_file, output_folder):
-    """Use the latest recording when available; otherwise let the user choose an MP4."""
-    if last_file:
-        latest = Path(last_file)
-        if latest.is_file():
-            return latest
+    """Always offer the MP4 picker; suggest the latest recording without forcing it."""
+    latest = Path(last_file) if last_file and Path(last_file).is_file() else None
     selected = filedialog.askopenfilename(
         parent=parent,
-        initialdir=str(output_folder),
+        initialdir=str(latest.parent if latest else output_folder),
+        initialfile=latest.name if latest else '',
         title='Choose a video to edit',
         filetypes=(('MP4 video', '*.mp4'), ('All files', '*.*')),
     )
