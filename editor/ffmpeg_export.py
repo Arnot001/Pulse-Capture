@@ -4,6 +4,7 @@ from pathlib import Path
 from branding import watermark_path
 from .cuts import CutPlan
 from .music import resolve_music_path
+from .music_mix import input_loops, filters as music_filters, duck
 from .crop_motion import motion_crop_filter
 from .transforms import EditOptions, video_filters
 from .polish import fade_seconds, audio_tempo_filters
@@ -61,17 +62,7 @@ def _source_audio_filters(edits, out_duration):
 
 
 def _music_audio_filters(edits, out_duration):
-    music = edits.music
-    filters = ['asetpts=PTS-STARTPTS', f'volume={music.music_volume:g}']
-    if not music.loop:
-        filters.append(f'apad=pad_dur={out_duration:.6f}')
-    filters.append(f'atrim=start=0:end={out_duration:.6f}')
-    fade = fade_seconds(out_duration)
-    if music.fade_in:
-        filters.append(f'afade=t=in:st=0:d={fade:.6f}')
-    if music.fade_out:
-        filters.append(f'afade=t=out:st={max(0, out_duration-fade):.6f}:d={fade:.6f}')
-    return filters
+    return music_filters(edits.music, out_duration)
 
 
 def build_export_command(ffmpeg, media, trim, output, edits=None, asset=None,
@@ -106,7 +97,7 @@ def build_export_command(ffmpeg, media, trim, output, edits=None, asset=None,
     music_index = None
     if edits.music.enabled:
         music_index = 2 if edits.branding.enabled else 1
-        if edits.music.loop:
+        if input_loops(edits.music):
             args += ['-stream_loop', '-1']
         args += ['-i', str(music_path)]
 
@@ -154,8 +145,11 @@ def build_export_command(ffmpeg, media, trim, output, edits=None, asset=None,
             f'[{music_index}:a:0]{",".join(_music_audio_filters(edits, out_duration))}[musica]'
         )
         if media.has_audio:
+            source_label, music_label = ('sourcea','musica')
+            if edits.music.duck_dialogue:
+                source_label, music_label = duck(graph,source_label,music_label,'duckedmusic')
             graph.append(
-                f'[sourcea][musica]amix=inputs=2:duration=longest:dropout_transition=0:normalize=0,'
+                f'[{source_label}][{music_label}]amix=inputs=2:duration=longest:dropout_transition=0:normalize=0,'
                 f'alimiter=limit=0.95:level=false:latency=true,atrim=start=0:end={out_duration:.6f}[a]'
             )
         else:

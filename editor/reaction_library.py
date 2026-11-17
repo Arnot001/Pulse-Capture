@@ -12,8 +12,10 @@ import struct
 import tempfile
 import threading
 import wave
+from functools import lru_cache
 
 from capture.ffmpeg_backend import process_options
+from .sound_design import SFX as NEW_SFX, synthesize as synthesize_original
 
 ASSETS = Path(__file__).resolve().parent.parent / 'assets'
 SFX = {
@@ -37,6 +39,8 @@ SFX = {
     'failure.trombone': ('Original sad brass sting', 'Failure', 1.6),
     'failure.descending': ('Descending tone', 'Failure', .9),
 }
+LEGACY_SFX = frozenset(SFX)
+SFX.update(NEW_SFX)
 EMOJI = {
     'emoji.skull': ('Skull', 'Reactions'), 'emoji.laugh': ('Laughing', 'Faces'),
     'emoji.cry': ('Crying', 'Faces'), 'emoji.shock': ('Shocked', 'Faces'),
@@ -46,6 +50,12 @@ EMOJI = {
     'emoji.alert': ('Warning', 'Alerts'), 'emoji.siren': ('Siren', 'Alerts'),
 }
 _LOCK = threading.RLock()
+
+
+@lru_cache(maxsize=1)
+def bundled_gifs():
+    """Metadata only: never decode 64 animations merely to open a panel."""
+    return {item['id']: item for item in json.loads((ASSETS/'reactions'/'catalogue.json').read_text(encoding='utf-8'))}
 
 
 def library_root():
@@ -122,6 +132,8 @@ def _atomic_json(path, value):
 
 def synthesize(asset_id, path):
     """Original layered oscillators, filtered noise and envelopes; deterministic PCM."""
+    if asset_id in NEW_SFX:
+        return synthesize_original(asset_id, path)
     duration = SFX[asset_id][2]
     rate = 48000
     rng = random.Random(asset_id)
@@ -194,10 +206,16 @@ class ReactionLibrary:
         safe_id(asset_id)
         if asset_id in SFX:
             name, category, duration = SFX[asset_id]
+            category = 'Failures' if category == 'Failure' else 'Reactions' if category == 'Reveals' else category
+            if asset_id == 'cinematic.riser': category = 'Suspense'
             item = dict(id=asset_id, name=name, category=category, duration=duration, kind='sfx', suffix='.wav')
+            item.update(artist='Pulse Capture', source='Original procedural sound design', licence='Pulse Original Media',
+                        attribution='', licence_record='assets/licenses/PULSE_ORIGINAL_MEDIA.md')
         elif asset_id in EMOJI:
             name, category = EMOJI[asset_id]
             item = dict(id=asset_id, name=name, category=category, duration=0, kind='emoji', suffix='.png', width=256, height=256)
+        elif asset_id in bundled_gifs():
+            item = dict(bundled_gifs()[asset_id])
         else:
             try:
                 path = self.root/(asset_id+'.json')
@@ -216,6 +234,8 @@ class ReactionLibrary:
         item = self.metadata(asset_id, kind)
         if item['kind'] == 'emoji':
             path = ASSETS/'emoji'/(asset_id+'.png')
+        elif asset_id in bundled_gifs():
+            path = ASSETS/'reactions'/(asset_id+'.gif')
         else:
             path = self.root/(asset_id+item['suffix'])
             if path.resolve().parent != self.root.resolve():
@@ -236,7 +256,7 @@ class ReactionLibrary:
         return path
 
     def items(self, kind):
-        values = [self.metadata(key) for key in (SFX if kind == 'sfx' else EMOJI if kind == 'emoji' else ())]
+        values = [self.metadata(key) for key in (SFX if kind == 'sfx' else EMOJI if kind == 'emoji' else bundled_gifs() if kind == 'gif' else ())]
         for path in sorted(self.root.glob('import.*.json')):
             try:
                 item = self.metadata(path.stem)
@@ -244,7 +264,42 @@ class ReactionLibrary:
                     values.append(item)
             except ValueError:
                 continue
+        categories = self.preferences().get('categories', {})
+        for item in values:
+            item['category'] = categories.get(item['id'], item['category'])
         return values
+
+    def thumbnail(self, asset_id):
+        if asset_id in bundled_gifs():
+            return ASSETS/'reactions'/(asset_id+'.png')
+        return self.resolve(asset_id)
+
+    def categorize(self, asset_ids, category):
+        category = str(category).strip()
+        if not category or len(category)>48 or any(ord(c)<32 for c in category):
+            raise ValueError('Use a category name of 1–48 characters.')
+        if category in ('All', 'Favourites', 'Recent'):
+            raise ValueError('That name is reserved for a library filter.')
+        for key in asset_ids: self.metadata(key)
+        with _LOCK:
+            prefs = self.preferences()
+            prefs.setdefault('categories', {}).update({key:category for key in asset_ids})
+            _atomic_json(self.root/'preferences.json', prefs)
+
+    def import_many(self, paths, kind, ffmpeg, ffprobe, progress=None, cancel=None):
+        if len(paths)>200: raise ValueError('Import up to 200 files in one batch.')
+        existing = {item['id'] for item in self.items(kind)}
+        added, duplicates, errors = [], [], []
+        for i, path in enumerate(paths):
+            if cancel is not None and cancel.is_set():break
+            try:
+                key = self.import_file(path, kind, ffmpeg, ffprobe)
+                (duplicates if key in existing else added).append(key)
+                existing.add(key)
+            except (ValueError, OSError, subprocess.SubprocessError) as exc:
+                errors.append(f'{Path(path).name}: {exc}')
+            if progress: progress(i+1, len(paths))
+        return dict(added=added, duplicates=duplicates, errors=errors)
 
     def preferences(self):
         try:
@@ -281,6 +336,17 @@ class ReactionLibrary:
             source.write_bytes(data)
             gif_info = inspect_gif(data) if kind == 'gif' else None
             asset_id = 'import.'+hashlib.sha256(data).hexdigest()[:32]
+            digest = hashlib.sha256(data).hexdigest()
+            if kind == 'gif':
+                match = next((key for key,item in bundled_gifs().items() if item['sha256']==digest),None)
+                if match: return match
+            # Importing the same file again must not overwrite its name, category
+            # or licence metadata. Different filenames with identical bytes dedupe.
+            try:
+                self.resolve(asset_id, kind)
+                return asset_id
+            except ValueError:
+                pass
             base = ['-v', 'error', '-protocol_whitelist', 'file,pipe', '-max_alloc', '67108864']
             result = subprocess.run([str(ffprobe), *base, '-count_frames', '-show_streams', '-show_format',
                                      '-of', 'json', str(source)], capture_output=True, timeout=15, **process_options())
@@ -315,7 +381,8 @@ class ReactionLibrary:
                     with destination.open('xb') as output:
                         output.write(content)
                 item = dict(id=asset_id, name=path.stem[:80], category='Imported', kind=kind,
-                            suffix=suffix, duration=duration)
+                            suffix=suffix, duration=duration, sha256=digest,
+                            source='Local import', licence='User supplied — verify rights', attribution='')
                 if kind == 'gif':
                     item.update(width=w, height=h, frames=frames, delays=gif_info[2])
                 _atomic_json(self.root/(asset_id+'.json'), item)

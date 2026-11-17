@@ -95,7 +95,25 @@ class MusicTools:
             8, t.MUTED, anchor='w',
         )
         self.hint.pack(fill='x', pady=(5, 0))
+        library_row=tk.Frame(panel,bg=t.PANEL);library_row.pack(fill='x',pady=(3,0))
+        self.browse_button=t.button(library_row,'BROWSE YOUTUBE AUDIO LIBRARY',self.browse_youtube)
+        self.details_button=t.button(library_row,'LIBRARY / PREVIEW / CREDITS',self.open_library)
+        for button in (self.browse_button,self.details_button):
+            button.configure(padx=7,pady=2,font=(t.FONT,-9,'bold'));button.pack(side='left',padx=(0,8))
+            window.controls.append(button)
         self.refresh()
+
+    def browse_youtube(self):
+        import webbrowser
+        from .music_library import YOUTUBE_LIBRARY_URL
+        webbrowser.open(YOUTUBE_LIBRARY_URL)
+
+    def open_library(self):
+        if not self.window.media or self.window.exporter.busy or self.window.closing:return
+        from .music_details import MusicDetails
+        existing=next((c for c in self.window.auto_children if isinstance(c,MusicDetails) and not c.closed),None)
+        if existing:existing.deiconify();existing.lift()
+        else:MusicDetails(self)
 
     @staticmethod
     def _volume(text):
@@ -117,6 +135,9 @@ class MusicTools:
             loop=self.loop.get(),
             fade_in=self.fade_in.get(),
             fade_out=self.fade_out.get(),
+            trim_start=self.window.edits.music.trim_start,
+            trim_end=self.window.edits.music.trim_end,
+            duck_dialogue=self.window.edits.music.duck_dialogue,
         )
 
     def changed(self):
@@ -125,6 +146,8 @@ class MusicTools:
             return
         try:
             music = self._state()
+            if music.track != w.edits.music.track:
+                music=replace(music,trim_start=0,trim_end=None)
             music.validate()
             w.edits = replace(w.edits, music=music)
             self.refresh()
@@ -162,6 +185,7 @@ class MusicTools:
         if not selected:
             return
         self.imported = Path(selected)
+        w.edits=replace(w.edits,music=replace(w.edits.music,trim_start=0,trim_end=None))
         self.track_choice.set(IMPORT_LABEL)
         values = list(TRACKS)
         if IMPORT_LABEL not in values:
@@ -194,6 +218,8 @@ class MusicTools:
         self.toggle_segments.enable(ready)
         self.track_combo.configure(state='readonly' if enabled else 'disabled')
         self.import_button.configure(state='normal' if ready else 'disabled')
+        self.browse_button.configure(state='normal' if ready else 'disabled')
+        self.details_button.configure(state='normal' if ready else 'disabled')
         self.music_volume_combo.configure(state='readonly' if enabled else 'disabled')
         self.original_volume_combo.configure(state='readonly' if enabled else 'disabled')
         for check in self.option_checks:

@@ -12,6 +12,7 @@ import time
 from capture.ffmpeg_backend import process_options
 from .cuts import CutPlan
 from .music import resolve_music_path
+from .music_mix import input_loops, filters as soundtrack_filters, duck
 from .polish import audio_tempo_filters
 from .transforms import EditOptions
 
@@ -44,7 +45,7 @@ def audio_preview_command(ffmpeg, media, source_position, trim, cuts=None,
             '-i', str(media.path)]
     if edits.music.enabled:
         music_path = music_path or resolve_music_path(edits.music)
-        if edits.music.loop:
+        if input_loops(edits.music):
             args += ['-stream_loop', '-1']
         args += ['-i', str(music_path)]
     graph = []
@@ -67,15 +68,13 @@ def audio_preview_command(ffmpeg, media, source_position, trim, cuts=None,
         source_filters.append('aresample=async=1:first_pts=0')
         graph.append(f'[{combined}]{",".join(source_filters)}[source]')
     if edits.music.enabled:
-        music_filters = [
-            f'atrim=start={output_offset:.9f}:end={output_offset+duration:.9f}',
-            'asetpts=PTS-STARTPTS', f'volume={edits.music.music_volume:g}',
-        ]
-        if not edits.music.loop:
-            music_filters.append(f'apad=pad_dur={duration:.9f}')
+        music_filters = soundtrack_filters(edits.music,duration,output_offset,output_offset+duration)
         graph.append(f'[1:a:0]{",".join(music_filters)}[music]')
     if media.has_audio and edits.music.enabled:
-        graph.append('[source][music]amix=inputs=2:duration=longest:'
+        source_label,music_label = ('source','music')
+        if edits.music.duck_dialogue:
+            source_label,music_label = duck(graph,source_label,music_label,'previewduck')
+        graph.append(f'[{source_label}][{music_label}]amix=inputs=2:duration=longest:'
                      'dropout_transition=0:normalize=0,'
                      'alimiter=limit=0.95:level=false:latency=true[aout]')
     elif media.has_audio or edits.music.enabled:

@@ -98,12 +98,24 @@ class Music:
     loop: bool = True
     fade_in: bool = True
     fade_out: bool = True
+    trim_start: float = 0.0
+    trim_end: float | None = None
+    duck_dialogue: bool = False
 
     def validate(self):
         if type(self.enabled) is not bool or type(self.loop) is not bool:
             raise ValueError('Choose valid music On/Off and Loop settings.')
         if type(self.fade_in) is not bool or type(self.fade_out) is not bool:
             raise ValueError('Choose valid music fade settings.')
+        if type(self.duck_dialogue) is not bool:
+            raise ValueError('Choose a valid dialogue ducking setting.')
+        for value in (self.trim_start, self.trim_end):
+            if value is not None and (isinstance(value, bool) or not isinstance(value, (float,int)) or not math.isfinite(value) or not 0<=value<=7200):
+                raise ValueError('Music trim times must be finite seconds between 0 and 7200.')
+        if self.trim_start is None or (self.trim_end is not None and self.trim_end<=self.trim_start):
+            raise ValueError('Music trim end must follow its start.')
+        if self.loop and self.trim_start and self.trim_end is None:
+            raise ValueError('Set the music trim end to loop a selected section.')
         if self.track not in TRACKS and self.track != IMPORT_LABEL:
             raise ValueError('Choose a Pulse track or import your own audio.')
         for value, label in ((self.music_volume, 'Music'), (self.original_volume, 'Original audio')):

@@ -70,7 +70,8 @@ class ComedyTests(unittest.TestCase):
             path=library.resolve(key); before=path.stat().st_mtime_ns
             digests.add(hashlib.sha256(path.read_bytes()).hexdigest())
             self.assertEqual(library.resolve(key).stat().st_mtime_ns,before)
-        self.assertEqual(len(digests),19)
+        self.assertGreaterEqual(len(SFX),150)
+        self.assertEqual(len(digests),len(SFX))
         library.remember('comedy.boing',True); library.remember('emoji.skull')
         self.assertIn('comedy.boing',ReactionLibrary().preferences()['favourites'])
         self.assertEqual(ReactionLibrary().preferences()['recent'][0],'emoji.skull')

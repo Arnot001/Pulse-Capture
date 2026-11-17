@@ -7,11 +7,12 @@ import subprocess
 import tempfile
 import threading
 import tkinter as tk
-from tkinter import filedialog, ttk
+from tkinter import filedialog, ttk, simpledialog
 
 from capture.ffmpeg_backend import process_options
 from ui import theme as t
 from .reaction_library import ReactionLibrary
+from .media_audition import Audition
 from .reactions import SoundCue, VisualCue, POSITIONS, ANIMATIONS, validate_cues
 
 
@@ -25,8 +26,9 @@ class ReactionDialog(tk.Toplevel):
         self.configure(bg=t.BG); self.transient(window)
         self.closed = False; self.busy = False
         self.images = {}; self.preview_photo = None
-        self.preview_timer = self.poll_timer = None
+        self.preview_timer = self.poll_timer = self.thumbnail_timer = None
         self.events = Queue(); self.temp = tempfile.TemporaryDirectory(prefix='pulse-audition-')
+        self.import_cancel = threading.Event()
         self.protocol('WM_DELETE_WINDOW',self.close)
         window.auto_children.add(self)
         self.search = tk.StringVar(); self.category = tk.StringVar(value='All')
@@ -38,16 +40,21 @@ class ReactionDialog(tk.Toplevel):
         self.categories.pack(side='left',padx=6)
         self.search.trace_add('write',lambda *_:self.refresh_library())
         self.category.trace_add('write',lambda *_:self.refresh_library())
-        if kind!='emoji':t.button(top,'IMPORT LOCAL',self.import_asset).pack(side='right')
+        if kind!='emoji':t.button(top,'IMPORT FILES',self.import_asset).pack(side='right')
         centre=tk.Frame(self,bg=t.BG);centre.pack(fill='both',expand=True,padx=16)
         style=ttk.Style(self);style.configure('Reactions.Treeview',rowheight=48)
-        self.assets=ttk.Treeview(centre,show='tree',style='Reactions.Treeview',height=4,selectmode='browse')
+        self.assets=ttk.Treeview(centre,show='tree',style='Reactions.Treeview',height=4,selectmode='extended')
         self.assets.pack(side='left',fill='both',expand=True)
+        scrollbar=ttk.Scrollbar(centre,orient='vertical',command=self.assets.yview)
+        scrollbar.pack(side='left',fill='y')
+        self.assets.configure(yscrollcommand=lambda a,b:(scrollbar.set(a,b),self.queue_thumbnails()))
         self.assets.bind('<<TreeviewSelect>>',lambda _:self.preview_asset())
         preview=tk.Frame(centre,bg=t.PANEL,width=190);preview.pack(side='right',fill='y',padx=(10,0));preview.pack_propagate(False)
         self.picture=tk.Label(preview,bg=t.PANEL,fg=t.TEXT,text='Select an effect');self.picture.pack(fill='both',expand=True)
         t.button(preview,'▶ PREVIEW',self.preview_asset).pack(fill='x')
+        t.button(preview,'STOP',self.stop_preview).pack(fill='x')
         t.button(preview,'★ FAVOURITE',self.favourite).pack(fill='x')
+        t.button(preview,'SET CATEGORY',self.categorize).pack(fill='x')
         self.asset_label=t.label(self,'',9,t.MUTED,anchor='w');self.asset_label.pack(fill='x',padx=16,pady=4)
         grid=tk.Frame(self,bg=t.BG);grid.pack(fill='x',padx=16)
         now=window.cuts.source_elapsed(window.position,window.trim)/window.edits.speed
@@ -82,6 +89,7 @@ class ReactionDialog(tk.Toplevel):
         self.cues.pack(fill='x',padx=16,pady=5);self.cues.bind('<<ListboxSelect>>',self.select_cue)
         self.note=t.label(self,'All cue times refer to the output after trims, cuts and speed. Use only media you own or may use.',9,t.MUTED,wraplength=790,justify='left')
         self.note.pack(fill='x',padx=16,pady=8)
+        self.audition=Audition(self,lambda message,error:self.note.configure(text=message,fg=t.RED if error else t.CYAN))
         self.refresh_library();self.refresh_cues()
 
     def total(self):
@@ -90,6 +98,7 @@ class ReactionDialog(tk.Toplevel):
     def selected(self):
         selected=self.assets.selection()
         if not selected:raise ValueError('Select a library asset first.')
+        if len(selected)!=1:raise ValueError('Select one asset to insert. Multiple selection is for categories and favourites.')
         return selected[0]
 
     def refresh_library(self):
@@ -98,43 +107,69 @@ class ReactionDialog(tk.Toplevel):
         self.images.clear()
         prefs=self.library.preferences()
         values=self.library.items(self.kind)
+        self.categories.configure(values=['All','Favourites','Recent',*sorted({x['category'] for x in values})])
         if self.category.get()=='Recent':
             values.sort(key=lambda x:prefs.get('recent',[]).index(x['id']) if x['id'] in prefs.get('recent',[]) else 999)
         for item in values:
             key=item['id'];cat=self.category.get()
-            if self.search.get().lower() not in (item['name']+' '+key).lower():continue
+            if self.search.get().lower() not in (item['name']+' '+key+' '+item['category']).lower():continue
             if cat=='Favourites' and key not in prefs.get('favourites',[]):continue
             if cat=='Recent' and key not in prefs.get('recent',[]):continue
             if cat not in ('All','Favourites','Recent',item['category']):continue
-            image=''
-            if self.kind!='sfx':
-                try:
-                    photo=tk.PhotoImage(master=self,file=str(self.library.resolve(key)))
-                    photo=photo.subsample(max(1,(max(photo.width(),photo.height())+39)//40))
-                    self.images[key]=photo;image=photo
-                except (tk.TclError,ValueError):pass
             star='★ ' if key in prefs.get('favourites',[]) else ''
-            self.assets.insert('','end',iid=key,text=f'{star}{item["name"]}  ·  {item["category"]}',image=image)
+            self.assets.insert('','end',iid=key,text=f'{star}{item["name"]}  ·  {item["category"]}')
+        self.queue_thumbnails()
+
+    def queue_thumbnails(self):
+        if self.kind!='sfx' and not self.closed and self.thumbnail_timer is None:
+            self.thumbnail_timer=self.after(20,self.load_thumbnails)
+
+    def load_thumbnails(self):
+        self.thumbnail_timer=None
+        if self.closed:return
+        count=0
+        for key in self.assets.get_children():
+            if key in self.images or not self.assets.bbox(key):continue
+            try:
+                photo=tk.PhotoImage(master=self,file=str(self.library.thumbnail(key)))
+                photo=photo.subsample(max(1,(max(photo.width(),photo.height())+39)//40))
+                self.images[key]=photo;self.assets.item(key,image=photo)
+            except (tk.TclError,ValueError):pass
+            count+=1
+            if count==4:self.queue_thumbnails();break
+
+    def stop_preview(self):
+        if self.preview_timer:self.after_cancel(self.preview_timer);self.preview_timer=None
+        if hasattr(self,'audition'):self.audition.stop()
+
+    def categorize(self):
+        selected=self.assets.selection()
+        if not selected:return
+        category=simpledialog.askstring('Category',f'Category for {len(selected)} selected assets:',parent=self)
+        if category is None:return
+        try:
+            self.library.categorize(selected,category)
+            self.category.set('All');self.refresh_library()
+            self.assets.selection_set(selected)
+        except (ValueError,OSError) as exc:self.note.configure(text=str(exc),fg=t.RED)
 
     def preview_asset(self):
-        if self.preview_timer:self.after_cancel(self.preview_timer);self.preview_timer=None
+        self.stop_preview()
         try:
-            key=self.selected();path=self.library.resolve(key,self.kind)
+            if len(self.assets.selection())!=1:return
+            key=self.selected()
             self.asset_label.configure(text=key)
             if self.kind=='sfx':
-                import winsound
-                winsound.PlaySound(None,0)
-                destination=Path(self.temp.name)/'audition.wav'
                 volume=float(self.values['volume'].get())
                 from .reactions import finite
                 finite(volume,0,2,'Preview volume')
-                subprocess.run([str(self.window.backend.ffmpeg),'-v','error','-nostdin','-y','-i',str(path),
-                                '-af',f'volume={volume:g},alimiter=limit=.9:level=false:latency=true',str(destination)],
-                               check=True,capture_output=True,timeout=25,**process_options())
-                winsound.PlaySound(str(destination),winsound.SND_FILENAME|winsound.SND_ASYNC)
+                ffmpeg,library=self.window.backend.ffmpeg,self.library
+                self.audition.play(lambda destination:[str(ffmpeg),'-v','error','-nostdin','-n',
+                    '-i',str(library.resolve(key,'sfx')),'-af',f'volume={volume:g},alimiter=limit=.9:level=false:latency=true',
+                    '-ac','2','-ar','48000','-c:a','pcm_s16le',str(destination)])
                 self.picture.configure(text=self.library.metadata(key)['name'])
             else:
-                self.animate(path,0)
+                self.animate(self.library.resolve(key,self.kind),0)
         except Exception as exc:self.note.configure(text=str(exc),fg=t.RED)
 
     def animate(self,path,index):
@@ -152,27 +187,38 @@ class ReactionDialog(tk.Toplevel):
             self.preview_timer=self.after(round(delay*1000),lambda:self.animate(path,index+1))
 
     def favourite(self):
-        try:self.library.remember(self.selected(),True);self.refresh_library()
+        try:
+            for key in self.assets.selection():self.library.remember(key,True)
+            self.refresh_library()
         except ValueError as exc:self.note.configure(text=str(exc),fg=t.RED)
 
     def import_asset(self):
         if self.busy:return
-        chosen=filedialog.askopenfilename(parent=self,title='Import your licensed local media',filetypes=[('Audio','*.wav *.mp3')] if self.kind=='sfx' else [('GIF','*.gif')])
+        chosen=filedialog.askopenfilenames(parent=self,title='Import your licensed local media (multiple files)',filetypes=[('Audio','*.wav *.mp3')] if self.kind=='sfx' else [('GIF','*.gif')])
         if not chosen:return
-        self.busy=True;self.note.configure(text='Validating and copying this asset…',fg=t.CYAN)
+        self.import_cancel.clear()
+        self.busy=True;self.note.configure(text='Validating and importing files…',fg=t.CYAN)
         def run():
-            try:self.events.put((True,self.library.import_file(chosen,self.kind,self.window.backend.ffmpeg,self.window.backend.ffprobe)))
+            try:self.events.put((True,self.library.import_many(chosen,self.kind,self.window.backend.ffmpeg,self.window.backend.ffprobe,
+                                                lambda i,n:self.events.put(('progress',(i,n))), self.import_cancel)))
             except Exception as exc:self.events.put((False,str(exc)))
         threading.Thread(target=run,daemon=True).start()
         self.poll_import()
 
     def poll_import(self):
         try:
-            ok,result=self.events.get_nowait();self.busy=False
+            ok,result=self.events.get_nowait()
+            if ok=='progress':
+                if not self.closed:self.note.configure(text=f'Importing {result[0]} / {result[1]}…',fg=t.CYAN)
+                self.poll_timer=self.after(60,self.poll_import);return
+            self.busy=False
             if self.closed:self.finish_close();return
-            self.note.configure(text=f'Imported: {result}' if ok else result,fg=t.GREEN if ok else t.RED)
+            self.note.configure(text=(f"Added {len(result['added'])} · duplicates {len(result['duplicates'])} · failed {len(result['errors'])}"
+                + ('\n'+'\n'.join(result['errors'][:2]) if result['errors'] else '')) if ok else result,fg=t.GREEN if ok else t.RED)
             if ok:
-                self.category.set('All');self.refresh_library();self.assets.selection_set(result)
+                self.category.set('All');self.refresh_library()
+                selected=tuple(dict.fromkeys(result['added']+result['duplicates']))
+                self.assets.selection_set(selected)
         except Empty:self.poll_timer=self.after(80,self.poll_import)
 
     def tracks(self):return list(self.window.edits.sounds if self.kind=='sfx' else self.window.edits.overlays)
@@ -229,6 +275,7 @@ class ReactionDialog(tk.Toplevel):
             self.note.configure(text='Insert or select a timed overlay first.',fg=t.RED)
             return
         self.select_cue()
+        self.stop_preview()
         self.window.select_tool('FORMAT')
         self.withdraw()
         self.window.lift()
@@ -305,7 +352,9 @@ class ReactionDialog(tk.Toplevel):
 
     def close(self):
         self.closed=True
-        if self.preview_timer:self.after_cancel(self.preview_timer)
+        self.import_cancel.set()
+        self.stop_preview();self.audition.close()
+        if self.thumbnail_timer:self.after_cancel(self.thumbnail_timer);self.thumbnail_timer=None
         try:
             import winsound
             winsound.PlaySound(None,0)
