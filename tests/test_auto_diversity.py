@@ -64,7 +64,7 @@ class AutoDiversityTests(unittest.TestCase):
         transcript=[dict(start=a,end=a+9.5,text='A complete informative speech phrase.') for a in (15,55,95,135,175,215,255,295,335)]
         plan=local_plan(analysis,self.media,AutoOptions(),transcript)
         self.assertEqual(plan,local_plan(analysis,self.media,AutoOptions(),transcript))
-        _,_,edits=editor_state(plan['shorts'][0],self.media,transcript)
+        _,_,edits=editor_state(plan['shorts'][0],self.media,transcript,style='News/Preview')
         self.assertTrue(edits.text.captions)
         cancel=threading.Event();cancel.set()
         with self.assertRaises(AutoCancelled):local_plan(analysis,self.media,AutoOptions(),cancel=cancel)
