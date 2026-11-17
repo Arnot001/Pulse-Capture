@@ -11,6 +11,7 @@ from .auto_ai import Pricing
 from .auto_analysis import AutoCancelled
 from .auto_job import AutoJob
 from .auto_plan import AutoOptions, STYLES
+from .auto_selection import source_ranges
 
 
 class AutoEditDialog(tk.Toplevel):
@@ -229,7 +230,7 @@ class AutoEditDialog(tk.Toplevel):
             row = tk.Frame(self.results, bg=t.PANEL)
             row.pack(fill='x', pady=4)
             duration = sum(s['end']-s['start'] for s in short['shots'])
-            t.label(row, f'{index+1}. {short["title"]} · {duration:.1f}s', 11, bold=True,
+            t.label(row, f'{index+1}. {short["title"]} · {duration:.1f}s\nSource {source_ranges(short["shots"])}', 10, bold=True,
                     wraplength=455, justify='left').pack(side='left', padx=10, pady=12)
             t.button(row, 'PREVIEW / EDIT', lambda s=short, p=payload: self.open_candidate(s, p)).pack(side='right', padx=10)
 
