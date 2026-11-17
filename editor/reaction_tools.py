@@ -71,6 +71,7 @@ class ReactionDialog(tk.Toplevel):
                 t.label(options,label,9).pack(side='left',padx=4)
                 ttk.Combobox(options,textvariable=var,values=values,state='readonly',width=15).pack(side='left')
             tk.Checkbutton(options,text='Loop GIF',variable=self.loop,bg=t.BG,fg=t.TEXT,selectcolor=t.CONTROL).pack(side='left',padx=6)
+            t.button(options,'POSITION ON VIDEO',self.position_on_video).pack(side='right')
         else:
             t.button(options,'ADD SILENCE',lambda:self.save(False,'silence.pause')).pack(side='left')
             t.label(options,'Background gain: 1 = unchanged, 0 = mute source + music',9,t.MUTED).pack(side='left',padx=8)
@@ -188,14 +189,50 @@ class ReactionDialog(tk.Toplevel):
 
     def select_cue(self,_=None):
         if not self.cues.curselection():return
-        cue=self.tracks()[self.indices[self.cues.curselection()[0]]]
+        index=self.indices[self.cues.curselection()[0]]
+        cue=self.tracks()[index]
+        self.fill_values(cue)
+        if self.kind!='sfx':
+            self.window.video.select_visual(index)
+            now=self.window.cuts.source_elapsed(self.window.position,self.window.trim)/self.window.edits.speed
+            end=cue.end
+            if cue.kind=='gif' and not cue.loop:
+                end=min(end,cue.start+self.library.metadata(cue.asset_id,cue.kind)['duration'])
+            if cue.start<=now<end:return
+            # Show an entered animation rather than its transparent first frame.
+            start=cue.start+min(.2,(end-cue.start)/2)
+        else:start=cue.at
+        self.window.seek(self.window.cuts.source_from_elapsed(start*self.window.edits.speed,self.window.trim))
+
+    def fill_values(self,cue):
         for key,var in self.values.items():
             value=getattr(cue,key)
-            var.set('' if value is None else str(value))
+            var.set('' if value is None else format(value,'.9g'))
         if self.kind!='sfx':self.position.set(cue.position);self.animation.set(cue.animation);self.loop.set(cue.loop)
-        if self.assets.exists(cue.asset_id):self.assets.selection_set(cue.asset_id)
-        start=cue.at if self.kind=='sfx' else cue.start
-        self.window.seek(self.window.cuts.source_from_elapsed(start*self.window.edits.speed,self.window.trim))
+        if self.assets.exists(cue.asset_id) and self.assets.selection()!=(cue.asset_id,):
+            self.assets.selection_set(cue.asset_id)
+
+    def sync_from_canvas(self,index,cue):
+        if self.kind=='sfx':return
+        if cue.kind!=self.kind:
+            self.cues.selection_clear(0,'end')
+            return
+        expected=[i for i,c in enumerate(self.tracks()) if c.kind==self.kind]
+        if self.indices!=expected:self.refresh_cues()
+        row=self.indices.index(index)
+        if self.cues.curselection()!=(row,):
+            self.cues.selection_clear(0,'end');self.cues.selection_set(row);self.cues.see(row)
+        self.fill_values(cue)
+
+    def position_on_video(self):
+        if not self.cues.curselection():
+            self.note.configure(text='Insert or select a timed overlay first.',fg=t.RED)
+            return
+        self.select_cue()
+        self.window.select_tool('FORMAT')
+        self.withdraw()
+        self.window.lift()
+        self.window.note.configure(text='Drag the overlay; corners resize, round handle rotates. Reopen EMOJIS / GIFS for numeric controls.',fg=t.CYAN)
 
     def commit(self,values):
         w=self.window
@@ -218,9 +255,12 @@ class ReactionDialog(tk.Toplevel):
             tracks=self.tracks()
             if update:
                 if not self.cues.curselection():raise ValueError('Select a timed cue to update or replace.')
-                tracks[self.indices[self.cues.curselection()[0]]]=cue
-            else:tracks.append(cue)
+                index=self.indices[self.cues.curselection()[0]]
+                tracks[index]=cue
+            else:
+                index=len(tracks);tracks.append(cue)
             self.commit(tracks)
+            if self.kind!='sfx':self.window.video.select_visual(index)
             if key!='silence.pause':self.library.remember(key)
             self.note.configure(text='Cue saved. Preview placement in Quick Edit; export creates a new MP4.',fg=t.GREEN)
         except (ValueError,TypeError) as exc:self.note.configure(text=str(exc),fg=t.RED)
@@ -229,6 +269,7 @@ class ReactionDialog(tk.Toplevel):
         try:
             if self.cues.curselection():
                 values=self.tracks();del values[self.indices[self.cues.curselection()[0]]];self.commit(values)
+                if self.kind!='sfx':self.window.video.select_visual(None)
         except ValueError as exc:self.note.configure(text=str(exc),fg=t.RED)
 
     def save_cues(self):

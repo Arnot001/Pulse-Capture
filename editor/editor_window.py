@@ -17,7 +17,7 @@ from .models import TrimRange, format_time, parse_time
 from .preview import Preview, anticipated_source_position
 from .audio_preview import AudioPlayback
 from .timeline import Timeline
-from .privacy_preview import PrivacyPreview
+from .reaction_preview import ReactionPreview
 from .overlay_tools import OverlayTools
 from .music_tools import MusicTools
 from .polish_tools import PolishTools
@@ -177,8 +177,8 @@ class EditorWindow(tk.Toplevel):
 
         preview_area = tk.Frame(self, bg=t.BG)
         preview_area.pack(fill='both', expand=True, padx=28)
-        self.video = PrivacyPreview(preview_area, self.crop_changed, self.overlay_tools.mask_changed,
-                                    self.polish_tools.focus_changed, bg='#060a10',
+        self.video = ReactionPreview(preview_area, self.crop_changed, self.overlay_tools.mask_changed,
+                                    self.polish_tools.focus_changed, window=self, bg='#060a10',
                                     highlightbackground=t.LINE, highlightthickness=1, height=260)
         preview_area.rowconfigure(0, weight=1)
         preview_area.columnconfigure(0, weight=1)
@@ -228,6 +228,12 @@ class EditorWindow(tk.Toplevel):
             dialog.notebook.select(dialog.effects_panel)
         else:
             from .reaction_tools import ReactionDialog
+            existing = next((child for child in self.auto_children if isinstance(child, ReactionDialog)
+                             and child.kind == kind and not child.closed), None)
+            if existing:
+                existing.deiconify()
+                existing.lift()
+                return
             ReactionDialog(self, kind)
 
     def open_auto_edit(self):
@@ -852,7 +858,7 @@ class EditorWindow(tk.Toplevel):
                         self._preview_latency_samples += 1
                     if frame.error:
                         self.stop_play()
-                        self.video.delete('frame', 'crop', 'privacy', 'privacy-active', 'zoom')
+                        self.video.delete('frame', 'crop', 'privacy', 'privacy-active', 'zoom', 'visual-guide')
                         self.video.photo = None
                         self.video.source_view = False
                         self.video.itemconfigure('placeholder', text='Preview unavailable')
