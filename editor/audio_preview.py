@@ -28,7 +28,7 @@ def audio_preview_command(ffmpeg, media, source_position, trim, cuts=None,
     trim.validate(media)
     cuts.validate_selection(media, trim)
     edits.validate(media)
-    if not media.has_audio and not edits.music.enabled:
+    if not media.has_audio and not edits.music.enabled and not edits.sounds:
         return None
     start = cuts.snap_position(source_position, trim)
     remaining = tuple((max(start, part.start), part.end)
@@ -78,10 +78,17 @@ def audio_preview_command(ffmpeg, media, source_position, trim, cuts=None,
         graph.append('[source][music]amix=inputs=2:duration=longest:'
                      'dropout_transition=0:normalize=0,'
                      'alimiter=limit=0.95:level=false:latency=true[aout]')
-    else:
+    elif media.has_audio or edits.music.enabled:
         label = 'source' if media.has_audio else 'music'
         graph.append(f'[{label}]anull[aout]')
-    args += ['-filter_complex', ';'.join(graph), '-map', '[aout]',
+    if edits.sounds:
+        from .reactions import add_sounds
+        label = 'aout' if media.has_audio or edits.music.enabled else None
+        result = add_sounds(args, graph, label, edits.sounds, duration, output_offset)
+        graph.append(f'[{result}]anull[previewmix]')
+    else:
+        result = None
+    args += ['-filter_complex', ';'.join(graph), '-map', '[previewmix]' if result else '[aout]',
              '-t', f'{duration:.9f}', '-ac', '2', '-ar', str(SAMPLE_RATE),
              '-c:a', 'pcm_s16le', '-f', 's16le', 'pipe:1']
     return args
@@ -130,7 +137,7 @@ class AudioPlayback:
             self._audio_failed = False
             self._play_requested_at = time.monotonic()
             self._pending = (position, trim, cuts, edits) if (
-                self.media.has_audio or edits.music.enabled) else None
+                self.media.has_audio or edits.music.enabled or edits.sounds) else None
             if self._pending and (self._worker is None or not self._worker.is_alive()):
                 self._worker = threading.Thread(
                     target=self._run, daemon=True, name='Pulse edit audio output')

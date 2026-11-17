@@ -16,6 +16,7 @@ class Caption:
     end: float
     text: str
     position: str = 'Bottom'
+    style: object = None
 
     def validate(self):
         if not all(type(v) in (int, float) and math.isfinite(v) for v in (self.start, self.end)):
@@ -23,6 +24,12 @@ class Caption:
         if not 0 <= self.start < self.end:
             raise ValueError('Caption end must follow its start.')
         TextOverlay(True, self.text, position=self.position).validate()
+        if self.style is not None:
+            from .typography import CaptionStyle, caption_layout
+            if not isinstance(self.style, CaptionStyle):
+                raise ValueError('Invalid caption style.')
+            self.style.validate()
+            caption_layout(1080, 1920, self.text, self.style)
 
 
 @dataclass(frozen=True)
@@ -155,6 +162,17 @@ def text_filter(width, height, text, resources, trim=None, cuts=None, source_pos
     if text.captions and (resources is None or len(resources.caption_paths) != len(text.captions)):
         raise ValueError('Caption resources are unavailable.')
     for caption, path in zip(text.captions, resources.caption_paths if resources else ()):
+        if caption.style is not None:
+            from .typography import styled_filter
+            if source_position is not None:
+                if caption.start <= source_position < caption.end:
+                    filters.append(styled_filter(width, height, caption, caption.style, resources,
+                                   [(caption.start, caption.end)], source_position))
+            elif trim is not None:
+                intervals = caption_intervals(caption, trim, cuts)
+                if intervals:
+                    filters.append(styled_filter(width, height, caption, caption.style, resources, intervals))
+            continue
         overlay = TextOverlay(True, caption.text, text.size, caption.position, safe_area=text.safe_area)
         draw = _drawtext(width, height, overlay, resources, path)
         if source_position is not None:

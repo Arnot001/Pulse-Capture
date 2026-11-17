@@ -1,0 +1,139 @@
+{
+  "format": "pulse-edit-plan",
+  "version": 2,
+  "title": "The disappearing pocket",
+  "style": "Comedy / Roast",
+  "source": {
+    "name": "pulse-demo.mp4",
+    "duration": 6.0,
+    "width": 640,
+    "height": 360,
+    "fps": 30.0,
+    "sha256": "8c99dc8aadf5955a4b5c57a934ea8f75484c7752749375f0c41be2a5b2dbd556"
+  },
+  "output": {
+    "width": 1080,
+    "height": 1920,
+    "fps": 30,
+    "framing": "full_frame",
+    "background": "dark"
+  },
+  "timeline": [
+    {
+      "kind": "title",
+      "text": "POCKET MAGIC?",
+      "duration": 1,
+      "font_size": 60,
+      "animation": "slide"
+    },
+    {
+      "kind": "shot",
+      "start": 0,
+      "end": 1,
+      "start_frame": 0,
+      "end_frame": 30,
+      "role": "setup",
+      "commentary": "Nothing visible yet. Script only; record narration separately."
+    },
+    {
+      "kind": "shot",
+      "start": 4,
+      "end": 5,
+      "role": "reveal"
+    },
+    {
+      "kind": "freeze",
+      "source_time": 4.5,
+      "role": "punchline",
+      "effect": "punch_zoom"
+    },
+    {
+      "kind": "shot",
+      "start": 0,
+      "end": 1,
+      "speed": 0.5,
+      "volume": 0.7,
+      "role": "replay",
+      "zoom": {
+        "factor": 1.5,
+        "x": 0.5,
+        "y": 0.5
+      },
+      "transition": {
+        "type": "dissolve",
+        "duration": 0.2
+      }
+    },
+    {
+      "kind": "title",
+      "text": "CHECK THE\nPOCKETS.",
+      "duration": 1,
+      "font_size": 72,
+      "animation": "pop"
+    }
+  ],
+  "captions": [
+    {
+      "start": 1,
+      "end": 2,
+      "text": "WATCH CLOSELY",
+      "zone": "top",
+      "basis": "observation"
+    },
+    {
+      "start": 3,
+      "end": 4.8,
+      "text": "THAT WAS PERSONAL",
+      "zone": "top",
+      "basis": "joke",
+      "typography": {
+        "highlight": "PERSONAL",
+        "font_size": 88,
+        "animation": "pop"
+      }
+    }
+  ],
+  "notes": "Fixture demonstration, not a claim about gameplay. Review all footage before publishing.",
+  "caption_theme": "Comedy Bold",
+  "freeze_duration": 1.8,
+  "sfx": [
+    {
+      "asset_id": "reaction.record_scratch",
+      "at": 2,
+      "volume": 0.65,
+      "duck_source": 0.35
+    },
+    {
+      "asset_id": "comedy.boing",
+      "at": 3,
+      "volume": 0.75,
+      "duck_source": 0.35
+    },
+    {
+      "asset_id": "reveal.ding",
+      "at": 3.2,
+      "volume": 0.5
+    }
+  ],
+  "overlays": [
+    {
+      "kind": "emoji",
+      "asset_id": "emoji.skull",
+      "start": 3,
+      "end": 4.8,
+      "position": "bottom_left",
+      "scale": 0.2,
+      "animation": "pop"
+    },
+    {
+      "kind": "gif",
+      "asset_id": "import.53e858da45e28ca3bbf99d987d862273",
+      "start": 3,
+      "end": 4.8,
+      "position": "bottom_right",
+      "scale": 0.25,
+      "loop": true,
+      "opacity": 1
+    }
+  ]
+}

@@ -1,10 +1,11 @@
 """Small timed-caption editor shared by automatic and manual edits."""
-from dataclasses import replace
+from dataclasses import replace, asdict
 import tkinter as tk
 from tkinter import ttk
 from ui import theme as t
 from .models import format_time, parse_time
 from .text_overlay import Caption
+from .typography import CaptionStyle, THEMES, theme_style
 
 
 class CaptionDialog(tk.Toplevel):
@@ -14,7 +15,7 @@ class CaptionDialog(tk.Toplevel):
         pulse = bool(getattr(window, 'pulse_candidate', None))
         self.title('Timed captions · output timestamps' if pulse else 'Timed captions · source timestamps')
         self.configure(bg=t.BG)
-        self.geometry('620x440')
+        self.geometry('680x620')
         self.transient(window)
         self.grab_set()
         self.captions = list(window.edits.text.captions)
@@ -33,6 +34,31 @@ class CaptionDialog(tk.Toplevel):
                      state='readonly', width=9).pack(side='left')
         self.input = tk.Text(self, height=3, bg=t.CONTROL, fg=t.TEXT, insertbackground=t.CYAN)
         self.input.pack(fill='x', padx=16, pady=10)
+        self.style_enabled = tk.BooleanVar(value=True)
+        styles = tk.Frame(self, bg=t.BG)
+        styles.pack(fill='x', padx=16, pady=4)
+        tk.Checkbutton(styles, text='Styled captions', variable=self.style_enabled, bg=t.BG, fg=t.TEXT,
+                       selectcolor=t.CONTROL).pack(side='left')
+        self.theme = tk.StringVar(value='Comedy Bold')
+        picker = ttk.Combobox(styles, textvariable=self.theme, values=THEMES, state='readonly', width=20)
+        picker.pack(side='left', padx=8)
+        picker.bind('<<ComboboxSelected>>', lambda _: self.set_style(theme_style(self.theme.get())))
+        self.style_vars = {}
+        settings = tk.Frame(self, bg=t.BG)
+        settings.pack(fill='x', padx=16)
+        for i, (key, value) in enumerate(asdict(CaptionStyle()).items()):
+            if key == 'theme':
+                continue
+            group = tk.Frame(settings, bg=t.BG)
+            group.grid(row=(i-1)//4, column=(i-1)%4, padx=(0,8), pady=3, sticky='ew')
+            t.label(group, key.replace('_',' ').title(), 9).pack(anchor='w')
+            var = tk.StringVar(value=str(value))
+            self.style_vars[key] = var
+            if key in ('alignment','animation'):
+                ttk.Combobox(group, textvariable=var, values=('left','centre','right') if key=='alignment' else
+                             ('none','fade','pop','shake'), state='readonly', width=12).pack(fill='x')
+            else:
+                tk.Entry(group, textvariable=var, width=14).pack(fill='x')
         actions = tk.Frame(self, bg=t.BG)
         actions.pack(fill='x', padx=16)
         for label, command in (('ADD', lambda: self.save(False)), ('UPDATE', lambda: self.save(True)),
@@ -42,6 +68,13 @@ class CaptionDialog(tk.Toplevel):
                             'Caption times stay anchored to the original video.', 10, t.MUTED, wraplength=580)
         self.note.pack(fill='x', padx=16, pady=12)
         self.refresh()
+
+    def set_style(self, style):
+        self.style_enabled.set(style is not None)
+        style = style or CaptionStyle()
+        self.theme.set(style.theme)
+        for key, var in self.style_vars.items():
+            var.set(str(getattr(style, key)))
 
     def refresh(self):
         self.rows.delete(0, 'end')
@@ -54,6 +87,7 @@ class CaptionDialog(tk.Toplevel):
             self.start.set(format_time(cue.start))
             self.end.set(format_time(cue.end))
             self.position.set(cue.position)
+            self.set_style(cue.style)
             self.input.delete('1.0', 'end')
             self.input.insert('1.0', cue.text)
             self.window.seek(cue.start)
@@ -70,8 +104,11 @@ class CaptionDialog(tk.Toplevel):
 
     def save(self, update):
         try:
+            values = {key: (int(var.get()) if key in ('font_size','outline','shadow') else var.get())
+                      for key, var in self.style_vars.items()}
+            style = CaptionStyle(theme=self.theme.get(), **values) if self.style_enabled.get() else None
             cue = Caption(parse_time(self.start.get()), parse_time(self.end.get()),
-                          self.input.get('1.0', 'end-1c'), self.position.get())
+                          self.input.get('1.0', 'end-1c'), self.position.get(), style)
             proposed = list(self.captions)
             if update:
                 if not self.rows.curselection():

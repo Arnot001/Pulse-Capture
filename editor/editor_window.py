@@ -93,7 +93,14 @@ class EditorWindow(tk.Toplevel):
         intro = tk.Frame(self, bg=t.BG)
         intro.pack(fill='x', padx=28, pady=(0, 12))
         self.source_label = t.label(intro, self.path.name, 9, t.MUTED, anchor='w')
-        self.source_label.pack(fill='x', pady=(4, 0))
+        reaction_row = tk.Frame(intro, bg=t.BG)
+        reaction_row.pack(side='right')
+        for label, kind in (('SOUND FX', 'sfx'), ('EMOJIS', 'emoji'), ('GIFS / REACTIONS', 'gif'), ('EFFECTS', 'effects')):
+            button = t.button(reaction_row, label, lambda k=kind: self.open_reactions(k))
+            button.configure(padx=6, pady=4, font=(t.FONT, -9, 'bold'))
+            button.pack(side='left', padx=2)
+            self.controls.append(button)
+        self.source_label.pack(side='left', fill='x', expand=True, pady=(4, 0))
 
         # Bottom controls stay reachable when the window is resized.
         bottom = tk.Frame(self, bg=t.BG)
@@ -206,6 +213,22 @@ class EditorWindow(tk.Toplevel):
         segments.pack(fill='x', pady=(0, 6))
         self.controls.extend(b for _, b in segments.buttons)
         return segments
+
+    def open_reactions(self, kind):
+        if not self.media or self.exporter.busy or self.closing:
+            return
+        self.stop_play()
+        if kind == 'effects':
+            from .pulse_tools import open_plan_dialog
+            if self.pulse_candidate:
+                plan, source = self.pulse_candidate
+                dialog = open_plan_dialog(self, plan=plan, media=source)
+            else:
+                dialog = open_plan_dialog(self, template=True)
+            dialog.notebook.select(dialog.effects_panel)
+        else:
+            from .reaction_tools import ReactionDialog
+            ReactionDialog(self, kind)
 
     def open_auto_edit(self):
         if not self.media or self.exporter.busy or self.closing:
@@ -526,6 +549,10 @@ class EditorWindow(tk.Toplevel):
             if hasattr(self, 'cut_tools') and self.tool.get() == 'CUT'
             else (None, None)
         )
+        self.timeline.reaction_markers = tuple(
+            (self.cuts.source_from_elapsed((c.at if hasattr(c, 'at') else c.start)*self.edits.speed, self.trim),
+             'SFX' if hasattr(c, 'at') else c.kind.upper())
+            for c in (*self.edits.sounds, *self.edits.overlays))
         self.timeline.draw()
         self.clock.configure(text=f'{format_time(self.position)} / {format_time(self.media.duration)}')
         self.refresh_crop_guide()
@@ -637,7 +664,7 @@ class EditorWindow(tk.Toplevel):
         # preview startup, even if both streams share the same clock.
         self._waiting_for_play_frame = bool(
             self.audio_on.get() and self.audio_player and
-            (self.media.has_audio or self.edits.music.enabled)
+            (self.media.has_audio or self.edits.music.enabled or self.edits.sounds)
         )
         self.play_anchor = self.position
         self.play_anchor_elapsed = self.cuts.source_elapsed(self.position, self.trim)
@@ -669,7 +696,7 @@ class EditorWindow(tk.Toplevel):
         """Map the master audio clock onto the cut-aware source timeline."""
         delta = time.monotonic() - self.play_started
         if (self.audio_on.get() and self.audio_player and
-                (self.media.has_audio or self.edits.music.enabled)):
+                (self.media.has_audio or self.edits.music.enabled or self.edits.sounds)):
             audio_delta = self.audio_player.elapsed()
             if audio_delta is None:
                 # Wait for device/decoder startup: video must not get ahead.

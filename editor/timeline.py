@@ -13,6 +13,7 @@ class Timeline(tk.Canvas):
         self.privacy = None
         self.cut_draft = (None, None)
         self.crop_keyframes = ()
+        self.reaction_markers = ()
         self.position = 0
         self.enabled = True
         self.drag = None
@@ -57,6 +58,11 @@ class Timeline(tk.Canvas):
                 mark = self.x(key.time)
                 self.create_polygon(mark, 41, mark+5, 46, mark, 51, mark-5, 46,
                                     fill=t.CYAN, outline=t.BG, tags='crop-keyframe')
+
+        for seconds, label in self.reaction_markers:
+            mark = self.x(seconds)
+            self.create_line(mark, 12, mark, 38, fill='#ffd83d', width=2, tags='reaction-cue')
+            self.create_text(mark, 43, text=label, fill='#ffd83d', font=(t.FONT, -8, 'bold'), tags='reaction-cue')
 
         draft_start, draft_end = self.cut_draft
         for value, label in ((draft_start, 'S'), (draft_end, 'E')):

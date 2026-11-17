@@ -1,4 +1,4 @@
-"""Closed, local-only Pulse Edit Plan v1. All times are seconds, never expressions."""
+"""Closed, local-only Pulse Edit Plan v1/v2. All times are seconds, never expressions."""
 import json
 import math
 from pathlib import Path
@@ -47,9 +47,9 @@ def frame_duration(value, where):
         raise ValueError(f'{where}: output durations must be multiples of 1/30 second.')
 
 
-def element_duration(item):
+def element_duration(item, freeze_default=1.8):
     return ((item['end']-item['start'])/item.get('speed', 1)
-            if item['kind'] == 'shot' else item['duration'])
+            if item['kind'] == 'shot' else item.get('duration', freeze_default))
 
 
 def timeline_positions(plan):
@@ -58,7 +58,7 @@ def timeline_positions(plan):
     result = []
     for item in plan['timeline']:
         cursor -= item.get('transition', {}).get('duration', 0)
-        end = cursor + element_duration(item)
+        end = cursor + element_duration(item, plan.get('freeze_duration', 1.8))
         result.append((cursor, end))
         cursor = end
     return result
@@ -67,9 +67,14 @@ def timeline_positions(plan):
 def validate_pulse_plan(plan, media):
     media.validate()
     fields(plan, ('format', 'version', 'title', 'source', 'output', 'timeline', 'captions'),
-           ('style', 'notes'))
-    if plan['format'] != 'pulse-edit-plan' or type(plan['version']) is not int or plan['version'] != 1:
-        raise ValueError('Supported format: pulse-edit-plan, version: 1.')
+           ('style', 'notes') + (('sfx', 'overlays', 'caption_theme', 'freeze_duration') if plan.get('version') == 2 else ()))
+    if plan['format'] != 'pulse-edit-plan' or type(plan['version']) is not int or plan['version'] not in (1, 2):
+        raise ValueError('Supported format: pulse-edit-plan, version: 1 or 2.')
+    v2 = plan['version'] == 2
+    if v2:
+        from .typography import THEMES
+        choice(plan.get('caption_theme', 'Comedy Bold'), THEMES, 'caption_theme')
+        frame_duration(plan.get('freeze_duration', 1.8), 'freeze_duration')
     text(plan['title'], 90, 'title')
     choice(plan.get('style', 'News/Preview'), ('News/Preview', 'Gaming', 'Comedy / Roast'), 'style')
     text(plan.get('notes', ''), 4000, 'notes', empty=True)
@@ -102,7 +107,9 @@ def validate_pulse_plan(plan, media):
             raise ValueError(f'{where}: expected an object.')
         kind = item.get('kind')
         choice(kind, ('shot', 'freeze', 'title'), where+'.kind')
-        common = ('at', 'transition', 'commentary', 'role')
+        common = ('at', 'transition', 'commentary', 'role') + (('effect',) if v2 and kind != 'title' else ())
+        if 'effect' in item:
+            choice(item['effect'], ('punch_zoom','shake','scratch','glitch'), where+'.effect')
         if kind == 'shot':
             fields(item, ('kind', 'start', 'end'), common + ('speed', 'volume', 'zoom', 'start_frame', 'end_frame'), where)
             number(item['start'], 0, media.duration, where+'.start')
@@ -119,7 +126,8 @@ def validate_pulse_plan(plan, media):
                         raise ValueError(f'{where}.{key}_frame disagrees with its timestamp.')
             footage = True
         elif kind == 'freeze':
-            fields(item, ('kind', 'source_time', 'duration'), common + ('zoom',), where)
+            fields(item, ('kind', 'source_time') if v2 else ('kind', 'source_time', 'duration'),
+                   common + ('zoom', 'duration') if v2 else common + ('zoom',), where)
             number(item['source_time'], 0, max(0, media.duration-1/media.fps), where+'.source_time')
             footage = True
         else:
@@ -134,7 +142,7 @@ def validate_pulse_plan(plan, media):
             # Bound text to the safe title area without silently changing font size.
             if max(len(line) for line in item['text'].split('\n')) * item.get('font_size', 64) > 864:
                 raise ValueError(f'{where}: title line too long for font_size; add line breaks or reduce it.')
-        frame_duration(element_duration(item), where+'.duration')
+        frame_duration(element_duration(item, plan.get('freeze_duration', 1.8)), where+'.duration')
         if 'zoom' in item:
             zoom = item['zoom']
             fields(zoom, ('factor', 'x', 'y'), where=where+'.zoom')
@@ -155,7 +163,7 @@ def validate_pulse_plan(plan, media):
                     raise ValueError('A hard cut has duration 0.')
             else:
                 frame_duration(duration, where+'.transition.duration')
-                if not index or duration > min(element_duration(items[index-1]), element_duration(item))/2:
+                if not index or duration > min(element_duration(items[index-1], plan.get('freeze_duration', 1.8)), element_duration(item, plan.get('freeze_duration', 1.8)))/2:
                     raise ValueError('A transition needs two adjacent elements and at most half of each duration.')
     if not footage:
         raise ValueError('Include at least one source shot or freeze-frame.')
@@ -172,7 +180,7 @@ def validate_pulse_plan(plan, media):
     if type(captions) is not list or len(captions) > 80:
         raise ValueError('captions: use at most 80 cues.')
     for cue in captions:
-        fields(cue, ('start', 'end', 'text', 'zone', 'basis'), ('evidence',), 'caption')
+        fields(cue, ('start', 'end', 'text', 'zone', 'basis'), ('evidence', 'typography') if v2 else ('evidence',), 'caption')
         number(cue['start'], 0, duration, 'caption.start')
         number(cue['end'], 0, duration, 'caption.end')
         text(cue['text'], 160, 'caption.text')
@@ -181,9 +189,48 @@ def validate_pulse_plan(plan, media):
         text(cue.get('evidence', ''), 500, 'caption.evidence', empty=True)
         if cue['basis'] == 'verified' and not cue.get('evidence', '').strip():
             raise ValueError('Verified captions require an evidence note; jokes are not confirmed bugs.')
-        Caption(cue['start'], cue['end'], cue['text'], cue['zone'].title()).validate()
+        style = caption_style(plan, cue)
+        Caption(cue['start'], cue['end'], cue['text'], cue['zone'].title(), style).validate()
+        if style and style.highlight and style.highlight not in cue['text']:
+            raise ValueError('Caption highlight must occur in its text.')
         text_geometry(1080, 1920, TextOverlay(True, cue['text'], position=cue['zone'].title(), safe_area=True))
+    if v2:
+        from .reactions import validate_cues
+        sounds, overlays = reaction_cues(plan)
+        validate_cues(sounds, overlays, duration)
     return plan
+
+
+def caption_style(plan, cue):
+    if plan['version'] == 1:
+        return None
+    from dataclasses import asdict
+    from .typography import CaptionStyle, theme_style
+    props = cue.get('typography', {})
+    fields(props, (), tuple(CaptionStyle.__dataclass_fields__), 'caption.typography')
+    style = asdict(theme_style(props.get('theme', plan.get('caption_theme', 'Comedy Bold'))))
+    style.update(props)
+    result = CaptionStyle(**style)
+    result.validate()
+    return result
+
+
+def reaction_cues(plan):
+    from .reactions import SoundCue, VisualCue
+    result = []
+    for key, model, required, limit in (('sfx', SoundCue, ('asset_id','at'),64),
+                                        ('overlays', VisualCue, ('kind','asset_id','start','end'),24)):
+        values = plan.get(key, [])
+        if type(values) is not list or len(values)>limit:
+            raise ValueError(f'{key}: expected an array with at most {limit} cues.')
+        cues = []
+        for value in values:
+            fields(value, required, tuple(model.__dataclass_fields__), key)
+            cue = model(**value)
+            cue.validate()
+            cues.append(cue)
+        result.append(tuple(cues))
+    return tuple(result)
 
 
 def parse_pulse_plan(raw):
@@ -239,9 +286,10 @@ def pulse_editor_state(plan, assembled_media):
     if ((assembled_media.width, assembled_media.height) != (1080, 1920)
             or abs(assembled_media.duration-duration) > .08):
         raise ValueError('Assembled media does not match the Pulse output timeline.')
-    captions = tuple(Caption(c['start'], c['end'], c['text'], c['zone'].title())
+    captions = tuple(Caption(c['start'], c['end'], c['text'], c['zone'].title(), caption_style(plan, c))
                      for c in plan['captions'] if c['basis'] != 'unverified')
-    edits = EditOptions(text=TextOverlay(captions=captions, safe_area=True))
+    sounds, overlays = reaction_cues(plan)
+    edits = EditOptions(text=TextOverlay(captions=captions, safe_area=True), sounds=sounds, overlays=overlays)
     trim, cuts = TrimRange(0, assembled_media.duration), CutPlan()
     edits.validate(assembled_media)
     cuts.validate_selection(assembled_media, trim)

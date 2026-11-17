@@ -192,7 +192,10 @@ def build_export_command(ffmpeg, media, trim, output, edits=None, asset=None,
 
     args += ['-c:v', 'libx264', '-preset', 'fast', '-crf', '20', '-pix_fmt', 'yuv420p',
              '-map_metadata', '-1', '-movflags', '+faststart', '-f', 'mp4', str(output)]
-    return args
+    from .reactions import augment_export, validate_cues
+    validate_cues(edits.sounds, edits.overlays, out_duration)
+    width, height = edits.encoded_size(media)
+    return augment_export(args, edits, out_duration, width, height)
 
 
 def build_plan_segment_command(ffmpeg, media, item, output, framing, text_resources=None):
@@ -266,6 +269,20 @@ def build_plan_segment_command(ffmpeg, media, item, output, framing, text_resour
         else:
             at = args.index('-filter_complex')+1
             args[at] = args[at].replace('[v]', '[freezeinput]') + f';[freezeinput]{tail}[v]'
+    effect = item.get('effect')
+    if effect:
+        effects = {
+            'punch_zoom': "zoompan=z='1+0.5*min(1,on/5)':x='iw/2-iw/zoom/2':y='ih/2-ih/zoom/2':d=1:s=1080x1920:fps=30",
+            'shake': "scale=1112:1978,crop=1080:1920:x='16+12*sin(t*70)*lt(t,.35)':y='29+12*cos(t*60)*lt(t,.35)'",
+            'scratch': "hue=s=0:enable='lt(t,.2)',drawbox=x=0:y=ih*.48:w=iw:h=8:c=white@.5:t=fill:enable='lt(t,.2)'",
+            'glitch': "rgbashift=rh=12:bh=-12:enable='lt(t,.3)'",
+        }
+        tail = effects[effect]
+        if '-vf' in args:
+            args[args.index('-vf')+1] += ',' + tail
+        else:
+            at = args.index('-filter_complex')+1
+            args[at] = args[at].replace('[v]', '[effectinput]') + f';[effectinput]{tail}[v]'
     if silent:
         # Remove the original audio mapping/options before binding generated silence.
         if '-an' in args:

@@ -140,8 +140,12 @@ class EditOptions:
     speed: float = 1.0
     fade: Fade = Fade()
     crop_motion: CropMotion = CropMotion()
+    sounds: tuple = ()
+    overlays: tuple = ()
 
     def validate(self, media):
+        from .reactions import validate_cues
+        validate_cues(self.sounds, self.overlays)
         expected = centered_crop(media, self.preset)
         self.branding.validate()
         self.text.validate()

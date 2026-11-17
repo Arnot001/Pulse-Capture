@@ -108,13 +108,13 @@ class ExportJob:
             if process.returncode:
                 raise RuntimeError('The video could not be exported.\n' + '\n'.join(log)[-1600:])
             self.events.put(ExportEvent('validating', .99, 'Checking your exported video…'))
-            info = self._validator(self.backend.ffprobe, reservation.partial, media.has_audio or edits.music.enabled)
+            info = self._validator(self.backend.ffprobe, reservation.partial, media.has_audio or edits.music.enabled or bool(edits.sounds))
             duration = float(info['format']['duration'])
             if abs(duration - out_duration) > max(.15, 2 / media.fps):
                 raise RuntimeError('The exported length did not match your selection. The original is unchanged.')
             # A valid MP4 can still contain 19 seconds of audio alongside
             # 31 seconds of video. Prevent an unsynced export being approved.
-            if (media.has_audio or edits.music.enabled) and info.get('streams'):
+            if (media.has_audio or edits.music.enabled or bool(edits.sounds)) and info.get('streams'):
                 validate_audio_coverage(info)
             if self.verify_short:
                 from .auto_verify import verify_short
@@ -122,7 +122,7 @@ class ExportJob:
                     'validating', .99,
                     'Decoding complete Short and checking audio and black frames…'))
                 verify_short(self.backend, reservation.partial, out_duration,
-                             media.has_audio or edits.music.enabled, self._cancel)
+                             media.has_audio or edits.music.enabled or bool(edits.sounds), self._cancel)
             self._check_cancel()
             reservation.publish()
             result = ExportEvent('saved', 1, 'Export complete', reservation.final)

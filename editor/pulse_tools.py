@@ -34,7 +34,7 @@ class PulsePlanDialog(tk.Toplevel):
                 'Re-rendering starts a new edit from this recipe; Quick Edit changes stay with the previous version.\n'
                 'Commentary is a script only. Unverified captions are withheld; jokes are not verified facts.',
                 10, t.MUTED, justify='left').pack(anchor='w', padx=20, pady=8)
-        notebook = ttk.Notebook(self)
+        notebook = self.notebook = ttk.Notebook(self)
         notebook.pack(fill='both', expand=True, padx=20, pady=6)
         json_panel = tk.Frame(notebook, bg=t.PANEL)
         notebook.add(json_panel, text='Edit JSON recipe')
@@ -49,6 +49,10 @@ class PulsePlanDialog(tk.Toplevel):
             self.timeline.heading(name, text=title)
             self.timeline.column(name, width=width)
         notebook.add(self.timeline, text='Validated timeline')
+        self.effects_panel = tk.Frame(notebook, bg=t.PANEL)
+        notebook.add(self.effects_panel, text='Effects picker')
+        from .effect_tools import EffectPicker
+        self.effect_picker = EffectPicker(self, self.effects_panel)
         self.status = t.label(self, 'Ready to validate.', 10, t.MUTED, wraplength=820, justify='left')
         self.status.pack(anchor='w', padx=20, pady=8)
         row = tk.Frame(self, bg=t.BG)
@@ -94,6 +98,10 @@ class PulsePlanDialog(tk.Toplevel):
             for cue in plan['captions']:
                 self.timeline.insert('', 'end', values=(f'{cue["start"]:.3f}–{cue["end"]:.3f}',
                                      cue['zone']+' caption', f'[{cue["basis"]}] {cue["text"]}'))
+            for cue in plan.get('sfx', []):
+                self.timeline.insert('', 'end', values=(f'{cue["at"]:.3f}', 'SFX', cue['asset_id']))
+            for cue in plan.get('overlays', []):
+                self.timeline.insert('', 'end', values=(f'{cue["start"]:.3f}-{cue["end"]:.3f}', cue['kind'], cue['asset_id']))
             withheld = sum(c['basis'] == 'unverified' for c in plan['captions'])
             self.status.configure(text=f'Valid recipe · {positions[-1][1]:.3f}s · '
                                   f'{len(plan["timeline"])} elements · {withheld} unverified captions withheld. '

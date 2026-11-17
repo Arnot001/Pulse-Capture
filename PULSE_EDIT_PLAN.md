@@ -1,5 +1,9 @@
 # Pulse Edit Plan v1
 
+The backward-compatible [v2 extension](PULSE_EDIT_PLAN_V2.md) adds local sound
+effects, colour emoji/GIF overlays, caption typography and configurable freezes.
+The contract below describes v1 and remains supported unchanged.
+
 Import an externally authored JSON recipe without an API key. Auto Edit now has
 **IMPORT PULSE PLAN** and **NEW PLAN / SOURCE ID**. The latter generates a starter
 recipe with the exact fingerprint and metadata of the open recording. Share that

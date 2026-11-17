@@ -32,6 +32,9 @@ def assemble_plan(backend, media, plan, root, cancel, progress=lambda message: N
             scratch = Path(temporary)
             assembled = None
             for index, item in enumerate(plan['timeline']):
+                item = dict(item)
+                if item['kind'] == 'freeze':
+                    item.setdefault('duration', plan.get('freeze_duration', 1.8))
                 check_cancel(cancel)
                 progress(f'Rendering element {index+1}/{len(plan["timeline"])} · {item["kind"]}…')
                 segment = scratch / f'element-{index}.mp4'

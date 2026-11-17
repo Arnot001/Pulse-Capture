@@ -1,5 +1,14 @@
 # Third-party components
 
+Bundled caption font: DejaVu Sans Bold. Copyright Bitstream, with DejaVu changes
+in the public domain and applicable Arev notices. The complete license is included
+in `assets/licenses/LICENSE_DEJAVU`. The font is distributed unmodified.
+
+The Pulse reaction PNG artwork and synthesized sound-effect definitions are
+original project assets. They contain no downloaded reaction GIFs or audio samples.
+Imported user media remains subject to its owner's licence. Pillow is used only
+by the optional artwork-authoring script, not by the application runtime.
+
 Pulse Capture uses Python, Tcl/Tk, and (in packaged builds) PyInstaller. Their
 licenses and installed distribution notices apply to those components.
 
