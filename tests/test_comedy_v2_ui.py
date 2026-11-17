@@ -43,7 +43,7 @@ class ComedyUITests(unittest.TestCase):
             old=w.video.photo;w.seek(1.4);self.pump(lambda:w.video.photo is not old)
             w.update_trim(replace(w.trim,end=min(3,w.media.duration)))
             w.output_folder=self.folder;w.export()
-            self.pump(lambda:w.last_export is not None or not w.exporter.busy)
+            self.pump(lambda:w.last_export is not None)
             self.assertIsNotNone(w.last_export,w.note.cget('text'))
 
     def test_effect_picker_updates_recipe_and_undo(self):
