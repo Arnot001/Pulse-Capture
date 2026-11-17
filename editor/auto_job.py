@@ -59,7 +59,7 @@ class AutoJob:
 
     def local(self, cancel):
         check_cancel(cancel)
-        plan = local_plan(self.analysis, self.media, self.options, self.transcript)
+        plan = local_plan(self.analysis, self.media, self.options, self.transcript, cancel=cancel)
         # A local fallback still reports an earlier charged/uncertain API attempt.
         ledger = self.folder/'usage.json'
         usage = json.loads(ledger.read_text(encoding='utf-8')) if ledger.exists() else {

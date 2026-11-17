@@ -213,76 +213,10 @@ def analyse(backend, media, cache_root, cancel, progress=lambda message: None):
     return result, folder
 
 
-def local_plan(analysis, media, options, transcript=()):
-    """Choose distinct coherent windows with scene/speech-aware edges, not random cuts."""
-    options.validate()
-    if media.duration < options.minimum:
-        raise ValueError('The source is shorter than your minimum duration. Lower the target or choose a longer video.')
-    samples = analysis['samples']
-    desired = (options.minimum+options.maximum)/2
-    boundaries = sorted(set([0., media.duration]+analysis['scenes']+
-                            [c[k] for c in transcript for k in ('start', 'end')]))
-    starts = sorted(set([0.]+[b for b in boundaries if b <= media.duration-options.minimum]+
-                        [float(x) for x in range(0, int(media.duration-options.minimum)+1, 3)]))
-    candidates = []
-    for start in starts:
-        ends = [b for b in boundaries if options.minimum <= b-start <= options.maximum]
-        end = min(ends, key=lambda b: abs(b-start-desired)) if ends else min(media.duration, start+desired)
-        if end-start < options.minimum:
-            continue
-        window = [s for s in samples if start <= s['time'] < end]
-        opening = [s for s in window if s['time'] < start+3]
-        if not window or sum(s['brightness'] < .035 for s in window)/len(window) > .15:
-            continue
-        weight = {'Gaming': (2.5, .4), 'News/Preview': (1.4, .3), 'Funny Moments': (1.5, .7),
-                  'Comedy / Roast': (1.5, .7)}[options.style]
-        def activity(group):
-            return sum(weight[0]*s['motion']+.5*s['scene']+weight[1]*s['audio'] for s in group)/max(1, len(group))
-        score = activity(window)+.6*activity(opening)
-        if start in boundaries:
-            score += .08
-        if any(c['start'] < start < c['end'] or c['start'] < end < c['end'] for c in transcript):
-            score -= .25
-        candidates.append((score, start, end, window))
-    selected = []
-    for score, start, end, window in sorted(candidates, reverse=True):
-        if any(max(0, min(end, b)-max(start, a))/min(end-start, b-a) > .15 for a, b, _ in selected):
-            continue
-        selected.append((start, end, window))
-        if len(selected) == options.count:
-            break
-    if not selected:
-        raise ValueError('No suitable non-black sequence found. Review this footage manually.')
-    shorts = []
-    for index, (start, end, window) in enumerate(selected):
-        # Adjacent ranges introduce crop keys, not extra cuts. Follow local motion
-        # in short spans; scene-boundary resets avoid panning across hard cuts.
-        edges = sorted(set([start, end]+[s for s in analysis['scenes'] if start+1 < s < end-1]))
-        # Merge nearby scene boundaries to prevent sub-second shots.
-        safe_edges = [edges[0]]
-        for marker in edges[1:-1]:
-            if marker - safe_edges[-1] >= 1.05 and end - marker >= 1.05:
-                safe_edges.append(marker)
-        edges = safe_edges + [edges[-1]]
-        if len(edges) > 9:
-            edges = [start, end]
-        while len(edges) < 9:
-            a, b = max(zip(edges, edges[1:]), key=lambda pair: pair[1]-pair[0])
-            if b-a <= 5:
-                break
-            edges.append((a+b)/2)
-            edges.sort()
-        shots = []
-        for a, b in zip(edges, edges[1:]):
-            def focus(at):
-                near = sorted(window, key=lambda s: abs(s['time']-at))[:3]
-                return sorted(s['focus_x'] for s in near)[len(near)//2]
-            shots.append({'start': a, 'end': b, 'focus_x': focus(a+.3), 'focus_y': .5,
-                          'end_focus_x': focus(b-.3), 'end_focus_y': .5})
-        title = f'{options.style} · selection {index+1}'
-        shorts.append({'title': title, 'description': 'Local-only candidate. Review footage and add a specific title before publishing.',
-                       'rationale': 'Distinct continuous sequence ranked by visual activity, opening energy and natural boundaries. '
-                                    'Local scoring cannot understand humour or verify news claims.',
-                       'verification': ['Review the crop, opening hook and all factual claims.'],
-                       'shots': shots, 'captions': []})
-    return validate_plan({'shorts': shorts}, media, options)
+def local_plan(analysis, media, options, transcript=(), *, cancel=None):
+    """Assemble separated quality moments using existing cached local evidence."""
+    from .auto_selection import select_local
+    cancelled = (lambda: check_cancel(cancel)) if cancel is not None else (lambda: None)
+    plan = select_local(analysis, media, options, transcript, cancelled)
+    cancelled()
+    return validate_plan(plan, media, options)
