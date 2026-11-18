@@ -4,7 +4,7 @@ from pathlib import Path
 import unittest
 
 from editor.models import MediaInfo
-from editor.roast_recipe import bind_roast_recipe, inspect_coverage, reference_mismatch
+from editor.roast_recipe import bind_roast_recipe, inspect_coverage, reference_mismatch, normalize_roast_zooms
 
 
 def video(name, duration):
@@ -106,6 +106,35 @@ class RoastStudioRecipeTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "video content hash"):
             bind_roast_recipe(plan_for_original(), video_now,
                               identity(video_now, "b"))
+
+    def test_generated_zoom_values_snap_and_are_reported(self):
+        media = video("long.mp4", 20)
+        recipe = plan_for_original()
+        recipe["timeline"][0]["zoom"] = dict(factor=1.28, x=.65, y=.5)
+        recipe["timeline"][1]["zoom"] = dict(factor=1.42, x=.65, y=.5)
+        recipe["timeline"][2]["zoom"] = dict(factor=1.18, x=.5, y=.5)
+        bound = bind_roast_recipe(recipe, media, identity(media, "a"))
+        self.assertEqual([item["zoom"]["factor"] for item in bound["timeline"]],
+                         [1.25, 1.5, 1.25])
+        self.assertEqual(recipe["timeline"][0]["zoom"]["factor"], 1.28)
+        self.assertIn("element 1: 1.28 -> 1.25", bound["notes"])
+        self.assertIn("element 2: 1.42 -> 1.5", bound["notes"])
+
+    def test_invalid_large_or_nonnumeric_zooms_are_not_normalized(self):
+        recipe = plan_for_original()
+        recipe["timeline"][0]["zoom"] = dict(factor=3.2, x=.5, y=.5)
+        self.assertEqual(normalize_roast_zooms(recipe), [])
+        with self.assertRaisesRegex(ValueError, "zoom.factor"):
+            bind_roast_recipe(recipe, video("long.mp4", 20),
+                              identity(video("long.mp4", 20), "a"))
+        recipe["timeline"][0]["zoom"]["factor"] = "1.28"
+        self.assertEqual(normalize_roast_zooms(recipe), [])
+
+    def test_supported_zooms_are_unchanged(self):
+        recipe = plan_for_original()
+        recipe["timeline"][0]["zoom"] = dict(factor=1.5, x=.5, y=.5)
+        self.assertEqual(normalize_roast_zooms(recipe), [])
+        self.assertEqual(recipe["timeline"][0]["zoom"]["factor"], 1.5)
 
 
 if __name__ == "__main__":
