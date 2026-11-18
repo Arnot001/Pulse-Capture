@@ -96,11 +96,11 @@ class RoastStudioDialog(tk.Toplevel):
             plan = read_pulse_plan(path)
             if plan.get("version") != 2:
                 raise ValueError("Use a Pulse Edit Plan v2 JSON with timed captions and effects.")
-            # This checks source timelines without pretending the files are identical.
-            inspect_coverage(plan, self.media, float(self.offset.get().strip()))
+            # Import first; trimmed copies may need an offset added later.
             self.plan, self.path = plan, Path(path)
             self.recipe_label.configure(text=self.path.name, fg=t.TEXT)
-            self.status_text("JSON loaded. Build a new preview bound to the open recording.")
+            self.status_text("JSON loaded. Enter Source offset if the scene moved "
+                             "in this recording, then build a preview.")
             self.go_button.configure(state="normal")
         except (ValueError, OSError, TypeError) as exc:
             self.plan = self.path = None
@@ -151,7 +151,7 @@ class RoastStudioDialog(tk.Toplevel):
                     warning = (
                         "THIS IS NOT THE SAME VERIFIED SOURCE AS THE JSON.\n\n"
                         f"Different: {label}\n"
-                        f"JSON reference duration: {self.plan['source']['duration']:.3f}s\n"
+                        f"JSON reference duration: {self.plan.get('source', {}).get('duration', 'unknown')}s\n"
                         f"Opened video duration: {self.media.duration:.3f}s\n"
                         f"Source time adjustment: {offset:+.3f}s\n\n"
                         "Only proceed if you have checked that the scene occurs at "
