@@ -114,6 +114,8 @@ class MemeFinder(tk.Toplevel):
                     path = folder / name
                     if not path.is_file():
                         fetch_audio(item, path, cancelled=self.cancel)
+                    if self.cancel.is_set():
+                        raise ValueError("Sound request cancelled.")
                     if operation == "preview":
                         value = path
                     else:
