@@ -24,6 +24,9 @@ class FakeLibrary:
     def categorize(self, keys, category):
         self.categories.append((keys, category))
 
+    def update_details(self, key, details):
+        self.details = details
+
 
 def fake_speech(text, output):
     with wave.open(str(output), 'wb') as audio:
@@ -57,6 +60,7 @@ class OfflineVoiceTests(unittest.TestCase):
         self.assertEqual(key, 'import.0123456789abcdef')
         self.assertEqual(library.calls, [('Voice - Aw nah brooo.wav', 'sfx', 'ffmpeg', 'ffprobe')])
         self.assertEqual(library.categories, [(['import.0123456789abcdef'], 'Voices')])
+        self.assertEqual(library.details['audio_type'], 'windows_voice')
 
     def test_cancel_never_adds_a_library_entry(self):
         library = FakeLibrary()

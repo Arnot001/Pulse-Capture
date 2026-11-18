@@ -7,13 +7,17 @@ from ui.app import choose_quick_edit_path
 
 
 class QuickEditEntryTests(unittest.TestCase):
-    def test_existing_latest_recording_opens_without_dialog(self):
+    def test_existing_latest_is_suggested_but_another_video_can_be_chosen(self):
         with TemporaryDirectory() as folder:
             path = Path(folder) / 'latest.mp4'
             path.write_bytes(b'video')
-            with patch('ui.app.filedialog.askopenfilename') as picker:
-                self.assertEqual(choose_quick_edit_path(None, path, folder), path)
-                picker.assert_not_called()
+            selected = Path(folder) / 'another.mp4'
+            selected.write_bytes(b'video')
+            with patch('ui.app.filedialog.askopenfilename', return_value=str(selected)) as picker:
+                self.assertEqual(choose_quick_edit_path(None, path, folder), selected)
+                picker.assert_called_once()
+                self.assertEqual(picker.call_args.kwargs['initialfile'], path.name)
+                self.assertEqual(picker.call_args.kwargs['initialdir'], str(path.parent))
 
     def test_fresh_start_can_choose_existing_mp4(self):
         with TemporaryDirectory() as folder:

@@ -13,6 +13,7 @@ from capture.ffmpeg_backend import process_options
 from ui import theme as t
 from .reaction_library import ReactionLibrary, REACTION_CATEGORIES
 from .media_audition import Audition
+from .soundboard import matches, in_category, rights_label, discovery_url
 from .reactions import SoundCue, VisualCue, POSITIONS, ANIMATIONS, validate_cues
 
 
@@ -46,7 +47,8 @@ class ReactionDialog(tk.Toplevel):
             self.audio_scope=tk.StringVar(value='All audio')
             scope=ttk.Combobox(browse,textvariable=self.audio_scope,values=('All audio','My recordings','Synthesized SFX','Windows voices'),state='readonly',width=18)
             scope.pack(side='left');scope.bind('<<ComboboxSelected>>',lambda _:self.refresh_library())
-            t.label(browse,'Import expressive reactions you own or are licensed to use.',9,t.MUTED).pack(side='left',padx=8)
+            t.button(browse,'FIND MEME SOUNDS',self.find_sounds).pack(side='left',padx=8)
+            t.button(browse,'SUGGEST REACTION',self.suggest_reaction).pack(side='left')
             t.button(browse,'CREATE VOICE (OPTIONAL)',self.create_voice).pack(side='right')
         centre=tk.Frame(self,bg=t.BG);centre.pack(fill='both',expand=True,padx=16)
         style=ttk.Style(self);style.configure('Reactions.Treeview',rowheight=48)
@@ -63,7 +65,7 @@ class ReactionDialog(tk.Toplevel):
         t.button(preview,'★ FAVOURITE',self.favourite).pack(fill='x')
         t.button(preview,'SET CATEGORY',self.categorize).pack(fill='x')
         t.button(preview,'DETAILS / LICENCE',self.details).pack(fill='x')
-        self.asset_label=t.label(self,'',9,t.MUTED,anchor='w');self.asset_label.pack(fill='x',padx=16,pady=4)
+        self.asset_label=t.label(self,'',9,t.MUTED,anchor='w',wraplength=720);self.asset_label.pack(fill='x',padx=16,pady=4)
         grid=tk.Frame(self,bg=t.BG);grid.pack(fill='x',padx=16)
         now=window.cuts.source_elapsed(window.position,window.trim)/window.edits.speed
         self.values={}
@@ -102,7 +104,9 @@ class ReactionDialog(tk.Toplevel):
         self.cues.pack(fill='x',padx=16,pady=5);self.cues.bind('<<ListboxSelect>>',self.select_cue)
         self.note=t.label(self,'All cue times refer to the output after trims, cuts and speed. Use only media you own or may use.',9,t.MUTED,wraplength=790,justify='left')
         self.note.pack(fill='x',padx=16,pady=8)
-        self.audition=Audition(self,lambda message,error:self.note.configure(text=message,fg=t.RED if error else t.CYAN))
+        self.suggestion_note=''
+        self.audition=Audition(self,lambda message,error:self.note.configure(
+            text=message+ ('\n'+self.suggestion_note if self.suggestion_note else ''),fg=t.RED if error else t.CYAN))
         self.refresh_library();self.refresh_cues()
 
     def total(self):
@@ -122,23 +126,25 @@ class ReactionDialog(tk.Toplevel):
         values=self.library.items(self.kind)
         self.categories.configure(values=['All','Favourites','Recent',*sorted({x['category'] for x in values} | (set(REACTION_CATEGORIES) if self.kind=='sfx' else set()))])
         if self.kind=='sfx':
+            from .reaction_suggestions import is_voice
             scope=self.audio_scope.get()
-            voices=self.library.preferences().get('categories',{})
             values=[v for v in values if scope=='All audio' or
-                    (scope=='My recordings' and v['id'].startswith('import.') and voices.get(v['id'])!='Voices') or
+                    (scope=='My recordings' and v['id'].startswith('import.') and not is_voice(v)) or
                     (scope=='Synthesized SFX' and not v['id'].startswith('import.')) or
-                    (scope=='Windows voices' and voices.get(v['id'])=='Voices')]
-            values.sort(key=lambda v:not v['id'].startswith('import.'))
+                    (scope=='Windows voices' and is_voice(v))]
+            values.sort(key=lambda v:2 if is_voice(v) else 0 if v['id'].startswith('import.') else 1)
         if self.category.get()=='Recent':
             values.sort(key=lambda x:prefs.get('recent',[]).index(x['id']) if x['id'] in prefs.get('recent',[]) else 999)
         for item in values:
             key=item['id'];cat=self.category.get()
-            if self.search.get().lower() not in (item['name']+' '+key+' '+item['category']+' '+item.get('transcript','')+' '+item.get('artist','')).lower():continue
+            if not matches(item,self.search.get()):continue
             if cat=='Favourites' and key not in prefs.get('favourites',[]):continue
             if cat=='Recent' and key not in prefs.get('recent',[]):continue
-            if cat not in ('All','Favourites','Recent',item['category']):continue
+            if cat not in ('All','Favourites','Recent') and not in_category(item,cat):continue
             star='★ ' if key in prefs.get('favourites',[]) else ''
             self.assets.insert('','end',iid=key,text=f'{star}{item["name"]}  ·  {item["category"]}')
+        if self.kind=='sfx' and not self.assets.get_children():
+            self.asset_label.configure(text='No matching local sound. FIND MEME SOUNDS opens a browser; IMPORT FILES adds your downloaded WAV/MP3.')
         self.queue_thumbnails()
 
     def queue_thumbnails(self):
@@ -169,6 +175,38 @@ class ReactionDialog(tk.Toplevel):
             ReactionDetails(self,self.selected())
         except ValueError as exc:self.note.configure(text=str(exc),fg=t.RED)
 
+    def find_sounds(self):
+        phrase=simpledialog.askstring('Find meme sounds',
+            'Sound name or spoken phrase (opens an external search page):',
+            initialvalue=self.search.get(),parent=self)
+        if phrase is None:return
+        try:
+            import webbrowser
+            if not webbrowser.open(discovery_url(phrase)):
+                raise ValueError('The browser could not open. Search in your browser, then import the downloaded audio.')
+            self.note.configure(text='Review source permissions, download WAV/MP3 yourself, then IMPORT FILES. Save source, creator and rights in DETAILS / LICENCE.',fg=t.CYAN)
+        except (ValueError,OSError) as exc:self.note.configure(text=str(exc),fg=t.RED)
+
+    def suggest_reaction(self):
+        try:
+            from .reaction_suggestions import caption_context, suggest
+            w=self.window
+            if w.exporter.busy or w.closing:raise ValueError('Wait for export to finish.')
+            captions,speech,total=caption_context(w)
+            suggestions=suggest(self.library,captions,speech,total,w.edits.sounds,
+                                getattr(self,'reviewed_suggestions',()))
+            if not suggestions:
+                raise ValueError('No suitable local reaction with a safe dialogue gap. Add descriptive captions and matching recorded clips; unknown speech stays protected. No voice was substituted.')
+            cue,caption=suggestions[0]
+            self.suggested_asset=cue.asset_id
+            self.reviewed_suggestions=getattr(self,'reviewed_suggestions',set())|{cue.asset_id}
+            self.audio_scope.set('My recordings');self.search.set('');self.category.set('All');self.refresh_library()
+            self.fill_values(cue)
+            w.seek(w.cuts.source_from_elapsed(cue.at*w.edits.speed,w.trim))
+            self.suggestion_note=f'Suggested for “{caption[:90]}” at {cue.at:.2f}s. Preview the clip, then INSERT AT PLAYHEAD to accept. Nothing added yet.'
+            self.note.configure(text=self.suggestion_note,fg=t.CYAN)
+        except (ValueError,OSError) as exc:self.note.configure(text=str(exc),fg=t.RED)
+
     def categorize(self):
         selected=self.assets.selection()
         if not selected:return
@@ -185,7 +223,11 @@ class ReactionDialog(tk.Toplevel):
         try:
             if len(self.assets.selection())!=1:return
             key=self.selected()
-            self.asset_label.configure(text=key)
+            if key!=getattr(self,'suggested_asset',None):self.suggestion_note=''
+            item=self.library.metadata(key)
+            rights=rights_label(item)
+            self.asset_label.configure(text=f'{item["name"]} · {rights}' +
+                (' — check permission before publishing.' if rights=='Unverified' else ''))
             if self.kind=='sfx':
                 volume=float(self.values['volume'].get())
                 from .reactions import finite
@@ -267,7 +309,7 @@ class ReactionDialog(tk.Toplevel):
                 + ('\n'+'\n'.join(result['errors'][:2]) if result['errors'] else '')) if ok else result,fg=t.GREEN if ok else t.RED)
             if ok:
                 if self.kind=='sfx':self.audio_scope.set('All audio')
-                self.category.set('All');self.refresh_library()
+                self.search.set('');self.category.set('All');self.refresh_library()
                 selected=tuple(dict.fromkeys(result['added']+result['duplicates']))
                 self.assets.selection_set(selected)
         except Empty:self.poll_timer=self.after(80,self.poll_import)
@@ -358,6 +400,7 @@ class ReactionDialog(tk.Toplevel):
             else:
                 index=len(tracks);tracks.append(cue)
             self.commit(tracks)
+            self.suggestion_note=''
             if self.kind!='sfx':self.window.video.select_visual(index)
             if key!='silence.pause':self.library.remember(key)
             self.note.configure(text='Cue saved. Preview placement in Quick Edit; export creates a new MP4.',fg=t.GREEN)

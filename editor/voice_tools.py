@@ -90,4 +90,5 @@ def generate_voice_import(text, library, ffmpeg, ffprobe, cancel=None):
             raise ValueError('Voice creation cancelled.')
         key = library.import_file(wav, 'sfx', ffmpeg, ffprobe)
     library.categorize([key], 'Voices')
+    library.update_details(key, dict(audio_type='windows_voice', source='Local Windows SAPI synthesis', transcript=text))
     return key

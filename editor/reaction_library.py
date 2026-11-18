@@ -50,9 +50,11 @@ EMOJI = {
     'emoji.alert': ('Warning', 'Alerts'), 'emoji.siren': ('Siren', 'Alerts'),
 }
 _LOCK = threading.RLock()
-REACTION_CATEGORIES = ('WTF', 'Disbelief', 'Rage', 'Cringe', 'Laughing', 'Dramatic')
+from .soundboard import REACTION_ALIASES, RIGHTS_STATUSES
+REACTION_CATEGORIES = tuple(REACTION_ALIASES)
 DETAIL_FIELDS = {'name': 80, 'artist': 120, 'source': 1000, 'licence': 1000,
-                 'attribution': 1600, 'transcript': 500}
+                 'attribution': 1600, 'transcript': 500, 'tags': 500, 'aliases': 500,
+                 'rights_status': 40, 'audio_type': 24}
 
 
 @lru_cache(maxsize=1)
@@ -301,6 +303,10 @@ class ReactionLibrary:
                 raise ValueError(f'{key}: enter plain text up to {DETAIL_FIELDS[key]} characters.')
         if 'name' in values and not values['name'].strip():
             raise ValueError('Give this reaction a searchable name.')
+        if 'rights_status' in values and values['rights_status'] not in RIGHTS_STATUSES:
+            raise ValueError('Choose an explicit rights status; file tags do not establish permission.')
+        if 'audio_type' in values and values['audio_type'] not in ('user_supplied', 'windows_voice'):
+            raise ValueError('Unsupported audio origin.')
         with _LOCK:
             item = self.metadata(asset_id)
             item.update(values)
@@ -395,6 +401,19 @@ class ReactionLibrary:
                 subprocess.run([str(ffmpeg), *base, '-nostdin', '-n', '-i', str(source), '-t', '20',
                                 '-ac', '2', '-ar', '48000', '-c:a', 'pcm_s16le', str(normalized)],
                                check=True, capture_output=True, timeout=20, **process_options())
+                # A fixed, bounded gain preserves dynamics and is identical in
+                # audition and export. Never rewrite existing imported assets.
+                with wave.open(str(normalized), 'rb') as audio:
+                    samples = array('h', audio.readframes(audio.getnframes()))
+                    params = audio.getparams()
+                peak = max((abs(v) for v in samples), default=0)
+                rms = math.sqrt(math.fsum(v*v for v in samples)/max(1,len(samples)))
+                gain = min(4., 32768*.18/rms, 32767*.9/peak) if rms > 58 and peak else 1.
+                gain_db = 20*math.log10(gain)
+                if gain != 1:
+                    with wave.open(str(normalized), 'wb') as audio:
+                        audio.setparams(params)
+                        audio.writeframes(array('h', (round(v*gain) for v in samples)).tobytes())
                 content, suffix = normalized.read_bytes(), '.wav'
             with _LOCK:
                 destination = self.root/(asset_id+suffix)
@@ -404,6 +423,8 @@ class ReactionLibrary:
                 item = dict(id=asset_id, name=path.stem[:80], category='Imported', kind=kind,
                             suffix=suffix, duration=duration, sha256=digest,
                             source='Local import', licence='User supplied — verify rights', attribution='')
+                item['rights_status'] = 'Unverified'
+                if kind == 'sfx': item['import_gain_db'] = round(gain_db, 3)
                 # Tags are descriptive data only. Preserve supplied credits without
                 # treating a copyright tag as permission to use the recording.
                 tags = {str(k).lower(): str(v) for k,v in
