@@ -13,7 +13,7 @@ from capture.ffmpeg_backend import process_options
 from ui import theme as t
 from .reaction_library import ReactionLibrary, REACTION_CATEGORIES
 from .media_audition import Audition
-from .soundboard import matches, in_category, rights_label, discovery_url
+from .soundboard import matches, in_category, rights_label
 from .reactions import SoundCue, VisualCue, POSITIONS, ANIMATIONS, validate_cues
 
 
@@ -144,7 +144,7 @@ class ReactionDialog(tk.Toplevel):
             star='★ ' if key in prefs.get('favourites',[]) else ''
             self.assets.insert('','end',iid=key,text=f'{star}{item["name"]}  ·  {item["category"]}')
         if self.kind=='sfx' and not self.assets.get_children():
-            self.asset_label.configure(text='No matching local sound. FIND MEME SOUNDS opens a browser; IMPORT FILES adds your downloaded WAV/MP3.')
+            self.asset_label.configure(text='No matching local sound. FIND MEME SOUNDS searches open audio inside Pulse Capture.')
         self.queue_thumbnails()
 
     def queue_thumbnails(self):
@@ -176,16 +176,13 @@ class ReactionDialog(tk.Toplevel):
         except ValueError as exc:self.note.configure(text=str(exc),fg=t.RED)
 
     def find_sounds(self):
-        phrase=simpledialog.askstring('Find meme sounds',
-            'Sound name or spoken phrase (opens an external search page):',
-            initialvalue=self.search.get(),parent=self)
-        if phrase is None:return
+        """Open the native discovery window; don't send searches to a browser."""
+        if self.kind!='sfx' or self.closed:return
         try:
-            import webbrowser
-            if not webbrowser.open(discovery_url(phrase)):
-                raise ValueError('The browser could not open. Search in your browser, then import the downloaded audio.')
-            self.note.configure(text='Review source permissions, download WAV/MP3 yourself, then IMPORT FILES. Save source, creator and rights in DETAILS / LICENCE.',fg=t.CYAN)
-        except (ValueError,OSError) as exc:self.note.configure(text=str(exc),fg=t.RED)
+            from .meme_finder import MemeFinder
+            MemeFinder(self)
+        except (ValueError,OSError,tk.TclError) as exc:
+            self.note.configure(text=str(exc),fg=t.RED)
 
     def suggest_reaction(self):
         try:
