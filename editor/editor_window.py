@@ -85,8 +85,12 @@ class EditorWindow(tk.Toplevel):
         t.label(header, 'QUICK EDIT', 10, t.MUTED, True).pack(side='right')
         self.auto_button = t.button(header, 'AUTO EDIT', self.open_auto_edit)
         self.auto_button.configure(pady=5, state='disabled')
-        self.auto_button.pack(side='right', padx=16)
+        self.auto_button.pack(side='right', padx=12)
         self.controls.append(self.auto_button)
+        self.roast_button = t.button(header, 'ROAST STUDIO · JSON', self.open_roast_studio)
+        self.roast_button.configure(pady=5, state='disabled')
+        self.roast_button.pack(side='right', padx=4)
+        self.controls.append(self.roast_button)
         if self.pulse_candidate:
             recipe_button = t.button(header, 'EDIT PULSE PLAN', self.open_pulse_plan)
             recipe_button.pack(side='right', padx=4)
@@ -236,6 +240,19 @@ class EditorWindow(tk.Toplevel):
                 existing.lift()
                 return
             ReactionDialog(self, kind)
+
+    def open_roast_studio(self):
+        if not self.media or self.exporter.busy or self.closing:
+            return
+        from .roast_studio import RoastStudioDialog
+        existing = next((child for child in self.auto_children
+                         if isinstance(child, RoastStudioDialog) and not child.closed), None)
+        if existing:
+            existing.lift()
+            return
+        self.stop_play()
+        studio = RoastStudioDialog(self)
+        self.auto_children.add(studio)
 
     def open_auto_edit(self):
         if not self.media or self.exporter.busy or self.closing:
