@@ -40,7 +40,7 @@ class MemeFinder(tk.Toplevel):
         entry.bind("<Return>", lambda _event: self.search())
         t.button(head, "SEARCH", self.search, accent=True).pack(side="left", padx=(8, 0))
 
-        t.label(self, "Openverse · CC0 / Public Domain / CC BY · permission must still be checked",
+        t.label(self, "Made using Openverse (independent; not endorsed). CC0 / Public Domain / CC BY.",
                 9, t.MUTED).pack(anchor="w", padx=15, pady=(0, 8))
         centre = tk.Frame(self, bg=t.BG)
         centre.pack(fill="both", expand=True, padx=15)
