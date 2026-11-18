@@ -920,7 +920,11 @@ class EditorWindow(tk.Toplevel):
                     self.set_busy(False)
                     if event.kind == 'saved':
                         self.last_export = event.path
-                        self.note.configure(text=f'EXPORTED ✓  {event.path.name}', fg=t.GREEN)
+                        warning = event.message if event.message != 'Export complete' else ''
+                        summary = f'EXPORTED ✓  {event.path.name}'
+                        if warning:
+                            summary += ' — ' + warning
+                        self.note.configure(text=summary, fg=t.CYAN if warning else t.GREEN)
                     else:
                         self.note.configure(text=event.message, fg=t.RED if event.kind == 'error' else t.MUTED)
         except Empty:
