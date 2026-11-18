@@ -116,16 +116,23 @@ class ExportJob:
             # 31 seconds of video. Prevent an unsynced export being approved.
             if (media.has_audio or edits.music.enabled or bool(edits.sounds)) and info.get('streams'):
                 validate_audio_coverage(info)
+            warning = ''
             if self.verify_short:
                 from .auto_verify import verify_short
                 self.events.put(ExportEvent(
                     'validating', .99,
                     'Decoding complete Short and checking audio and black frames…'))
-                verify_short(self.backend, reservation.partial, out_duration,
-                             media.has_audio or edits.music.enabled or bool(edits.sounds), self._cancel)
+                verification = verify_short(self.backend, reservation.partial, out_duration,
+                                            media.has_audio or edits.music.enabled or bool(edits.sounds), self._cancel)
+                intervals = verification.get('black_intervals', [])
+                if intervals:
+                    start, end = intervals[0]
+                    more = f' (+{len(intervals)-1} more)' if len(intervals) > 1 else ''
+                    warning = (f'Review black video at {start:.2f}–{end:.2f}s{more}. '
+                               'The MP4 passed decode and audio checks.')
             self._check_cancel()
             reservation.publish()
-            result = ExportEvent('saved', 1, 'Export complete', reservation.final)
+            result = ExportEvent('saved', 1, warning or 'Export complete', reservation.final)
         except ExportCancelled:
             result = ExportEvent('cancelled', message='Export cancelled. Your original is unchanged.')
         except Exception as exc:
