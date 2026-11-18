@@ -15,6 +15,7 @@ from tests import test_pulse_plan_ui as fixture
                      "Opt-in Windows Tk integration")
 class MemeFinderUITests(unittest.TestCase):
     pump = fixture.PulsePlanUITests.pump
+    cleanup = fixture.PulsePlanUITests.cleanup
 
     def setUp(self):
         gc.collect()
