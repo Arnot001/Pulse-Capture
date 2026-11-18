@@ -10,7 +10,7 @@ import urllib.error
 import urllib.request
 
 from .auto_analysis import atomic_json, check_cancel
-from .auto_plan import PLAN_SCHEMA, validate_plan, editor_state
+from .auto_plan import PLAN_SCHEMA, validate_plan, editor_state, recover_timestamp_rounding
 
 DEFAULT_MODEL = 'gpt-5.4-mini-2026-03-17'
 PRICING_CHECKED = '2026-11-12'
@@ -132,6 +132,37 @@ def send_request(request, api_key):
         raise RuntimeError('OpenAI response unavailable. Charge is uncertain, so the reservation is retained; no automatic retry.') from None
 
 
+def accept_response(response, ledger, request_hash, folder, pricing, media, options, transcript):
+    """Validate a preserved response locally, recording every accepted correction."""
+    try:
+        usage = response.get('usage')
+        if isinstance(usage, dict) and all(type(usage.get(k)) is int and usage[k] >= 0 for k in ('input_tokens','output_tokens')):
+            ledger['measured_usage'] = {k: usage[k] for k in ('input_tokens','output_tokens')}
+            ledger['measured_cost_gbp'] = pricing.cost(usage['input_tokens'], usage['output_tokens'])
+        if response.get('status') != 'completed':
+            raise ValueError('AI response was incomplete. No paid retry; local-only mode is available.')
+        texts = [part['text'] for item in response.get('output', []) if item.get('type') == 'message'
+                 for part in item.get('content', []) if part.get('type') == 'output_text']
+        plan = json.loads(''.join(texts))
+        corrections = []
+        try:
+            validate_plan(plan, media, options)
+        except ValueError:
+            plan, corrections = recover_timestamp_rounding(plan, media, options)
+        for short in plan['shorts']:
+            editor_state(short, media, transcript)
+        ledger.update(status='completed', timestamp_corrections=corrections)
+        ledger.pop('validation_error', None)
+        atomic_json(folder/'usage.json', ledger)
+        atomic_json(folder/'ai-result.json', {'request_hash':request_hash,'plan':plan,'usage':ledger})
+        return plan
+    except (ValueError, TypeError, KeyError, AttributeError) as exc:
+        ledger.update(status='validation_failed', validation_error=str(exc)[:1000])
+        atomic_json(folder/'usage.json', ledger)
+        raise ValueError(f'{exc} Raw response saved in {folder/"ai-response.json"}. '
+                         'Reuse this job for local recovery; no new paid request will be made.') from exc
+
+
 def request_plan(request, quote, pricing, media, options, transcript, job_folder, cancel, api_key, *, sender=send_request):
     """Reserve before transmission. Never release an uncertain/failed paid request."""
     pricing.validate()
@@ -145,6 +176,20 @@ def request_plan(request, quote, pricing, media, options, transcript, job_folder
             validate_plan(cached['plan'], media, options)
             return cached['plan'], cached['usage'], True
     check_cancel(cancel)
+    # Reuse before requiring a key or considering a new reservation. A rejected
+    # response never falls through to the sender, including after app restart.
+    raw_path = folder/'ai-response.json'
+    if raw_path.exists():
+        if raw_path.stat().st_size > 8_000_000:
+            raise ValueError('Saved AI response is too large; no paid retry.')
+        saved = json.loads(raw_path.read_text(encoding='utf-8'))
+        ledger = json.loads(ledger_path.read_text(encoding='utf-8'))
+        if saved.get('request_hash') != request_hash or ledger.get('request_hash') != request_hash:
+            raise ValueError('Saved response belongs to different request settings; no paid retry.')
+        recorded_pricing = Pricing(**ledger['quote']['pricing'])
+        plan = accept_response(saved['response'],ledger,request_hash,folder,recorded_pricing,media,options,transcript)
+        check_cancel(cancel)
+        return plan, ledger, True
     upper = quote['reserved_upper_gbp']
     if not math.isfinite(upper) or upper <= 0 or upper > pricing.budget_gbp:
         raise ValueError(f'Paid request blocked: upper estimate £{upper:.4f} exceeds the £{pricing.budget_gbp:.2f} job limit. Use local-only mode.')
@@ -163,25 +208,11 @@ def request_plan(request, quote, pricing, media, options, transcript, job_folder
     try:
         check_cancel(cancel)
         response = sender(request, api_key)
-        usage = response.get('usage')
-        if isinstance(usage, dict) and all(type(usage.get(k)) is int and usage[k] >= 0 for k in ('input_tokens', 'output_tokens')):
-            ledger['measured_usage'] = {k: usage[k] for k in ('input_tokens', 'output_tokens')}
-            ledger['measured_cost_gbp'] = pricing.cost(usage['input_tokens'], usage['output_tokens'])
-            ledger['status'] = 'usage_recorded'
-            atomic_json(ledger_path, ledger)
-        if response.get('status') != 'completed':
-            raise ValueError('AI response was incomplete. No paid retry; local-only mode is available.')
-        texts = [part['text'] for item in response.get('output', []) if item.get('type') == 'message'
-                 for part in item.get('content', []) if part.get('type') == 'output_text']
-        plan = validate_plan(json.loads(''.join(texts)), media, options)
-        for short in plan['shorts']:
-            editor_state(short, media, transcript)  # validate renderability before accepting/cache
-        ledger['status'] = 'completed'
-        atomic_json(ledger_path, ledger)
-        atomic_json(result_path, {'request_hash': request_hash, 'plan': plan, 'usage': ledger})
+        atomic_json(raw_path, {'request_hash':request_hash,'response':response})
+        plan = accept_response(response,ledger,request_hash,folder,pricing,media,options,transcript)
         check_cancel(cancel)
         return plan, ledger, False
     except Exception:
-        ledger['status'] = 'failed_or_interrupted'
+        if ledger['status'] != 'validation_failed':ledger['status'] = 'failed_or_interrupted'
         atomic_json(ledger_path, ledger)
         raise

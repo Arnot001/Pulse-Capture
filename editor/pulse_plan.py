@@ -95,7 +95,11 @@ def validate_pulse_plan(plan, media):
     if any(type(output[k]) is not int or output[k] != v
            for k, v in (('width', 1080), ('height', 1920), ('fps', 30))):
         raise ValueError('v1 output is 1080 × 1920 at 30 fps, H.264/AAC MP4.')
-    choice(output['framing'], ('full_frame', 'crop_to_fill'), 'output.framing')
+    choice(output['framing'], ('full_frame', 'crop_to_fill', 'comedy_bands') if v2 else ('full_frame','crop_to_fill'), 'output.framing')
+    bands = None
+    if output['framing']=='comedy_bands':
+        from .comedy_layout import regions
+        bands = regions((media.width,media.height))
     choice(output['background'], ('dark',), 'output.background')
     items = plan['timeline']
     if type(items) is not list or not 1 <= len(items) <= 32:
@@ -193,11 +197,16 @@ def validate_pulse_plan(plan, media):
         Caption(cue['start'], cue['end'], cue['text'], cue['zone'].title(), style).validate()
         if style and style.highlight and style.highlight not in cue['text']:
             raise ValueError('Caption highlight must occur in its text.')
+        if bands:
+            from .comedy_layout import fit_caption
+            fit_caption(cue['text'],style,bands[cue['zone']])
         text_geometry(1080, 1920, TextOverlay(True, cue['text'], position=cue['zone'].title(), safe_area=True))
     if v2:
         from .reactions import validate_cues
         sounds, overlays = reaction_cues(plan)
         validate_cues(sounds, overlays, duration)
+        from .comedy_layout import overlay_region
+        for cue in overlays:overlay_region(cue,bands,1080,1920)
     return plan
 
 
@@ -209,6 +218,7 @@ def caption_style(plan, cue):
     props = cue.get('typography', {})
     fields(props, (), tuple(CaptionStyle.__dataclass_fields__), 'caption.typography')
     style = asdict(theme_style(props.get('theme', plan.get('caption_theme', 'Comedy Bold'))))
+    if plan['output']['framing']=='comedy_bands':style['font_size']=104
     style.update(props)
     result = CaptionStyle(**style)
     result.validate()
@@ -289,7 +299,8 @@ def pulse_editor_state(plan, assembled_media):
     captions = tuple(Caption(c['start'], c['end'], c['text'], c['zone'].title(), caption_style(plan, c))
                      for c in plan['captions'] if c['basis'] != 'unverified')
     sounds, overlays = reaction_cues(plan)
-    edits = EditOptions(text=TextOverlay(captions=captions, safe_area=True), sounds=sounds, overlays=overlays)
+    dimensions = (int(plan['source']['width']),int(plan['source']['height'])) if plan['output']['framing']=='comedy_bands' else None
+    edits = EditOptions(text=TextOverlay(captions=captions, safe_area=True), sounds=sounds, overlays=overlays, comedy_bands=dimensions)
     trim, cuts = TrimRange(0, assembled_media.duration), CutPlan()
     edits.validate(assembled_media)
     cuts.validate_selection(assembled_media, trim)

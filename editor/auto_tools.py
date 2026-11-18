@@ -175,7 +175,9 @@ class AutoEditDialog(tk.Toplevel):
     def ai(self):
         if self.job and self.job.request:
             key = self.key.get()
-            self.status.configure(text='AI is reviewing sampled frames. One paid request; no automatic retry…', fg=t.CYAN)
+            saved = any((self.job.folder/name).exists() for name in ('ai-response.json','ai-result.json'))
+            self.status.configure(text='Rechecking the saved AI response locally. No new paid request…' if saved else
+                                  'AI is reviewing sampled frames. One paid request; no automatic retry…', fg=t.CYAN)
             self.work(lambda: self.job.ai(self.cancel, key), 'result')
 
     def poll(self):
@@ -198,7 +200,10 @@ class AutoEditDialog(tk.Toplevel):
                 self.local_button.configure(state='normal' if ready else 'disabled')
                 quote = self.job.quote if ready else None
                 allowed = bool(quote and quote['reserved_upper_gbp'] <= self.pricing.budget_gbp)
-                self.ai_button.configure(state='normal' if allowed else 'disabled')
+                saved = bool(ready and self.job.request and any((self.job.folder/name).exists()
+                             for name in ('ai-response.json','ai-result.json')))
+                self.ai_button.configure(state='normal' if allowed or saved else 'disabled',
+                                         text='REUSE SAVED AI' if saved else 'CREATE WITH AI')
                 self.folder_button.configure(state='normal' if ready else 'disabled')
                 if kind == 'prepared':
                     cost = (f'AI estimate £{quote["estimated_gbp"]:.3f} total; reserve up to £{quote["reserved_upper_gbp"]:.3f}. '
@@ -225,6 +230,8 @@ class AutoEditDialog(tk.Toplevel):
         cost = f'£{measured:.4f} estimated from recorded usage' if measured is not None else f'up to £{usage["reserved_gbp"]:.4f} reserved; usage uncertain'
         self.status.configure(text=f'{payload["mode"]} · {len(payload["plan"]["shorts"])} candidates · {cost}\n'
                               + ('Reused AI result; no new charge. ' if payload['cached_ai_result'] else '')
+                              + (f'{len(usage["timestamp_corrections"])} tiny timestamp corrections recorded. '
+                                 if usage.get('timestamp_corrections') else '')
                               + self.job.transcript_note, fg=t.GREEN)
         for index, short in enumerate(payload['plan']['shorts']):
             row = tk.Frame(self.results, bg=t.PANEL)

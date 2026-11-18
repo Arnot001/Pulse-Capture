@@ -1,5 +1,6 @@
 """Strict Auto Edit plans, translated into the existing non-destructive editor."""
 from dataclasses import dataclass, replace
+import copy
 import math
 import textwrap
 
@@ -138,6 +139,42 @@ def wrap_caption(value):
         width += 1
         lines = textwrap.wrap(value, width=width)
     return '\n'.join(lines)
+
+
+def recover_timestamp_rounding(plan, media, options):
+    """Only shrink sub-millisecond boundary overshoots; never reorder or add footage."""
+    media.validate()
+    check_schema(plan, PLAN_SCHEMA)
+    repaired = copy.deepcopy(plan)
+    changes = []
+    tolerance = min(.001, 1/media.fps)
+
+    def snap(item, field, target, where):
+        old = item[field]
+        if 0 < abs(old-target) <= tolerance:
+            item[field] = target
+            changes.append(dict(field=where+'.'+field, before=old, after=target))
+
+    for index, short in enumerate(repaired['shorts']):
+        previous = 0
+        for number, shot in enumerate(short['shots']):
+            where = f'shorts[{index}].shots[{number}]'
+            if shot['start'] < previous: snap(shot,'start',previous,where)
+            if shot['end'] > media.duration: snap(shot,'end',media.duration,where)
+            previous = shot['end']
+        previous = 0
+        for number, cue in enumerate(short['captions']):
+            where = f'shorts[{index}].captions[{number}]'
+            if cue['start'] < previous: snap(cue,'start',previous,where)
+            # Exactly one containing shot, allowing only the rounding tolerance.
+            matches = [s for s in short['shots'] if s['start']-tolerance <= cue['start'] < cue['end'] <= s['end']+tolerance]
+            if len(matches)==1:
+                shot=matches[0]
+                if cue['start'] < shot['start']: snap(cue,'start',shot['start'],where)
+                if cue['end'] > shot['end']: snap(cue,'end',shot['end'],where)
+            previous=cue['end']
+    validate_plan(repaired, media, options)
+    return repaired, changes
 
 
 def editor_state(short, media, transcript=(), *, assembled_media=None, style=None):

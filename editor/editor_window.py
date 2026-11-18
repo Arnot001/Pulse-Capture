@@ -57,6 +57,7 @@ class EditorWindow(tk.Toplevel):
         self.edits = EditOptions()
         self.tool = tk.StringVar(value='TRIM')
         self.format_choice = tk.StringVar(value='Original')
+        self.comedy_on = tk.BooleanVar(value=False)
         self.brand_on = tk.BooleanVar(value=False)
         self.brand_corner = tk.StringVar(value='Bottom right')
         self.brand_size = tk.StringVar(value='Small')
@@ -95,7 +96,7 @@ class EditorWindow(tk.Toplevel):
         self.source_label = t.label(intro, self.path.name, 9, t.MUTED, anchor='w')
         reaction_row = tk.Frame(intro, bg=t.BG)
         reaction_row.pack(side='right')
-        for label, kind in (('SOUND FX', 'sfx'), ('EMOJIS', 'emoji'), ('GIFS / REACTIONS', 'gif'), ('EFFECTS', 'effects')):
+        for label, kind in (('REACTION AUDIO', 'sfx'), ('EMOJIS', 'emoji'), ('GIFS / REACTIONS', 'gif'), ('EFFECTS', 'effects')):
             button = t.button(reaction_row, label, lambda k=kind: self.open_reactions(k))
             button.configure(padx=6, pady=4, font=(t.FONT, -9, 'bold'))
             button.pack(side='left', padx=2)
@@ -271,6 +272,7 @@ class EditorWindow(tk.Toplevel):
         plan, source = self.pulse_candidate
         trim, self.cuts, self.edits = editor_state(plan, source, assembled_media=self.media)
         self.format_choice.set(self.edits.preset)
+        self.comedy_on.set(self.edits.comedy_bands is not None)
         self.update_trim(trim)
         self.select_tool('TEXT')
         self.title(f'PULSE · Pulse Plan · {plan["title"]}')
@@ -288,6 +290,12 @@ class EditorWindow(tk.Toplevel):
         panel = self.panels['FORMAT']
         self.add_segments(panel, self.format_choice, format_choices, self.format_changed)
         t.label(panel, 'Full Frame keeps the whole picture on a dark 1080 × 1920 canvas.', 9, t.MUTED).pack(anchor='w')
+        row=tk.Frame(panel,bg=t.PANEL);row.pack(fill='x',pady=(4,0))
+        toggle=tk.Checkbutton(row,text='COMEDY LAYOUT — safe caption bands',variable=self.comedy_on,
+                              command=self.comedy_changed,bg=t.PANEL,fg=t.CYAN,selectcolor=t.CONTROL)
+        toggle.pack(side='left');self.controls.append(toggle)
+        button=t.button(row,'BAND CAPTIONS',lambda:self.overlay_tools.edit_captions())
+        button.configure(pady=3,font=(t.FONT,-10,'bold'));button.pack(side='right');self.controls.append(button)
         panel = self.panels['CROP']
         self.add_segments(panel, self.format_choice, format_choices, self.format_changed)
         self.crop_hint = t.label(panel, 'Choose a shape, then drag the cyan frame to keep what matters.', 9, t.MUTED)
@@ -350,6 +358,7 @@ class EditorWindow(tk.Toplevel):
         try:
             if self.format_choice.get() != self.edits.preset:
                 self.edits = self.edits.with_format(self.media, self.format_choice.get())
+            self.comedy_on.set(self.edits.comedy_bands is not None)
             self.video.crop = self.edits.crop
             self.overlay_tools.refresh()
             self.polish_tools.refresh()
@@ -360,6 +369,31 @@ class EditorWindow(tk.Toplevel):
         except ValueError as exc:
             self.format_choice.set(self.edits.preset)
             self.note.configure(text=str(exc), fg=t.RED)
+
+    def comedy_changed(self):
+        if not self.media or self.exporter.busy:return
+        try:
+            if self.comedy_on.get():
+                if self.pulse_candidate:
+                    plan,source=self.pulse_candidate
+                    if plan['output']['framing'] not in ('full_frame','comedy_bands'):
+                        raise ValueError('Re-render this plan using full_frame or comedy_bands to preserve the whole picture.')
+                    dimensions=(source.width,source.height)
+                    proposed=replace(self.edits,comedy_bands=dimensions)
+                else:
+                    proposed=replace(self.edits.with_format(self.media,FULL_FRAME_FORMAT),
+                                     comedy_bands=(self.media.width,self.media.height))
+            else:
+                if any(c.zone!='canvas' for c in self.edits.overlays):
+                    raise ValueError('Set band overlays to Canvas before disabling Comedy Layout.')
+                proposed=replace(self.edits,comedy_bands=None)
+            proposed.validate(self.media)
+            self.stop_play();self.edits=proposed;self.format_choice.set(proposed.preset)
+            self.update_timeline();self.request_frame()
+            self.note.configure(text='Comedy bands ready. Add Top / Bottom captions and choose a band for emoji or GIF reactions.',fg=t.CYAN)
+        except ValueError as exc:
+            self.comedy_on.set(self.edits.comedy_bands is not None)
+            self.note.configure(text=str(exc),fg=t.RED)
 
     def refresh_crop_guide(self):
         if not self.media or not hasattr(self, 'video'):
