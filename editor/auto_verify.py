@@ -34,10 +34,16 @@ def verify_short(backend, path, expected_duration, expect_audio, cancel):
             starts.append(float(line.split('=', 1)[1]))
         if line.startswith('lavfi.black_end='):
             ends.append(float(line.split('=', 1)[1]))
+    # Black pixels can be intentional: scene cuts, comic pauses, fades and dark
+    # gameplay are valid content. Only decode/format/audio-integrity errors
+    # should prevent publishing. Report black spans for manual review instead
+    # of discarding the finished MP4.
+    black_intervals = []
     for index, start in enumerate(starts):
         end = ends[index] if index < len(ends) else duration
-        if end-start >= .15:
-            raise ValueError('Auto Edit export contains a black interval. Adjust the selection or fades and export again.')
+        if end - start >= .15:
+            black_intervals.append((round(start, 3), round(min(end, duration), 3)))
     return {'path': str(Path(path)), 'width': 1080, 'height': 1920, 'duration': duration,
             'video_codec': 'h264', 'audio_codec': audio['codec_name'] if audio else None,
-            'full_decode': True, 'sustained_black_frames': False}
+            'full_decode': True, 'sustained_black_frames': bool(black_intervals),
+            'black_intervals': black_intervals}
