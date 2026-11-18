@@ -68,6 +68,50 @@ class MemeCatalogTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             parse_results({"results": {}})
 
+    def test_short_spoken_reactions_rank_above_long_music(self):
+        results = [
+            entry(id="long-song", title="Bruh music remix", duration=18000,
+                  tags=[{"name": "song"}, {"name": "music"}]),
+            entry(id="spoken", title="Bruh shouted voice", duration=1300,
+                  tags=[{"name": "human"}, {"name": "speech"}]),
+            entry(id="ambience", title="Background rain", duration=16000,
+                  tags=[{"name": "ambience"}]),
+        ]
+        ranked = parse_results({"results": results}, phrase="bruh", focus="voices")
+        self.assertEqual(ranked[0]["id"], "spoken")
+        self.assertEqual(ranked[0]["duration"], 1300)
+        self.assertEqual(ranked[0]["tags"], ("human", "speech"))
+        self.assertEqual(ranked[-1]["id"], "long-song")
+        self.assertEqual(len(ranked), 3)
+
+    def test_quick_effect_category_prefers_effects_and_does_not_override_licences(self):
+        results = [
+            entry(id="song", title="Boom song remix", duration=1200,
+                  tags=[{"name": "music"}]),
+            entry(id="impact", title="Boom punch impact", duration=900,
+                  tags=[{"name": "impact"}, {"name": "cartoon"}]),
+            entry(id="restricted", title="Boom sound", duration=950,
+                  license="by-nc", tags=[{"name": "impact"}]),
+        ]
+        ranked = parse_results({"results": results}, phrase="boom", focus="effects")
+        self.assertEqual([item["id"] for item in ranked], ["impact", "song"])
+        with self.assertRaisesRegex(ValueError, "Unsupported"):
+            parse_results({"results": results}, phrase="boom", focus="unknown")
+
+    def test_ranked_search_does_not_make_extra_api_requests(self):
+        requested = []
+        def stub(request, timeout):
+            requested.append(request.full_url)
+            return FakeResponse(json.dumps({"results": [
+                entry(id="music", title="Laugh music remix", duration=14000),
+                entry(id="voice", title="Laughing human voice", duration=2000,
+                      tags=[{"name": "laughter"}]),
+            ]}).encode(), request.full_url)
+        result = search_openverse("laugh", opener=stub, focus="voices")
+        self.assertEqual(len(requested), 1)
+        self.assertEqual(result[0]["id"], "voice")
+        self.assertIn("page_size=20", requested[0])
+
     def test_remote_audio_host_is_constrained(self):
         for valid in ("https://cdn.freesound.org/sound.mp3",
                       "https://upload.wikimedia.org/example.wav",
