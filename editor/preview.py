@@ -65,7 +65,7 @@ def preview_command(ffmpeg, media, position, width, height, edits=None, source_v
             from .reactions import add_visuals
             graph = [filters] if complex_graph else [f'[0:v:0]{filters}[v]']
             out_w, out_h = edits.encoded_size(media)
-            visual = add_visuals(args, graph, 'v', edits.overlays, out_w, out_h, output_time)
+            visual = add_visuals(args, graph, 'v', edits.overlays, out_w, out_h, output_time, edits.bands(media))
             graph.append(f'[{visual}]null[reactionpreview]')
             filters = ';'.join(graph)
             args += ['-filter_complex_threads', '1', '-filter_complex',

@@ -155,23 +155,29 @@ def caption_intervals(caption, trim, cuts):
     return intervals
 
 
-def text_filter(width, height, text, resources, trim=None, cuts=None, source_position=None):
+def text_filter(width, height, text, resources, trim=None, cuts=None, source_position=None, bands=None):
     filters = []
     if text.enabled:
-        filters.append(_drawtext(width, height, text, resources, resources.path))
+        if bands:
+            from .typography import styled_filter, CaptionStyle
+            filters.append(styled_filter(width,height,Caption(0,86400,text.text,text.position),
+                           CaptionStyle(font_size=104,animation='none'),resources,[(0,86400)],source_position,bands))
+        else:
+            filters.append(_drawtext(width, height, text, resources, resources.path))
     if text.captions and (resources is None or len(resources.caption_paths) != len(text.captions)):
         raise ValueError('Caption resources are unavailable.')
     for caption, path in zip(text.captions, resources.caption_paths if resources else ()):
-        if caption.style is not None:
-            from .typography import styled_filter
+        if caption.style is not None or bands:
+            from .typography import styled_filter, CaptionStyle
+            style = caption.style or CaptionStyle(font_size=104)
             if source_position is not None:
                 if caption.start <= source_position < caption.end:
-                    filters.append(styled_filter(width, height, caption, caption.style, resources,
-                                   [(caption.start, caption.end)], source_position))
+                    filters.append(styled_filter(width, height, caption, style, resources,
+                                   [(caption.start, caption.end)], source_position, bands))
             elif trim is not None:
                 intervals = caption_intervals(caption, trim, cuts)
                 if intervals:
-                    filters.append(styled_filter(width, height, caption, caption.style, resources, intervals))
+                    filters.append(styled_filter(width, height, caption, style, resources, intervals, bands=bands))
             continue
         overlay = TextOverlay(True, caption.text, text.size, caption.position, safe_area=text.safe_area)
         draw = _drawtext(width, height, overlay, resources, path)

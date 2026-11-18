@@ -189,7 +189,7 @@ def build_export_command(ffmpeg, media, trim, output, edits=None, asset=None,
     from .reactions import augment_export, validate_cues
     validate_cues(edits.sounds, edits.overlays, out_duration)
     width, height = edits.encoded_size(media)
-    return augment_export(args, edits, out_duration, width, height)
+    return augment_export(args, edits, out_duration, width, height, edits.bands(media))
 
 
 def build_plan_segment_command(ffmpeg, media, item, output, framing, text_resources=None):
@@ -243,7 +243,7 @@ def build_plan_segment_command(ffmpeg, media, item, output, framing, text_resour
                 '-c:a', 'aac', '-b:a', '192k', '-t', f'{duration:.9f}', '-movflags', '+faststart', str(output)]
         return args
 
-    preset = FULL_FRAME_FORMAT if framing == 'full_frame' else SHORTS_FORMAT
+    preset = FULL_FRAME_FORMAT if framing in ('full_frame','comedy_bands') else SHORTS_FORMAT
     edits = EditOptions().with_format(media, preset)
     if 'zoom' in item:
         zoom = item['zoom']
@@ -272,6 +272,14 @@ def build_plan_segment_command(ffmpeg, media, item, output, framing, text_resour
             'glitch': "rgbashift=rh=12:bh=-12:enable='lt(t,.3)'",
         }
         tail = effects[effect]
+        if framing == 'comedy_bands':
+            from .transforms import full_frame_geometry
+            x,y,w,h = full_frame_geometry(media)
+            # Keep interruptions inside the picture; never enlarge gameplay into a band.
+            tail = tail.replace('1080x1920',f'{w}x{h}')
+            if effect=='shake':
+                tail = f"scale={w+32}:{h+58},crop={w}:{h}:x='16+12*sin(t*70)*lt(t,.35)':y='29+12*cos(t*60)*lt(t,.35)'"
+            tail = f'crop={w}:{h}:{x}:{y},'+tail+f',pad=1080:1920:{x}:{y}:color=0x101820'
         if '-vf' in args:
             args[args.index('-vf')+1] += ',' + tail
         else:

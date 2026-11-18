@@ -50,6 +50,9 @@ EMOJI = {
     'emoji.alert': ('Warning', 'Alerts'), 'emoji.siren': ('Siren', 'Alerts'),
 }
 _LOCK = threading.RLock()
+REACTION_CATEGORIES = ('WTF', 'Disbelief', 'Rage', 'Cringe', 'Laughing', 'Dramatic')
+DETAIL_FIELDS = {'name': 80, 'artist': 120, 'source': 1000, 'licence': 1000,
+                 'attribution': 1600, 'transcript': 500}
 
 
 @lru_cache(maxsize=1)
@@ -219,12 +222,12 @@ class ReactionLibrary:
         else:
             try:
                 path = self.root/(asset_id+'.json')
-                if path.stat().st_size > 4096:
+                if path.stat().st_size > 65536:
                     raise ValueError('Invalid library metadata.')
                 item = json.loads(path.read_text(encoding='utf-8'))
             except (OSError, ValueError) as exc:
                 raise ValueError(f'Missing local asset: {asset_id}. Import it in the reaction library first.') from exc
-            if item.get('id') != asset_id or item.get('kind') not in ('gif', 'sfx') or item.get('suffix') not in ('.gif', '.wav'):
+            if type(item) is not dict or item.get('id') != asset_id or item.get('kind') not in ('gif', 'sfx') or item.get('suffix') not in ('.gif', '.wav'):
                 raise ValueError('Invalid library metadata.')
         if kind and item['kind'] != kind:
             raise ValueError(f'{asset_id} is not a {kind} asset.')
@@ -285,6 +288,24 @@ class ReactionLibrary:
             prefs = self.preferences()
             prefs.setdefault('categories', {}).update({key:category for key in asset_ids})
             _atomic_json(self.root/'preferences.json', prefs)
+
+    def update_details(self, asset_id, values):
+        """Edit imported descriptive data, retaining identity and all decoder metadata."""
+        item = self.metadata(asset_id)
+        if not asset_id.startswith('import.'):
+            raise ValueError('Bundled media credits are read-only. Import your own recording to edit its details.')
+        if type(values) is not dict or set(values) - DETAIL_FIELDS.keys():
+            raise ValueError('Unsupported reaction detail fields.')
+        for key, value in values.items():
+            if type(value) is not str or len(value) > DETAIL_FIELDS[key] or any(ord(c) < 32 and c != '\n' for c in value):
+                raise ValueError(f'{key}: enter plain text up to {DETAIL_FIELDS[key]} characters.')
+        if 'name' in values and not values['name'].strip():
+            raise ValueError('Give this reaction a searchable name.')
+        with _LOCK:
+            item = self.metadata(asset_id)
+            item.update(values)
+            _atomic_json(self.root/(asset_id+'.json'), item)
+        return item
 
     def import_many(self, paths, kind, ffmpeg, ffprobe, progress=None, cancel=None):
         if len(paths)>200: raise ValueError('Import up to 200 files in one batch.')
@@ -383,7 +404,24 @@ class ReactionLibrary:
                 item = dict(id=asset_id, name=path.stem[:80], category='Imported', kind=kind,
                             suffix=suffix, duration=duration, sha256=digest,
                             source='Local import', licence='User supplied — verify rights', attribution='')
+                # Tags are descriptive data only. Preserve supplied credits without
+                # treating a copyright tag as permission to use the recording.
+                tags = {str(k).lower(): str(v) for k,v in
+                        {**info.get('format', {}).get('tags', {}), **stream.get('tags', {})}.items()}
+                for field, keys in (('name', ('title',)), ('artist', ('artist', 'author')),
+                                    ('licence', ('license', 'licence')), ('attribution', ('copyright',))):
+                    value = next((tags[key] for key in keys if tags.get(key)), None)
+                    if value:
+                        item[field] = ''.join(c for c in value if ord(c) >= 32 or c == '\n')[:DETAIL_FIELDS[field]]
+                if sum(len(k)+len(v) for k,v in tags.items()) <= 4000:
+                    item['embedded_tags'] = tags
                 if kind == 'gif':
                     item.update(width=w, height=h, frames=frames, delays=gif_info[2])
+                # Restoring a missing media file must retain the user's credits.
+                try:
+                    previous = self.metadata(asset_id, kind)
+                except ValueError:
+                    previous = {}
+                item.update({key: previous[key] for key in DETAIL_FIELDS if key in previous})
                 _atomic_json(self.root/(asset_id+'.json'), item)
             return asset_id

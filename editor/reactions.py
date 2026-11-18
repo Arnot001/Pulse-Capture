@@ -34,6 +34,8 @@ class SoundCue:
         if self.duration is not None:
             finite(self.duration, .01, 20, 'Sound duration')
         self.length()
+        if self.asset_id.startswith('import.'):
+            ReactionLibrary().resolve(self.asset_id,'sfx')
         if total is not None and self.at >= total:
             raise ValueError('Sound starts outside the output timeline.')
 
@@ -56,11 +58,15 @@ class VisualCue:
     animation: str = 'none'
     x: float | None = None
     y: float | None = None
+    zone: str = 'canvas'
 
     def validate(self, total=None):
         if self.kind not in ('emoji', 'gif'):
             raise ValueError('Overlay kind must be emoji or gif.')
         ReactionLibrary().metadata(self.asset_id, self.kind)
+        ReactionLibrary().resolve(self.asset_id, self.kind)
+        if self.zone not in ('canvas','top','bottom'):
+            raise ValueError('Overlay zone must be canvas, top or bottom.')
         finite(self.start, 0, 86400, 'Overlay start')
         finite(self.end, .01, 86400, 'Overlay end')
         if self.end <= self.start or (total is not None and self.end > total+.00001):
@@ -127,7 +133,7 @@ def add_sounds(args, graph, input_label, sounds, duration, offset=0):
     return 'reactionaudio'
 
 
-def add_visuals(args, graph, input_label, overlays, width, height, sample_time=None):
+def add_visuals(args, graph, input_label, overlays, width, height, sample_time=None, bands=None):
     """One compositor for still previews and MP4. Rotated bounds stay inside safe areas."""
     current = input_label
     library = ReactionLibrary()
@@ -152,7 +158,9 @@ def add_visuals(args, graph, input_label, overlays, width, height, sample_time=N
         if sample_time is not None and cue.kind == 'gif':
             args += ['-ss', f'{elapsed % item["duration"] if cue.loop else elapsed:.9f}']
         args += ['-i', str(library.resolve(cue.asset_id, cue.kind))]
-        size = max(16, round(min(width,height)*cue.scale))
+        from .comedy_layout import overlay_region, overlay_size
+        region = overlay_region(cue,bands,width,height)
+        size = overlay_size(cue,width,height,region)
         clock = str(elapsed) if sample_time is not None else 't'
         duration = end-cue.start
         ramp = min(.15, duration/3)
@@ -179,7 +187,13 @@ def add_visuals(args, graph, input_label, overlays, width, height, sample_time=N
             y += f'-{size*.12:g}*abs(sin({motion_time}*14))*exp(-{motion_time}*4)'
         if cue.animation == 'shake':
             x += f'+{size*.04:g}*sin({motion_time}*70)'
-        x, y = f'max(0,min(W-w,{x}))', f'max(0,min(H-h,{y}))'
+        if cue.zone!='canvas':
+            x = f'{region.x}+{cue.x if cue.x is not None else 1 if "right" in cue.position else 0 if "left" in cue.position else .5}*({region.width}-w)'
+            y = f'{region.y}+{cue.y if cue.y is not None else .5}*({region.height}-h)'
+            if cue.animation=='bounce':y+=f'-{size*.12:g}*abs(sin({motion_time}*14))*exp(-{motion_time}*4)'
+            if cue.animation=='shake':x+=f'+{size*.04:g}*sin({motion_time}*70)'
+        x = f'max({region.x},min({region.x+region.width}-w,{x}))'
+        y = f'max({region.y},min({region.y+region.height}-h,{y}))'
         enable = '' if sample_time is not None else f":enable='gte(t,{cue.start:.9f})*lt(t,{end:.9f})'"
         output = f'reactionv{i}'
         graph.append(f"[{current}][{mark}]overlay=x='{x}':y='{y}':eof_action=pass:repeatlast=0:format=auto{enable}[{output}]")
@@ -187,7 +201,7 @@ def add_visuals(args, graph, input_label, overlays, width, height, sample_time=N
     return current
 
 
-def augment_export(args, edits, duration, width, height):
+def augment_export(args, edits, duration, width, height, bands=None):
     """Extend an existing export command, preserving its video/audio transforms."""
     if not edits.sounds and not edits.overlays:
         return args
@@ -220,7 +234,7 @@ def augment_export(args, edits, duration, width, height):
     # add_* uses the existing input count to assign stream indexes.
     inputs = ['-i']*args.count('-i')
     initial = len(inputs)
-    video = add_visuals(inputs, graph, video.strip('[]'), edits.overlays, width, height)
+    video = add_visuals(inputs, graph, video.strip('[]'), edits.overlays, width, height, bands=bands)
     if edits.sounds:
         audio = add_sounds(inputs, graph, audio, edits.sounds, duration)
         if '-an' in args:

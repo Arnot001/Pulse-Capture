@@ -20,6 +20,8 @@ class CaptionStyle:
     highlight_colour: str = '#FFD83D'
     alignment: str = 'centre'
     animation: str = 'pop'
+    band_width: float = 1
+    band_y: float = .5
 
     def validate(self):
         if self.theme not in THEMES or self.alignment not in ('left', 'centre', 'right') or self.animation not in ('none','fade','pop','shake'):
@@ -33,6 +35,8 @@ class CaptionStyle:
                 raise ValueError('Caption colours must be #RRGGBB.')
         if type(self.highlight) is not str or len(self.highlight)>80 or any(ord(c)<32 or c in '{}\\' for c in self.highlight):
             raise ValueError('Highlight must be a plain phrase of at most 80 characters.')
+        finite(self.band_width, .3, 1, 'Caption band width')
+        finite(self.band_y, 0, 1, 'Caption position within band')
 
 
 def theme_style(theme):
@@ -80,7 +84,7 @@ def caption_layout(width, height, text, style):
     return size, lines
 
 
-def styled_filter(width, height, caption, style, resources, intervals, sample_time=None):
+def styled_filter(width, height, caption, style, resources, intervals, sample_time=None, bands=None):
     from .text_overlay import filter_path
     size, lines = caption_layout(width, height, caption.text, style)
     factor = min(width,height)/1080
@@ -94,6 +98,21 @@ def styled_filter(width, height, caption, style, resources, intervals, sample_ti
     x = {'left':width*.11,'centre':width*.5,'right':width*.89}[style.alignment]
     y = height*.12 if caption.position=='Top' else height*.78 if caption.position=='Bottom' else height*.5
     anchor = align+6 if caption.position=='Top' else align if caption.position=='Bottom' else align+3
+    clip = ''
+    if bands:
+        from .comedy_layout import fit_caption
+        if caption.position not in ('Top','Bottom'):
+            raise ValueError('Comedy Layout captions must use the Top or Bottom band.')
+        band = bands[caption.position.lower()]
+        size, lines, block_h, padding = fit_caption(caption.text, style, band, width)
+        rendered = r'\N'.join(literal(line) for line in lines)
+        if style.highlight:
+            rendered = re.sub(pattern, lambda match: r'{\c'+ass_colour(style.highlight_colour)+'}'+match[0]+r'{\c'+ass_colour(style.colour)+'}', rendered)
+        x = {'left':band.x+padding, 'centre':band.x+band.width/2,
+             'right':band.x+band.width-padding}[style.alignment]
+        y = band.y+padding+(band.height-2*padding-block_h)*style.band_y+block_h/2
+        anchor = align+3
+        clip = f'\\clip({band.x},{band.y},{band.x+band.width},{band.y+band.height})'
     header = f'''[Script Info]
 ScriptType: v4.00+
 PlayResX: {width}
@@ -108,7 +127,7 @@ Format: Layer,Start,End,Style,Name,MarginL,MarginR,MarginV,Effect,Text
 '''
     events = []
     for start,end in intervals:
-        tags = f'\\an{anchor}\\pos({x:.2f},{y:.2f})'
+        tags = f'\\an{anchor}\\pos({x:.2f},{y:.2f})'+clip
         if style.animation=='pop':
             tags += r'\fscx75\fscy75\t(0,120,\fscx100\fscy100)'
         elif style.animation=='fade':
@@ -119,7 +138,7 @@ Format: Layer,Start,End,Style,Name,MarginL,MarginR,MarginV,Effect,Text
                 a,b=start+i*.025,min(end,start+(i+1)*.025)
                 if a<b:
                     jitter = (-1 if i%2 else 1)*width*.006
-                    events.append(f'Dialogue: 0,{ass_time(a)},{ass_time(b)},Pulse,,0,0,0,,{{\\an{anchor}\\pos({x+jitter:.2f},{y:.2f})}}{rendered}')
+                    events.append(f'Dialogue: 0,{ass_time(a)},{ass_time(b)},Pulse,,0,0,0,,{{\\an{anchor}\\pos({x+jitter:.2f},{y:.2f}){clip}}}{rendered}')
             start = min(end,start+.15)
         if end>start:
             events.append(f'Dialogue: 0,{ass_time(start)},{ass_time(end)},Pulse,,0,0,0,,{{{tags}}}{rendered}')

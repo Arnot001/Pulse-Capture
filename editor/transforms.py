@@ -142,6 +142,7 @@ class EditOptions:
     crop_motion: CropMotion = CropMotion()
     sounds: tuple = ()
     overlays: tuple = ()
+    comedy_bands: tuple | None = None
 
     def validate(self, media):
         from .reactions import validate_cues
@@ -154,6 +155,22 @@ class EditOptions:
         self.zoom.validate()
         validate_speed(self.speed)
         self.fade.validate()
+        bands = self.bands(media)
+        if bands:
+            from .comedy_layout import fit_caption
+            from .typography import CaptionStyle
+            if self.preset != FULL_FRAME_FORMAT and not (self.preset == 'Original' and
+                    (media.width,media.height) == SHORTS_RESOLUTION):
+                raise ValueError('Comedy Layout requires Full Frame Shorts or an assembled portrait plan.')
+            entries = [(c.text,c.position,c.style) for c in self.text.captions]
+            if self.text.enabled:entries.append((self.text.text,self.text.position,None))
+            for value,position,style in entries:
+                if position not in ('Top','Bottom'):
+                    raise ValueError('Use Top or Bottom captions with Comedy Layout.')
+                fit_caption(value,style or CaptionStyle(font_size=104),bands[position.lower()])
+        from .comedy_layout import overlay_region
+        for cue in self.overlays:
+            overlay_region(cue,bands,1080,1920)
         if not isinstance(self.crop_motion, CropMotion):
             raise ValueError('Choose valid crop keyframes.')
         if self.crop_motion.keyframes:
@@ -192,7 +209,16 @@ class EditOptions:
         return (self.crop.width, self.crop.height) if self.crop else (media.width, media.height)
 
     def with_format(self, media, preset):
-        return replace(self, preset=preset, crop=centered_crop(media, preset), crop_motion=CropMotion())
+        if self.comedy_bands and preset != FULL_FRAME_FORMAT and any(c.zone!='canvas' for c in self.overlays):
+            raise ValueError('Move band overlays to Canvas before changing away from Comedy Layout.')
+        return replace(self, preset=preset, crop=centered_crop(media, preset), crop_motion=CropMotion(),
+                       comedy_bands=self.comedy_bands if preset==FULL_FRAME_FORMAT else None)
+
+    def bands(self, media):
+        if self.comedy_bands is None:
+            return None
+        from .comedy_layout import regions
+        return regions(self.comedy_bands)
 
     def crop_at(self, media, source_time):
         """Preview and source-coordinate editing share one sampled crop."""
@@ -278,7 +304,7 @@ def video_filters(media, edits, asset=None, text_resources=None, duration=None, 
 
     width, height = edits.output_size(media)
     if edits.text.visible:
-        graph.append(f'[{current}]{text_filter(width, height, edits.text, text_resources, trim, cuts, source_position)}[text]')
+        graph.append(f'[{current}]{text_filter(width, height, edits.text, text_resources, trim, cuts, source_position, edits.bands(media))}[text]')
         current = 'text'
 
     if edits.branding.enabled:

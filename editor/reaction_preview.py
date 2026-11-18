@@ -46,7 +46,7 @@ class ReactionPreview(PrivacyPreview):
 
     def geometry(self, cue):
         width, height = self.window.edits.encoded_size(self.media)
-        return visual_bounds(cue, width, height, self.output_time(), self.item(cue))
+        return visual_bounds(cue, width, height, self.output_time(), self.item(cue), self.window.edits.bands(self.media))
 
     def visual_rect(self, cue):
         box = self.geometry(cue)
@@ -186,7 +186,7 @@ class ReactionPreview(PrivacyPreview):
                 actual = self.geometry(proposed).side
                 left = box.x if sx > 0 else box.x+box.side-actual
                 top = box.y if sy > 0 else box.y+box.side-actual
-            proposed = positioned(proposed, left, top, width, height, self.output_time(), self.item(cue))
+            proposed = positioned(proposed, left, top, width, height, self.output_time(), self.item(cue), self.window.edits.bands(self.media))
         try:
             self.apply_visual(proposed)
         except ValueError as exc:

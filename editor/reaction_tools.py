@@ -11,7 +11,7 @@ from tkinter import filedialog, ttk, simpledialog
 
 from capture.ffmpeg_backend import process_options
 from ui import theme as t
-from .reaction_library import ReactionLibrary
+from .reaction_library import ReactionLibrary, REACTION_CATEGORIES
 from .media_audition import Audition
 from .reactions import SoundCue, VisualCue, POSITIONS, ANIMATIONS, validate_cues
 
@@ -21,7 +21,7 @@ class ReactionDialog(tk.Toplevel):
         super().__init__(window)
         self.window, self.kind = window, kind
         self.library = ReactionLibrary()
-        self.title({'sfx':'SOUND FX','emoji':'EMOJIS','gif':'GIFS / REACTIONS'}[kind])
+        self.title({'sfx':'REACTION AUDIO / SOUND FX','emoji':'EMOJIS','gif':'GIFS / REACTIONS'}[kind])
         self.geometry('840x690'); self.minsize(760,620)
         self.configure(bg=t.BG); self.transient(window)
         self.closed = False; self.busy = False
@@ -41,7 +41,13 @@ class ReactionDialog(tk.Toplevel):
         self.search.trace_add('write',lambda *_:self.refresh_library())
         self.category.trace_add('write',lambda *_:self.refresh_library())
         if kind!='emoji':t.button(top,'IMPORT FILES',self.import_asset).pack(side='right')
-        if kind=='sfx':t.button(top,'CREATE VOICE',self.create_voice).pack(side='right',padx=6)
+        if kind=='sfx':
+            browse=tk.Frame(self,bg=t.BG);browse.pack(fill='x',padx=16,pady=(0,5))
+            self.audio_scope=tk.StringVar(value='All audio')
+            scope=ttk.Combobox(browse,textvariable=self.audio_scope,values=('All audio','My recordings','Synthesized SFX','Windows voices'),state='readonly',width=18)
+            scope.pack(side='left');scope.bind('<<ComboboxSelected>>',lambda _:self.refresh_library())
+            t.label(browse,'Import expressive reactions you own or are licensed to use.',9,t.MUTED).pack(side='left',padx=8)
+            t.button(browse,'CREATE VOICE (OPTIONAL)',self.create_voice).pack(side='right')
         centre=tk.Frame(self,bg=t.BG);centre.pack(fill='both',expand=True,padx=16)
         style=ttk.Style(self);style.configure('Reactions.Treeview',rowheight=48)
         self.assets=ttk.Treeview(centre,show='tree',style='Reactions.Treeview',height=4,selectmode='extended')
@@ -56,12 +62,13 @@ class ReactionDialog(tk.Toplevel):
         t.button(preview,'STOP',self.stop_preview).pack(fill='x')
         t.button(preview,'★ FAVOURITE',self.favourite).pack(fill='x')
         t.button(preview,'SET CATEGORY',self.categorize).pack(fill='x')
+        t.button(preview,'DETAILS / LICENCE',self.details).pack(fill='x')
         self.asset_label=t.label(self,'',9,t.MUTED,anchor='w');self.asset_label.pack(fill='x',padx=16,pady=4)
         grid=tk.Frame(self,bg=t.BG);grid.pack(fill='x',padx=16)
         now=window.cuts.source_elapsed(window.position,window.trim)/window.edits.speed
         self.values={}
         fields=[('at' if kind=='sfx' else 'start','At / start',f'{now:.3f}'),
-                ('duration' if kind=='sfx' else 'end','Duration' if kind=='sfx' else 'End', '1.8' if kind=='sfx' else f'{min(self.total(),now+1.8):.3f}')]
+                ('duration' if kind=='sfx' else 'end','Duration (blank = full)' if kind=='sfx' else 'End', '' if kind=='sfx' else f'{min(self.total(),now+1.8):.3f}')]
         if kind=='sfx':
             fields += [('volume','Volume 0–2','.75'),('duck_source','Background gain','1'),('fade_in','Fade in','.005'),('fade_out','Fade out','.03')]
         else:
@@ -72,9 +79,14 @@ class ReactionDialog(tk.Toplevel):
             t.label(group,label,9).pack(anchor='w')
             var=tk.StringVar(value=value);self.values[key]=var
             tk.Entry(group,textvariable=var,width=15).pack(fill='x')
+        self.zone=tk.StringVar(value='bottom' if window.edits.comedy_bands else 'canvas')
         self.position=tk.StringVar(value='bottom_right');self.animation=tk.StringVar(value='pop');self.loop=tk.BooleanVar(value=True)
         options=tk.Frame(self,bg=t.BG);options.pack(fill='x',padx=16,pady=4)
         if kind!='sfx':
+            zone_row=tk.Frame(self,bg=t.BG);zone_row.pack(fill='x',padx=16,pady=2)
+            t.label(zone_row,'Layout zone',9).pack(side='left')
+            ttk.Combobox(zone_row,textvariable=self.zone,values=('canvas','top','bottom'),state='readonly',width=12).pack(side='left',padx=8)
+            t.label(zone_row,'Top / bottom stay inside Comedy Layout bands, including during animation.',9,t.MUTED).pack(side='left')
             for label,var,values in (('Position',self.position,POSITIONS),('Animation',self.animation,ANIMATIONS)):
                 t.label(options,label,9).pack(side='left',padx=4)
                 ttk.Combobox(options,textvariable=var,values=values,state='readonly',width=15).pack(side='left')
@@ -108,12 +120,20 @@ class ReactionDialog(tk.Toplevel):
         self.images.clear()
         prefs=self.library.preferences()
         values=self.library.items(self.kind)
-        self.categories.configure(values=['All','Favourites','Recent',*sorted({x['category'] for x in values})])
+        self.categories.configure(values=['All','Favourites','Recent',*sorted({x['category'] for x in values} | (set(REACTION_CATEGORIES) if self.kind=='sfx' else set()))])
+        if self.kind=='sfx':
+            scope=self.audio_scope.get()
+            voices=self.library.preferences().get('categories',{})
+            values=[v for v in values if scope=='All audio' or
+                    (scope=='My recordings' and v['id'].startswith('import.') and voices.get(v['id'])!='Voices') or
+                    (scope=='Synthesized SFX' and not v['id'].startswith('import.')) or
+                    (scope=='Windows voices' and voices.get(v['id'])=='Voices')]
+            values.sort(key=lambda v:not v['id'].startswith('import.'))
         if self.category.get()=='Recent':
             values.sort(key=lambda x:prefs.get('recent',[]).index(x['id']) if x['id'] in prefs.get('recent',[]) else 999)
         for item in values:
             key=item['id'];cat=self.category.get()
-            if self.search.get().lower() not in (item['name']+' '+key+' '+item['category']).lower():continue
+            if self.search.get().lower() not in (item['name']+' '+key+' '+item['category']+' '+item.get('transcript','')+' '+item.get('artist','')).lower():continue
             if cat=='Favourites' and key not in prefs.get('favourites',[]):continue
             if cat=='Recent' and key not in prefs.get('recent',[]):continue
             if cat not in ('All','Favourites','Recent',item['category']):continue
@@ -143,10 +163,16 @@ class ReactionDialog(tk.Toplevel):
         if self.preview_timer:self.after_cancel(self.preview_timer);self.preview_timer=None
         if hasattr(self,'audition'):self.audition.stop()
 
+    def details(self):
+        try:
+            from .reaction_details import ReactionDetails
+            ReactionDetails(self,self.selected())
+        except ValueError as exc:self.note.configure(text=str(exc),fg=t.RED)
+
     def categorize(self):
         selected=self.assets.selection()
         if not selected:return
-        category=simpledialog.askstring('Category',f'Category for {len(selected)} selected assets:',parent=self)
+        category=simpledialog.askstring('Category',f'Category for {len(selected)} selected assets (e.g. WTF, Disbelief, Rage, Cringe, Laughing, Dramatic):',parent=self)
         if category is None:return
         try:
             self.library.categorize(selected,category)
@@ -240,6 +266,7 @@ class ReactionDialog(tk.Toplevel):
             self.note.configure(text=(f"Added {len(result['added'])} · duplicates {len(result['duplicates'])} · failed {len(result['errors'])}"
                 + ('\n'+'\n'.join(result['errors'][:2]) if result['errors'] else '')) if ok else result,fg=t.GREEN if ok else t.RED)
             if ok:
+                if self.kind=='sfx':self.audio_scope.set('All audio')
                 self.category.set('All');self.refresh_library()
                 selected=tuple(dict.fromkeys(result['added']+result['duplicates']))
                 self.assets.selection_set(selected)
@@ -278,7 +305,7 @@ class ReactionDialog(tk.Toplevel):
         for key,var in self.values.items():
             value=getattr(cue,key)
             var.set('' if value is None else format(value,'.9g'))
-        if self.kind!='sfx':self.position.set(cue.position);self.animation.set(cue.animation);self.loop.set(cue.loop)
+        if self.kind!='sfx':self.position.set(cue.position);self.animation.set(cue.animation);self.loop.set(cue.loop);self.zone.set(cue.zone)
         if self.assets.exists(cue.asset_id) and self.assets.selection()!=(cue.asset_id,):
             self.assets.selection_set(cue.asset_id)
 
@@ -322,7 +349,7 @@ class ReactionDialog(tk.Toplevel):
         try:
             key=asset_id or self.selected()
             values={key:(None if not var.get().strip() else float(var.get())) for key,var in self.values.items()}
-            cue=SoundCue(key,**values) if self.kind=='sfx' else VisualCue(self.kind,key,**values,position=self.position.get(),animation=self.animation.get(),loop=self.loop.get())
+            cue=SoundCue(key,**values) if self.kind=='sfx' else VisualCue(self.kind,key,**values,position=self.position.get(),animation=self.animation.get(),loop=self.loop.get(),zone=self.zone.get())
             tracks=self.tracks()
             if update:
                 if not self.cues.curselection():raise ValueError('Select a timed cue to update or replace.')
@@ -371,7 +398,9 @@ class ReactionDialog(tk.Toplevel):
                 raise ValueError('Cue file belongs to a different source or trim/cut/speed selection.')
             sounds,overlays=reaction_cues(data);validate_cues(sounds,overlays,self.total())
             if w.exporter.busy:raise ValueError('Wait for export to finish.')
-            w.stop_play();w.edits=replace(w.edits,sounds=sounds,overlays=overlays);w.update_timeline();w.request_frame();self.refresh_cues()
+            proposed=replace(w.edits,sounds=sounds,overlays=overlays)
+            proposed.validate(w.media)
+            w.stop_play();w.edits=proposed;w.update_timeline();w.request_frame();self.refresh_cues()
         except Exception as exc:self.note.configure(text=str(exc),fg=t.RED)
 
     def close(self):

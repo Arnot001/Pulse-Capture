@@ -30,7 +30,7 @@ class CaptionDialog(tk.Toplevel):
         for label, var in (('Start', self.start), ('End', self.end)):
             t.label(fields, label, 10).pack(side='left')
             tk.Entry(fields, textvariable=var, width=12).pack(side='left', padx=6)
-        ttk.Combobox(fields, textvariable=self.position, values=('Top', 'Centre', 'Bottom'),
+        ttk.Combobox(fields, textvariable=self.position, values=('Top','Bottom') if window.edits.comedy_bands else ('Top', 'Centre', 'Bottom'),
                      state='readonly', width=9).pack(side='left')
         self.input = tk.Text(self, height=3, bg=t.CONTROL, fg=t.TEXT, insertbackground=t.CYAN)
         self.input.pack(fill='x', padx=16, pady=10)
@@ -67,6 +67,9 @@ class CaptionDialog(tk.Toplevel):
         self.note = t.label(self, 'Caption times refer to the assembled Pulse output.' if pulse else
                             'Caption times stay anchored to the original video.', 10, t.MUTED, wraplength=580)
         self.note.pack(fill='x', padx=16, pady=12)
+        if window.edits.comedy_bands:
+            self.set_style(CaptionStyle(font_size=104))
+            self.note.configure(text='Top / Bottom use safe comedy bands. Band width: .3–1; Band y: 0–1 within the band.')
         self.refresh()
 
     def set_style(self, style):
@@ -104,7 +107,8 @@ class CaptionDialog(tk.Toplevel):
 
     def save(self, update):
         try:
-            values = {key: (int(var.get()) if key in ('font_size','outline','shadow') else var.get())
+            values = {key: (int(var.get()) if key in ('font_size','outline','shadow') else
+                            float(var.get()) if key in ('band_width','band_y') else var.get())
                       for key, var in self.style_vars.items()}
             style = CaptionStyle(theme=self.theme.get(), **values) if self.style_enabled.get() else None
             cue = Caption(parse_time(self.start.get()), parse_time(self.end.get()),

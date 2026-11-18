@@ -60,5 +60,51 @@ class ComedyUITests(unittest.TestCase):
         picker.apply('Remove visual effect');self.assertNotIn('effect',dialog.get_plan()['timeline'][0])
         dialog.close()
 
+    def test_comedy_toggle_band_caption_zone_and_full_audio_default(self):
+        with patch.dict(os.environ,PULSE_REACTION_LIBRARY=str(self.folder/'library')):
+            w=self.window
+            w.select_tool('FORMAT');w.comedy_on.set(True);w.comedy_changed()
+            self.assertEqual(w.edits.comedy_bands,(w.media.width,w.media.height),w.note.cget('text'))
+            captions=CaptionDialog(w)
+            captions.input.insert('1.0','DOGGO COMES FIRST')
+            captions.save(False)
+            self.assertEqual(w.edits.text.captions[0].style.font_size,104,captions.note.cget('text'))
+            captions.destroy()
+            w.open_reactions('emoji')
+            dialog=next(c for c in w.auto_children if isinstance(c,ReactionDialog))
+            self.assertEqual(dialog.zone.get(),'bottom')
+            dialog.assets.selection_set('emoji.skull');dialog.save(False)
+            self.assertEqual(w.edits.overlays[0].zone,'bottom',dialog.note.cget('text'))
+            w.comedy_on.set(False);w.comedy_changed()
+            self.assertTrue(w.comedy_on.get())  # Cannot silently strand a band overlay.
+            dialog.close()
+            w.open_reactions('sfx')
+            sound=next(c for c in w.auto_children if isinstance(c,ReactionDialog))
+            self.assertEqual(sound.values['duration'].get(),'')
+            self.assertIn('WTF',sound.categories.cget('values'))
+            self.pump(lambda:sound.assets.winfo_height()>1)
+            self.assertGreater(sound.assets.winfo_height(),100)
+            self.assertLess(sound.note.winfo_y()+sound.note.winfo_height(),sound.winfo_height()+1)
+            sound.close()
+
+    def test_saved_ai_recovery_is_visible_without_request(self):
+        from types import SimpleNamespace
+        from editor.auto_tools import AutoEditDialog
+        from unittest.mock import Mock
+        dialog=AutoEditDialog(self.window)
+        self.addCleanup(dialog.finish_close)
+        folder=self.folder/'saved-job';folder.mkdir()
+        (folder/'ai-response.json').write_text('{}',encoding='utf-8')
+        dialog.job=SimpleNamespace(folder=folder,request={'model':'test'},analysis={'duration':6},
+            quote={'estimated_gbp':.01,'reserved_upper_gbp':.1},transcript_note='Offline fixture',ai=Mock())
+        dialog.events.put(('prepared',None));dialog.poll()
+        self.assertEqual(dialog.ai_button.cget('text'),'REUSE SAVED AI')
+        with patch.object(dialog,'work') as work:
+            dialog.ai()
+            self.assertIn('No new paid request',dialog.status.cget('text'))
+            work.assert_called_once()
+        dialog.job.ai.assert_not_called()
+        dialog.close()
+
 
 if __name__=='__main__':unittest.main()
