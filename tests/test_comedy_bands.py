@@ -31,6 +31,23 @@ class ComedyBandTests(unittest.TestCase):
             fit_caption('W'*160,CaptionStyle(font_size=120),self.bands['bottom'])
         with self.assertRaises(ValueError):regions((1080,1920))
 
+    def test_already_letterboxed_portrait_short_uses_existing_dark_bands(self):
+        # This source has already been rendered to 9:16, with 16:9 gameplay
+        # centred inside it. Do not reject it just because its file is portrait.
+        self.assertEqual(regions((1080,1920)), self.bands)
+        self.assertEqual(regions((1080,1920),360,640), regions((1920,1080),360,640))
+        portrait=MediaInfo(Path('already-letterboxed-short.mp4'),12,1080,1920,30,True)
+        edits=replace(EditOptions().with_format(portrait,FULL_FRAME_FORMAT),
+                      comedy_bands=(portrait.width,portrait.height),
+                      text=TextOverlay(captions=(
+                          Caption(0,3,'BRO ABANDONED THE MISSION','Top',CaptionStyle(font_size=104)),
+                          Caption(0,3,'TO PET THE DOG','Bottom',CaptionStyle(font_size=104)),
+                      )))
+        edits.validate(portrait)
+        self.assertEqual(edits.output_size(portrait),(1080,1920))
+        with self.assertRaisesRegex(ValueError,'9:16'):
+            regions((1000,1400))
+
     def test_all_animation_bounds_and_drag_stay_in_zone(self):
         item=dict(width=256,height=256,duration=1)
         for zone,band in self.bands.items():
