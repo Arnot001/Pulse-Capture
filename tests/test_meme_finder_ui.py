@@ -24,16 +24,6 @@ class MemeFinderUITests(unittest.TestCase):
         self.library_patch.start()
         self.addCleanup(self.library_patch.stop)
 
-    def tearDown(self):
-        try:
-            for child in list(self.window.auto_children):
-                if hasattr(child, "close"):
-                    child.close()
-        finally:
-            fixture.PulsePlanUITests.cleanup(self)
-            self.window = self.root = None
-            gc.collect()
-
     def test_search_preview_and_import_without_external_browser(self):
         item = dict(id="fixture.wav", name="Our own WTF shout",
                     creator="Pulse Test", license="CC0",
@@ -51,12 +41,14 @@ class MemeFinderUITests(unittest.TestCase):
             return Path(path)
 
         dialog = ReactionDialog(self.window, "sfx")
+        self.addCleanup(dialog.close)
         self.finder = None
         with patch("editor.meme_finder.search_openverse", return_value=[item]) as search, \
              patch("editor.meme_finder.fetch_audio", side_effect=fake_fetch) as fetch, \
              patch("editor.meme_finder.messagebox.askyesno", return_value=True) as confirm, \
              patch("editor.meme_finder.webbrowser.open") as browser:
             self.finder = MemeFinder(dialog)
+            self.addCleanup(self.finder.close)
             self.pump(lambda: not self.finder.busy and self.finder.listbox.size() == 1)
             search.assert_called_once()
             self.finder.listbox.selection_set(0)
@@ -86,8 +78,6 @@ class MemeFinderUITests(unittest.TestCase):
             dialog.insert()
             self.assertEqual(self.window.edits.sounds[0].asset_id, key)
 
-        self.finder.close()
-        dialog.close()
 
 
 if __name__ == "__main__":
