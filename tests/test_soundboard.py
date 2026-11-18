@@ -164,8 +164,9 @@ class SoundboardWindowsTests(unittest.TestCase):
 
     def test_discovery_and_missing_asset_are_recoverable(self):
         dialog=ReactionDialog(self.window,'sfx')
-        with patch('editor.reaction_tools.simpledialog.askstring',return_value='BRUH'),patch('webbrowser.open',return_value=True) as browser:
-            dialog.find_sounds();browser.assert_called_once_with(discovery_url('BRUH'))
+        with patch('editor.meme_finder.MemeFinder') as finder:
+            dialog.find_sounds()
+            finder.assert_called_once_with(dialog)
         dialog.assets.selection_set('original.rimshot')
         with patch.object(dialog.library,'resolve',side_effect=ValueError('Missing local asset')):
             dialog.preview_asset();self.pump(lambda:'Missing local asset' in dialog.note.cget('text'))
