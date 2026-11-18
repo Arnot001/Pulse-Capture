@@ -1,0 +1,22 @@
+name: Roast Studio focused checks
+on:
+  push:
+    branches:
+      - feature/roast-studio-json-source-bind-20261118
+  workflow_dispatch:
+
+jobs:
+  source-binding:
+    runs-on: windows-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Compile editor and tests
+        shell: pwsh
+        run: python -m compileall -q editor tests
+      - name: Unit and compatibility tests
+        shell: pwsh
+        run: python -m unittest tests.test_roast_recipe tests.test_pulse_plan tests.test_comedy_bands -v
