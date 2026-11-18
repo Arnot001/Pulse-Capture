@@ -155,7 +155,7 @@ def bind_roast_recipe(plan, media, identity, *, offset=0.0, confirm_mismatch=Fal
     if offset:
         suffix += f" Source timestamps shifted by {offset:+.3f}s."
     if zoom_changes:
-        suffix += "\\nZoom presets normalised (review these): " + "; ".join(zoom_changes) + "."
+        suffix += "\nZoom presets normalised (review these): " + "; ".join(zoom_changes) + "."
     rebound["notes"] = (rebound.get("notes", "") + suffix)[-4000:]
     validate_pulse_plan(rebound, media)
     return rebound
