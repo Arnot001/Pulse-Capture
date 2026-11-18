@@ -81,7 +81,7 @@ class MemeCatalogTests(unittest.TestCase):
         self.assertEqual(ranked[0]["id"], "spoken")
         self.assertEqual(ranked[0]["duration"], 1300)
         self.assertEqual(ranked[0]["tags"], ("human", "speech"))
-        self.assertEqual(ranked[-1]["id"], "ambience")
+        self.assertEqual(ranked[-1]["id"], "long-song")
         self.assertEqual(len(ranked), 3)
 
     def test_quick_effect_category_prefers_effects_and_does_not_override_licences(self):
