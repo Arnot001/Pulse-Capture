@@ -59,90 +59,10 @@ Focused Windows Actions job **Roast Studio focused checks** ran compileall plus
 verified**. Keep the candidate separate from stable until the PC tests and
 manual video review pass.
 
-## Guarded PC verification and installation
+## PC validation
 
-**Close Pulse Capture** and save any unsaved edit settings first. Execute the
-whole PowerShell block, not individual lines. This creates a local backup
-branch, tests the candidate without overwriting anything, returns to the PC
-branch, then fast-forwards the existing installation only after the tests
-pass. No ZIP files, resets, cleans or duplicate directories.
+The candidate must pass the real Windows Tk import-and-render UI test
+(`tests.test_roast_studio_ui`) before it is installed as a stable release.
 
-```powershell
-& {
-    $ErrorActionPreference = "Stop"
-    $pc = "$env:USERPROFILE\Desktop\Pulse-Capture"
-    Set-Location $pc
-
-    $original = "pc/quick-edit-choose-video-20261117"
-    $candidate = "origin/feature/roast-studio-json-source-bind-20261118"
-    if ((git branch --show-current).Trim() -ne $original) {
-        throw "Wrong PC branch. Nothing changed."
-    }
-    if (git status --porcelain) {
-        throw "Uncommitted edits. Preserve them before updating."
-    }
-
-    git fetch origin "refs/heads/feature/roast-studio-json-source-bind-20261118:refs/remotes/origin/feature/roast-studio-json-source-bind-20261118"
-    if ($LASTEXITCODE -ne 0) { throw "Fetch failed." }
-    git merge-base --is-ancestor HEAD $candidate
-    if ($LASTEXITCODE -ne 0) { throw "Branches diverged. No force merge." }
-
-    $previous = (git rev-parse --short HEAD).Trim()
-    $backup = "backup/pc-before-roast-studio-$previous"
-    if (-not (git branch --list $backup)) {
-        git branch $backup
-        if ($LASTEXITCODE -ne 0) { throw "Backup failed." }
-    }
-
-    $oldPath = $env:PATH
-    $oldUI = $env:PULSE_RUN_UI_TESTS
-    $entered = $false
-
-    try {
-        if (-not (Get-Command ffmpeg -ErrorAction SilentlyContinue)) {
-            $exe = Get-ChildItem "$pc\vendor" -Recurse -Filter ffmpeg.exe -ErrorAction SilentlyContinue |
-                Select-Object -First 1
-            if ($exe) { $env:PATH = "$($exe.DirectoryName);$env:PATH" }
-        }
-        if (-not (Get-Command ffmpeg -ErrorAction SilentlyContinue) -or
-            -not (Get-Command ffprobe -ErrorAction SilentlyContinue)) {
-            throw "FFmpeg and FFprobe are required for the real UI test."
-        }
-
-        git switch --detach $candidate
-        if ($LASTEXITCODE -ne 0) { throw "Could not open test branch." }
-        $entered = $true
-
-        py -3 -m unittest tests.test_roast_recipe tests.test_pulse_plan tests.test_comedy_bands -v
-        if ($LASTEXITCODE -ne 0) { throw "Pure tests failed. Stable branch remains intact." }
-
-        $env:PULSE_RUN_UI_TESTS = "1"
-        py -3 -m unittest tests.test_roast_studio_ui -v
-        if ($LASTEXITCODE -ne 0) { throw "Windows UI test failed. No install." }
-
-        Write-Host "ROAST STUDIO CANDIDATE TESTS PASSED" -ForegroundColor Green
-    } finally {
-        if ($entered) {
-            git switch $original
-            if ($LASTEXITCODE -ne 0) { throw "Could not restore stable branch." }
-        }
-        $env:PATH = $oldPath
-        if ($null -eq $oldUI) {
-            Remove-Item Env:PULSE_RUN_UI_TESTS -ErrorAction SilentlyContinue
-        } else {
-            $env:PULSE_RUN_UI_TESTS = $oldUI
-        }
-    }
-
-    git merge --ff-only $candidate
-    if ($LASTEXITCODE -ne 0) { throw "Fast-forward installation failed." }
-    git log -1 --oneline
-    Write-Host "ROAST STUDIO INSTALLED IN THE ORIGINAL FOLDER" -ForegroundColor Green
-}
-```
-
-After installation launch from the same PC folder with
-`py -3 pulse_capture.py` or a verified shortcut to that checkout.
-Open the original GTA recording first, then select one of the supplied
-JSON roast recipes. If the source differs, approve binding **only after**
-confirming the scene is really at the intended timestamp.
+All PowerShell installation, testing and launching commands are provided
+**in chat only**; this repository does not distribute PC setup commands.
