@@ -82,7 +82,7 @@ def parse_results(data):
 
 def search_openverse(phrase, opener=urlopen):
     phrase = search_phrase(phrase)
-    url = API + "?" + urlencode(dict(q=phrase, page_size=30, license_type="commercial"))
+    url = API + "?" + urlencode(dict(q=phrase, page_size=20, license_type="commercial"))
     request = Request(url, headers={"Accept": "application/json", "User-Agent": USER_AGENT})
     with opener(request, timeout=12) as response:
         raw = response.read(1024 * 1024 + 1)
