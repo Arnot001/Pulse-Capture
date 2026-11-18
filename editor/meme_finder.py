@@ -30,15 +30,30 @@ class MemeFinder(tk.Toplevel):
         self.results = []
         self.temp = tempfile.TemporaryDirectory(prefix="pulse-meme-finder-")
         self.after_id = None
-        self.search_text = tk.StringVar(value=dialog.search.get().strip() or "funny reaction")
+        self.search_text = tk.StringVar(value=dialog.search.get().strip() or "laugh")
+        self.focus = "all"
         head = tk.Frame(self, bg=t.BG)
         head.pack(fill="x", padx=15, pady=12)
         t.label(head, "Sound search", 11, t.TEXT, True).pack(side="left", padx=(0, 8))
         entry = tk.Entry(head, textvariable=self.search_text, width=36, bg=t.CONTROL,
                          fg=t.TEXT, insertbackground=t.TEXT, relief="flat")
         entry.pack(side="left", fill="x", expand=True)
-        entry.bind("<Return>", lambda _event: self.search())
-        t.button(head, "SEARCH", self.search, accent=True).pack(side="left", padx=(8, 0))
+        entry.bind("<Return>", lambda _event: self.manual_search())
+        t.button(head, "SEARCH", self.manual_search, accent=True).pack(side="left", padx=(8, 0))
+
+        presets = tk.Frame(self, bg=t.BG)
+        presets.pack(fill="x", padx=15, pady=(0, 9))
+        for title, query, focus in (
+            ("SHOUTS", "angry shout", "voices"),
+            ("LAUGHS", "laugh", "voices"),
+            ("SHOCK", "gasp", "voices"),
+            ("NOPE", "nope", "voices"),
+            ("FAIL", "fail buzzer", "effects"),
+            ("BOOM", "impact boom", "effects"),
+        ):
+            t.button(presets, title, lambda q=query, f=focus: self.preset_search(q, f)
+                     ).pack(side="left", padx=(0, 5))
+        t.label(presets, "Short clips first", 9, t.MUTED).pack(side="right")
 
         t.label(self, "Made using Openverse (independent; not endorsed). CC0 / Public Domain / CC BY.",
                 9, t.MUTED).pack(anchor="w", padx=15, pady=(0, 8))
@@ -88,7 +103,10 @@ class MemeFinder(tk.Toplevel):
     def selected_changed(self, _event=None):
         try:
             item = self.chosen()
-            self.details.configure(text=(item["name"] + "\n\nCreator: " + item["creator"] +
+            duration = item.get("duration")
+            timing = ("\n\nLength: " + f"{duration / 1000:.1f}s") if duration is not None else ""
+            self.details.configure(text=(item["name"] + timing +
+                "\n\nCreator: " + item["creator"] +
                 "\n\nIndexed licence: " + item["license"] +
                 "\n\nCheck the source before publishing. Search index metadata is not a licence grant."))
         except ValueError:
@@ -101,6 +119,7 @@ class MemeFinder(tk.Toplevel):
         self.report({"search": "Searching open audio…", "preview": "Loading selected sound…",
                      "import": "Importing the selected clip…"}[operation])
         phrase = self.search_text.get()
+        focus = self.focus
         folder = Path(self.temp.name)
         library = self.dialog.library
         backend = self.dialog.window.backend
@@ -108,7 +127,7 @@ class MemeFinder(tk.Toplevel):
         def run():
             try:
                 if operation == "search":
-                    value = search_openverse(phrase)
+                    value = search_openverse(phrase, focus=focus)
                 else:
                     name = hashlib.sha256(item["id"].encode("utf-8")).hexdigest()[:20] + item["suffix"]
                     path = folder / name
@@ -144,6 +163,20 @@ class MemeFinder(tk.Toplevel):
     def search(self):
         self.stop()
         self.start_job("search")
+
+    def manual_search(self):
+        # Typing a phrase always uses the broad catalogue, not the last preset.
+        self.focus = "all"
+        self.search()
+
+    def preset_search(self, query, focus):
+        # Curated one-click phrases use the same API, limits and rights checks.
+        if self.busy:
+            self.report("Finish the current sound request before another search.")
+            return
+        self.focus = focus
+        self.search_text.set(query)
+        self.search()
 
     def preview(self):
         try:
@@ -193,9 +226,11 @@ class MemeFinder(tk.Toplevel):
                     self.results = value
                     self.listbox.delete(0, "end")
                     for item in value:
-                        self.listbox.insert("end", item["name"] + "  ·  " + item["license"])
-                    self.report(f"Found {len(value)} supported open-audio results. "
-                                "Search another phrase if none fit.")
+                        length = item.get("duration")
+                        length_label = f"  ·  {length / 1000:.1f}s" if length is not None else ""
+                        self.listbox.insert("end", item["name"] + length_label + "  ·  " + item["license"])
+                    self.report(f"Found {len(value)} supported results, ranked for short reactions. "
+                                "These are openly indexed recordings, not guaranteed famous memes.")
                 elif operation == "preview":
                     ffmpeg = self.dialog.window.backend.ffmpeg
                     self.audition.play(lambda output: [str(ffmpeg), "-v", "error", "-nostdin", "-n",
