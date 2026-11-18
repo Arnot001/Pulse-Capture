@@ -70,6 +70,39 @@ def inspect_coverage(plan, media, offset=0.0):
     return offset
 
 
+# AI-generated plans sometimes request arbitrary zoom factors. The renderer
+# deliberately only implements three presets. Correct nearby values here,
+# never in the strict Pulse Plan importer or in the author's source recipe.
+ZOOM_PRESETS = (1.25, 1.5, 2.0)
+ZOOM_SNAP_TOLERANCE = 0.10
+
+
+def normalize_roast_zooms(plan):
+    """Snap only nearby numeric zoom factors to supported presets in-place.
+
+    Return human-readable change records so the UI/notes can make every
+    adjustment visible. Truly unsupported zooms remain validation errors.
+    """
+    changes = []
+    for index, item in enumerate(plan.get("timeline", []), start=1):
+        if not isinstance(item, dict) or "zoom" not in item:
+            continue
+        zoom = item["zoom"]
+        if not isinstance(zoom, dict):
+            continue  # The regular plan validator will report this.
+        factor = zoom.get("factor")
+        if type(factor) not in (int, float) or not math.isfinite(factor):
+            continue
+        if factor in ZOOM_PRESETS:
+            continue
+        closest = min(ZOOM_PRESETS, key=lambda value: (abs(value - factor), value))
+        if abs(closest - factor) > ZOOM_SNAP_TOLERANCE + 1e-9:
+            continue  # Do not silently change an unrelated zoom request.
+        zoom["factor"] = closest
+        changes.append(f"element {index}: {factor:g} -> {closest:g}")
+    return changes
+
+
 def bind_roast_recipe(plan, media, identity, *, offset=0.0, confirm_mismatch=False,
                       captions_in_bands=True):
     """Return a separately validated, source-bound plan; never alter the original.
@@ -106,6 +139,7 @@ def bind_roast_recipe(plan, media, identity, *, offset=0.0, confirm_mismatch=Fal
                     element[frame_key] = round(element[key] * media.fps)
         elif element["kind"] == "freeze":
             element["source_time"] = round(element["source_time"] + offset, 9)
+    zoom_changes = normalize_roast_zooms(rebound)
     if captions_in_bands:
         # The existing renderer enforces BOTH comedy band geometry and
         # three-line/mobile-readable text sizing for every caption.
@@ -120,6 +154,8 @@ def bind_roast_recipe(plan, media, identity, *, offset=0.0, confirm_mismatch=Fal
               "\nROAST STUDIO: exact source reference verified.")
     if offset:
         suffix += f" Source timestamps shifted by {offset:+.3f}s."
+    if zoom_changes:
+        suffix += "\\nZoom presets normalised (review these): " + "; ".join(zoom_changes) + "."
     rebound["notes"] = (rebound.get("notes", "") + suffix)[-4000:]
     validate_pulse_plan(rebound, media)
     return rebound
