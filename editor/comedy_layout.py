@@ -20,10 +20,16 @@ def regions(source_size, width=1080, height=1920):
             any(type(n) is not int or not 2<=n<=100000 for n in source_size)):
         raise ValueError('Comedy Layout needs valid original landscape dimensions.')
     sw, sh = source_size
-    if sw<=sh:
-        raise ValueError('Comedy Layout needs landscape footage. Use Full Frame or Crop to Fill for portrait video.')
-    scale = min(width/((sw+1)//2*2), height/((sh+1)//2*2))
-    picture_h = int(((sh+1)//2*2)*scale)//2*2
+    if sw <= sh:
+        # A pre-exported 9:16 Short can already have a centred 16:9 picture
+        # inside its dark bands. The user explicitly enables Comedy Layout;
+        # never rescale that portrait source or insert another set of bars.
+        if abs(sw/sh - 9/16) > .01:
+            raise ValueError('Portrait Comedy Layout expects a 9:16 Short with centred landscape gameplay in existing dark bands.')
+        picture_h = int(width * 9 / 16) // 2 * 2
+    else:
+        scale = min(width/((sw+1)//2*2), height/((sh+1)//2*2))
+        picture_h = int(((sh+1)//2*2)*scale)//2*2
     picture_y = (height-picture_h)//4*2
     margin, gap = round(width*.10), round(height*.018)
     top_y, bottom_end = round(height*.09), round(height*.82)
