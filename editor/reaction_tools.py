@@ -41,6 +41,7 @@ class ReactionDialog(tk.Toplevel):
         self.search.trace_add('write',lambda *_:self.refresh_library())
         self.category.trace_add('write',lambda *_:self.refresh_library())
         if kind!='emoji':t.button(top,'IMPORT FILES',self.import_asset).pack(side='right')
+        if kind=='sfx':t.button(top,'CREATE VOICE',self.create_voice).pack(side='right',padx=6)
         centre=tk.Frame(self,bg=t.BG);centre.pack(fill='both',expand=True,padx=16)
         style=ttk.Style(self);style.configure('Reactions.Treeview',rowheight=48)
         self.assets=ttk.Treeview(centre,show='tree',style='Reactions.Treeview',height=4,selectmode='extended')
@@ -201,6 +202,29 @@ class ReactionDialog(tk.Toplevel):
         def run():
             try:self.events.put((True,self.library.import_many(chosen,self.kind,self.window.backend.ffmpeg,self.window.backend.ffprobe,
                                                 lambda i,n:self.events.put(('progress',(i,n))), self.import_cancel)))
+            except Exception as exc:self.events.put((False,str(exc)))
+        threading.Thread(target=run,daemon=True).start()
+        self.poll_import()
+
+    def create_voice(self):
+        """Make an original spoken reaction, then import it as an ordinary sound cue."""
+        if self.kind != 'sfx' or self.busy:return
+        spoken=simpledialog.askstring('CREATE VOICE','Enter a short spoken reaction (up to 140 characters):',parent=self)
+        if spoken is None:return
+        try:
+            from .voice_tools import validate_voice_text
+            spoken=validate_voice_text(spoken)
+        except ValueError as exc:
+            self.note.configure(text=str(exc),fg=t.RED)
+            return
+        self.import_cancel.clear()
+        self.busy=True;self.note.configure(text='Creating local Windows voice…',fg=t.CYAN)
+        def run():
+            try:
+                from .voice_tools import generate_voice_import
+                key=generate_voice_import(spoken,self.library,self.window.backend.ffmpeg,
+                                          self.window.backend.ffprobe,self.import_cancel)
+                self.events.put((True,dict(added=[key],duplicates=[],errors=[])))
             except Exception as exc:self.events.put((False,str(exc)))
         threading.Thread(target=run,daemon=True).start()
         self.poll_import()
