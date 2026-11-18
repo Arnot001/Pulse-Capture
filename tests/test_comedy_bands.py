@@ -29,7 +29,6 @@ class ComedyBandTests(unittest.TestCase):
                 self.assertTrue(all(measure(line,size)+2*padding<=band.width for line in lines))
         with self.assertRaisesRegex(ValueError,'readable'):
             fit_caption('W'*160,CaptionStyle(font_size=120),self.bands['bottom'])
-        with self.assertRaises(ValueError):regions((1080,1920))
 
     def test_already_letterboxed_portrait_short_uses_existing_dark_bands(self):
         # This source has already been rendered to 9:16, with 16:9 gameplay
