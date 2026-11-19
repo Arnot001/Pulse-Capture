@@ -96,6 +96,17 @@ class VoiceoverTests(unittest.TestCase):
             self.assertEqual(path.read_bytes()[40:44], struct.pack("<I", 4800))
             self.assertFalse((Path(tmp) / (req.identity + ".received.wav")).exists())
 
+    def test_recover_saved_paid_bytes_without_key_or_approval(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            req = SpeechRequest("Recover speech without spending again")
+            received = Path(tmp) / (req.identity + ".received.wav")
+            received.write_bytes(fake_wav())
+            path, cached = generate(req, root=tmp, approval=False,
+                                    sender=lambda *_: self.fail("Unexpected paid API call"))
+            self.assertTrue(cached)
+            self.assertTrue(path.exists())
+            self.assertFalse(received.exists())
+
     def test_retains_received_paid_audio_on_validation_error(self):
         with tempfile.TemporaryDirectory() as tmp:
             req = SpeechRequest("Keep received bytes even on error")
