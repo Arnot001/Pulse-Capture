@@ -58,5 +58,31 @@ class NarrationTests(unittest.TestCase):
                 add_narration([], [], None, Narration(str(path), start=2), 3, offset=9), None)
 
 
+    def test_editor_preview_and_export_share_narration(self):
+        from dataclasses import replace
+        from editor.audio_preview import audio_preview_command
+        from editor.ffmpeg_export import build_export_command
+        from editor.cuts import CutPlan
+        from editor.models import MediaInfo, TrimRange
+        from editor.transforms import EditOptions
+        with tempfile.TemporaryDirectory() as tmp, patch.dict(os.environ, {"LOCALAPPDATA": tmp}):
+            path = voice_file(tmp)
+            media = MediaInfo(Path("fictional.mp4"), 12, 1920, 1080, 30, True)
+            edits = replace(EditOptions(), narration=Narration(str(path), start=1.5))
+            preview = audio_preview_command("ffmpeg", media, 0, TrimRange(0, 12), CutPlan(), edits)
+            self.assertIn("narrationmix", preview[preview.index("-filter_complex") + 1])
+            self.assertIn(str(path), preview)
+            output = build_export_command("ffmpeg", media, TrimRange(0, 12),
+                                          Path(tmp)/"export.mp4", edits)
+            self.assertIn(str(path), output)
+            self.assertIn("narrationmix", output[output.index("-filter_complex") + 1])
+            self.assertIn("[narrationmix]", output)
+            silent = MediaInfo(Path("silent.mp4"), 12, 1920, 1080, 30, False)
+            output2 = build_export_command("ffmpeg", silent, TrimRange(0, 12),
+                                           Path(tmp)/"export2.mp4", edits)
+            self.assertIn(str(path), output2)
+            self.assertNotIn("-an", output2)
+
+
 if __name__ == "__main__":
     unittest.main()
