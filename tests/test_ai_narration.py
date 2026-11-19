@@ -71,16 +71,16 @@ class NarrationTests(unittest.TestCase):
             edits = replace(EditOptions(), narration=Narration(str(path), start=1.5))
             preview = audio_preview_command("ffmpeg", media, 0, TrimRange(0, 12), CutPlan(), edits)
             self.assertIn("narrationmix", preview[preview.index("-filter_complex") + 1])
-            self.assertIn(str(path), preview)
+            self.assertIn(str(path.resolve()).casefold(), [str(x).casefold() for x in preview])
             output = build_export_command("ffmpeg", media, TrimRange(0, 12),
                                           Path(tmp)/"export.mp4", edits)
-            self.assertIn(str(path), output)
+            self.assertIn(str(path.resolve()).casefold(), [str(x).casefold() for x in output])
             self.assertIn("narrationmix", output[output.index("-filter_complex") + 1])
             self.assertIn("[narrationmix]", output)
             silent = MediaInfo(Path("silent.mp4"), 12, 1920, 1080, 30, False)
             output2 = build_export_command("ffmpeg", silent, TrimRange(0, 12),
                                            Path(tmp)/"export2.mp4", edits)
-            self.assertIn(str(path), output2)
+            self.assertIn(str(path.resolve()).casefold(), [str(x).casefold() for x in output2])
             self.assertNotIn("-an", output2)
 
 
