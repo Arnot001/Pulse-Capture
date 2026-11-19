@@ -82,7 +82,7 @@ def request_audio(payload, api_key):
     )
     try:
         with urllib.request.build_opener(NoRedirect()).open(req, timeout=100) as response:
-            if response.status != 200 or "audio/" not in response.headers.get("Content-Type", ""):
+            if response.status != 200 or response.headers.get("Content-Type", "").split(";")[0].strip().lower() not in ("audio/wav", "audio/x-wav", "audio/wave", "application/octet-stream"):
                 raise RuntimeError("The service did not return audio; an attempt may have been charged.")
             blob = response.read(MAX_FILE_BYTES + 1)
     except urllib.error.HTTPError as exc:
