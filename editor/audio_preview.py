@@ -87,6 +87,8 @@ def audio_preview_command(ffmpeg, media, source_position, trim, cuts=None,
     if edits.narration:
         from .narration import add_narration
         result = add_narration(args, graph, result, edits.narration, duration, output_offset)
+    if result is None:
+        return None
     args += ['-filter_complex', ';'.join(graph), '-map', f'[{result}]',
              '-t', f'{duration:.9f}', '-ac', '2', '-ar', str(SAMPLE_RATE),
              '-c:a', 'pcm_s16le', '-f', 's16le', 'pipe:1']
