@@ -156,6 +156,23 @@ def generate(request, *, approval=False, api_key=None, root=None, sender=request
     if wav_path.is_file():
         valid_wav(wav_path)
         return wav_path, True
+    received = folder / (ident + ".received.wav")
+    if received.is_file():
+        # Retry local WAV finalization only, without sending another paid request.
+        fd, tempname = tempfile.mkstemp(prefix="speech-recovery-", suffix=".wav", dir=folder)
+        os.close(fd)
+        try:
+            length = normalize_wav(received, tempname)
+            os.replace(tempname, wav_path)
+            received.unlink(missing_ok=True)
+            metadata.write_text(json.dumps({
+                "model": MODEL, "voice": request.voice, "style": request.style,
+                "transcript": request.text, "duration_seconds": length,
+                "ai_generated": True,
+            }, ensure_ascii=False, indent=2), encoding="utf-8")
+            return wav_path, True
+        finally:
+            Path(tempname).unlink(missing_ok=True)
     if not approval:
         raise ValueError("Confirm the paid request in Voiceover Studio before generating.")
     if not (api_key or os.environ.get("OPENAI_API_KEY", "")).strip():
