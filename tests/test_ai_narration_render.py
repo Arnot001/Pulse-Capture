@@ -90,6 +90,15 @@ class NarrationRenderTests(unittest.TestCase):
                         values = struct.unpack("<" + "h" * (len(segment) // 2), segment)
                         return sum(x*x for x in values) / max(1, len(values))
                     self.assertGreater(energy(1.25), energy(.3) * 2.0 if not with_audio else 200.0)
+                    # Actual preview PCM must decode with the same narration cue.
+                    from editor.audio_preview import audio_preview_command
+                    preview = audio_preview_command(
+                        FFMPEG, media, 0, TrimRange(0, 4), CutPlan(), edits)
+                    self.assertIsNotNone(preview)
+                    preview_pcm = subprocess.run(preview, capture_output=True, timeout=60)
+                    self.assertEqual(preview_pcm.returncode, 0, preview_pcm.stderr[-1500:])
+                    self.assertGreater(len(preview_pcm.stdout), 4 * 48000 * 4 - 50000)
+
 
 
 if __name__ == "__main__":
