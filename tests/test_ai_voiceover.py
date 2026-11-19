@@ -1,12 +1,13 @@
 """Offline, zero-cost tests for GPT narration safeguards."""
 import io
+import struct
 import json
 from pathlib import Path
 import tempfile
 import unittest
 import wave
 
-from editor.ai_voiceover import SpeechRequest, generate, library_root
+from editor.ai_voiceover import SpeechRequest, generate, library_root, valid_wav
 
 
 def fake_wav():
@@ -79,6 +80,33 @@ class VoiceoverTests(unittest.TestCase):
                 generate(req, root=tmp, approval=True, api_key="test-only",
                          sender=lambda *args: b"not-a-wav")
             self.assertFalse((Path(tmp) / (req.identity + ".wav")).exists())
+
+    def test_streaming_wav_placeholder_header_is_not_90_seconds(self):
+        # Reproduce WAV responses whose RIFF/data lengths are 0xFFFFFFFF.
+        # The real payload contains just one tenth of a second of speech.
+        with tempfile.TemporaryDirectory() as tmp:
+            original = bytearray(fake_wav())
+            original[4:8] = struct.pack("<I", 0xFFFFFFFF)
+            original[40:44] = struct.pack("<I", 0xFFFFFFFF)
+            req = SpeechRequest("Short narration with bogus streaming header")
+            path, reused = generate(req, root=tmp, approval=True,
+                                    api_key="test-only", sender=lambda *_: bytes(original))
+            self.assertFalse(reused)
+            self.assertAlmostEqual(valid_wav(path), 0.1, places=2)
+            self.assertEqual(path.read_bytes()[40:44], struct.pack("<I", 4800))
+            self.assertFalse((Path(tmp) / (req.identity + ".received.wav")).exists())
+
+    def test_retains_received_paid_audio_on_validation_error(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            req = SpeechRequest("Keep received bytes even on error")
+            with self.assertRaisesRegex(ValueError, "preserved"):
+                generate(req, root=tmp, approval=True, api_key="test-only",
+                         sender=lambda *_: b"invalid audio from server")
+            received = Path(tmp) / (req.identity + ".received.wav")
+            self.assertEqual(received.read_bytes(), b"invalid audio from server")
+            with self.assertRaisesRegex(ValueError, "already had one"):
+                generate(req, root=tmp, approval=True, api_key="test-only",
+                         sender=lambda *_: self.fail("Unexpected new API call"))
 
 
 if __name__ == "__main__":
