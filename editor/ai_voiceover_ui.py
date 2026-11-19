@@ -72,7 +72,9 @@ class VoiceoverStudio(tk.Toplevel):
             self.status.configure(text=str(exc), fg=t.RED)
             return
         existing = library_root() / (req.identity + ".wav")
-        if not existing.exists():
+        recoverable = library_root() / (req.identity + ".received.wav")
+        reuse = existing.exists() or recoverable.exists()
+        if not reuse:
             if not messagebox.askyesno("Confirm paid OpenAI request",
                  "This will make ONE chargeable OpenAI speech-generation request. "
                  "Actual price depends on API billing and may not be known beforehand. "
@@ -82,11 +84,11 @@ class VoiceoverStudio(tk.Toplevel):
         key = self.key.get()
         self.busy = True
         self.make_button.configure(state="disabled")
-        self.status.configure(text="Loading saved narration…" if existing.exists() else "Generating voiceover…", fg=t.CYAN)
+        self.status.configure(text="Recovering previously received narration…" if reuse else "Generating voiceover…", fg=t.CYAN)
 
         def worker():
             try:
-                path, reused = generate(req, approval=not existing.exists(), api_key=key)
+                path, reused = generate(req, approval=not reuse, api_key=key)
                 self.events.put((path, reused, None))
             except Exception as exc:
                 self.events.put((None, False, str(exc)))
