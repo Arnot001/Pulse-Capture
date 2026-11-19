@@ -35,6 +35,9 @@ try {
             $buildArgs += @('--add-binary', "$binaryPath;vendor")
         }
     }
+    # Conversion runs in its isolated Python environment, so retain the worker
+    # as a source resource instead of only embedding compiled Python bytecode.
+    $buildArgs += @('--add-data', 'editor/voice_conversion_worker.py;editor')
     $buildArgs += @('--add-data', 'assets;assets', 'pulse_capture.py')
     & $Python @buildArgs
     if ($LASTEXITCODE -ne 0) { throw 'Application build failed.' }

@@ -1,0 +1,81 @@
+"""Windows Tk Voice Studio import, controls, placement and reuse; no paid requests."""
+from dataclasses import replace
+import os
+from pathlib import Path
+import shutil
+import time
+import unittest
+from unittest.mock import patch
+
+from editor.ai_voiceover_ui import VoiceoverStudio
+from editor.voice_assets import import_audio
+from tests import test_pulse_plan_ui as fixture
+from tests.test_voice_studio_v2 import tone
+
+
+@unittest.skipUnless(os.environ.get('PULSE_RUN_UI_TESTS') == '1', 'Opt-in Windows Tk integration')
+class VoiceStudioUITests(unittest.TestCase):
+    setUp = fixture.PulsePlanUITests.setUp
+    cleanup = fixture.PulsePlanUITests.cleanup
+    pump = fixture.PulsePlanUITests.pump
+
+    def test_import_place_move_replace_and_reopen(self):
+        with patch.dict(os.environ, {'LOCALAPPDATA':str(self.folder)}):
+            source = self.folder/'my-take.wav'
+            tone(source)
+            self.window.position = 3
+            self.window.edits = replace(self.window.edits, speed=1.5)
+            studio = VoiceoverStudio(self.window)
+            try:
+                panel = studio.change_voice
+                self.pump(lambda: not panel.busy)
+                self.assertAlmostEqual(panel.start.get(), 2)
+                with patch('editor.voice_studio_panel.filedialog.askopenfilename', return_value=str(source)):
+                    panel.import_recording()
+                self.pump(lambda: panel.original is not None)
+                original = panel.original
+                panel.values['pitch'].set(4)
+                panel.values['speed'].set(1.5)
+                panel.preview_settings()
+                self.pump(lambda: not panel.busy)
+                self.assertNotEqual(panel.output, original)
+                self.assertTrue(original.is_file())
+                panel.attach()
+                self.assertAlmostEqual(self.window.edits.narration.start, 2)
+                panel.start.set(.5)
+                panel.track_volume.set(.7)
+                panel.duck.set(.2)
+                panel.attach()
+                self.assertEqual(self.window.edits.narration.start, .5)
+                self.assertEqual(self.window.edits.narration.volume, .7)
+                self.assertEqual(self.window.edits.narration.background_gain, .2)
+                studio.close()
+                studio = VoiceoverStudio(self.window)
+                panel = studio.change_voice
+                self.assertEqual(panel.start.get(), .5)
+                self.assertEqual(panel.output, Path(self.window.edits.narration.file))
+                self.pump(lambda: not panel.busy)
+                panel.remove()
+                self.assertIsNone(self.window.edits.narration)
+                self.assertTrue(original.exists())
+                self.assertFalse(self.errors)
+            finally:
+                studio.close()
+
+    def test_paid_generation_requires_confirmation_and_key_is_masked(self):
+        with patch.dict(os.environ, {'LOCALAPPDATA':str(self.folder)}):
+            studio = VoiceoverStudio(self.window)
+            try:
+                studio.script.insert('1.0', 'No request without confirmation.')
+                with patch('editor.ai_voiceover_ui.messagebox.askyesno', return_value=False), \
+                     patch('editor.ai_voiceover_ui.generate') as generate:
+                    studio.make_button.invoke()
+                    generate.assert_not_called()
+                self.assertTrue(studio.key_entry.cget('show'))
+                self.assertEqual(len(studio.tabs.tabs()), 2)
+            finally:
+                studio.close()
+
+
+if __name__ == '__main__':
+    unittest.main()

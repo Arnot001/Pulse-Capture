@@ -4,6 +4,7 @@ import math
 from pathlib import Path
 
 from .ai_voiceover import library_root, valid_wav
+from .voice_assets import wav_info
 
 
 @dataclass(frozen=True)
@@ -18,7 +19,11 @@ class Narration:
         root = library_root().resolve()
         if path.parent != root or path.suffix.lower() != ".wav" or not path.is_file():
             raise ValueError("Narration must be a saved WAV from the Pulse voiceover library.")
-        length = valid_wav(path)
+        try:
+            length = wav_info(path)['duration']
+        except ValueError:
+            # Preserve support for older, short PCM speech responses.
+            length = valid_wav(path)
         if any(type(v) not in (float, int) or not math.isfinite(v) for v in
                (self.start, self.volume, self.background_gain)):
             raise ValueError("Narration settings must be finite numbers.")
