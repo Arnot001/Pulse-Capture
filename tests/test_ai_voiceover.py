@@ -115,7 +115,7 @@ class VoiceoverTests(unittest.TestCase):
                          sender=lambda *_: b"invalid audio from server")
             received = Path(tmp) / (req.identity + ".received.wav")
             self.assertEqual(received.read_bytes(), b"invalid audio from server")
-            with self.assertRaisesRegex(ValueError, "already had one"):
+            with self.assertRaisesRegex(ValueError, "not return a readable WAV"):
                 generate(req, root=tmp, approval=True, api_key="test-only",
                          sender=lambda *_: self.fail("Unexpected new API call"))
 
