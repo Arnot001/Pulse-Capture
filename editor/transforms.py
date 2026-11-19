@@ -141,12 +141,18 @@ class EditOptions:
     fade: Fade = Fade()
     crop_motion: CropMotion = CropMotion()
     sounds: tuple = ()
+    narration: object | None = None
     overlays: tuple = ()
     comedy_bands: tuple | None = None
 
     def validate(self, media):
         from .reactions import validate_cues
         validate_cues(self.sounds, self.overlays)
+        if self.narration is not None:
+            from .narration import Narration
+            if not isinstance(self.narration, Narration):
+                raise ValueError('Choose a valid saved narration clip.')
+            self.narration.validate()
         expected = centered_crop(media, self.preset)
         self.branding.validate()
         self.text.validate()
