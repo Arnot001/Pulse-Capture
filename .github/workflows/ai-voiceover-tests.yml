@@ -1,0 +1,28 @@
+name: AI voiceover offline checks
+on:
+  push:
+    branches:
+      - feature/ai-voiceover-studio-20261119
+  workflow_dispatch:
+
+jobs:
+  voiceover:
+    runs-on: windows-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Compile editor code
+        shell: pwsh
+        run: python -m compileall -q editor tests
+      - name: Offline voiceover unit tests (no API calls)
+        shell: pwsh
+        run: python -m unittest tests.test_ai_voiceover tests.test_ai_narration tests.test_editor_audio_preview tests.test_reaction_canvas -v
+      - name: Real FFmpeg narration render (synthetic video; zero API spend)
+        shell: pwsh
+        run: |
+          if (-not (Get-Command ffmpeg -ErrorAction SilentlyContinue)) { choco install ffmpeg -y --no-progress }
+          $env:PATH += ";C:\\ProgramData\\chocolatey\\bin"
+          python -m unittest tests.test_ai_narration_render -v

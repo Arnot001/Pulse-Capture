@@ -87,6 +87,10 @@ class EditorWindow(tk.Toplevel):
         self.auto_button.configure(pady=5, state='disabled')
         self.auto_button.pack(side='right', padx=12)
         self.controls.append(self.auto_button)
+        self.voiceover_button = t.button(header, 'AI VOICEOVER', self.open_voiceover_studio)
+        self.voiceover_button.configure(pady=5, state='disabled')
+        self.voiceover_button.pack(side='right', padx=4)
+        self.controls.append(self.voiceover_button)
         self.roast_button = t.button(header, 'ROAST STUDIO · JSON', self.open_roast_studio)
         self.roast_button.configure(pady=5, state='disabled')
         self.roast_button.pack(side='right', padx=4)
@@ -218,6 +222,11 @@ class EditorWindow(tk.Toplevel):
         segments.pack(fill='x', pady=(0, 6))
         self.controls.extend(b for _, b in segments.buttons)
         return segments
+
+    def open_voiceover_studio(self):
+        """Open the standalone narration generator without changing video edit state."""
+        from .ai_voiceover_ui import VoiceoverStudio
+        VoiceoverStudio(self)
 
     def open_reactions(self, kind):
         if not self.media or self.exporter.busy or self.closing:
