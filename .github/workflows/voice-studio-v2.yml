@@ -1,0 +1,31 @@
+name: Voice Studio V2 focused regression
+on:
+  push:
+    branches:
+      - feature/voice-studio-v2-20261119
+  workflow_dispatch:
+
+jobs:
+  offline-v2:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Syntax checks
+        shell: pwsh
+        run: python -m compileall -q editor tests setup-voice-studio.py
+      - name: Install FFmpeg if absent
+        shell: pwsh
+        run: |
+          if (-not (Get-Command ffmpeg -ErrorAction SilentlyContinue)) { choco install ffmpeg -y --no-progress }
+      - name: Run isolated audio and voice regression tests
+        shell: pwsh
+        run: |
+          $env:LOCALAPPDATA = Join-Path $env:RUNNER_TEMP 'pulse-voice-local'
+          $env:PULSE_REACTION_LIBRARY = Join-Path $env:RUNNER_TEMP 'pulse-reactions'
+          New-Item -ItemType Directory -Force -Path $env:LOCALAPPDATA, $env:PULSE_REACTION_LIBRARY | Out-Null
+          python -m unittest tests.test_ai_voiceover tests.test_ai_narration tests.test_voice_studio_v2 tests.test_voice_studio_render tests.test_editor_audio_preview tests.test_reaction_canvas -v
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
