@@ -14,6 +14,9 @@ from .voice_assets import digest, metadata, new_path, run_audio, wav_info
 SOURCE_REV = '74a1d147b17a8c3092dd5430504bd83ef6c7eb23'
 MODEL_REV = 'f36e7edfe1684461a8343844af60babc2efbb727'
 MODEL_URL = 'https://huggingface.co/myshell-ai/OpenVoiceV2'
+REQUIRED_FILES = ('checkpoints/converter/config.json', 'checkpoints/converter/checkpoint.pth') + tuple(
+    'source/openvoice/' + name + '.py' for name in
+    ('__init__', 'models', 'modules', 'commons', 'attentions', 'transforms'))
 
 
 def runtime_root():
@@ -27,14 +30,28 @@ def runtime_python(root=None):
 
 def available(root=None):
     root = Path(root) if root else runtime_root()
-    return (runtime_python(root).is_file() and (root / 'installed.json').is_file()
-            and (root / 'checkpoints/converter/checkpoint.pth').is_file())
+    try:
+        _runtime_manifest(root)
+        return runtime_python(root).is_file()
+    except (OSError, ValueError, KeyError, TypeError):
+        return False
+
+
+def _runtime_manifest(root):
+    manifest = json.loads((root / 'installed.json').read_text(encoding='utf-8'))
+    if not isinstance(manifest, dict) or manifest.get('source_revision') != SOURCE_REV or manifest.get('model_revision') != MODEL_REV:
+        raise ValueError('Unsupported or incomplete conversion runtime. Run Voice Studio setup in a new folder.')
+    hashes = manifest.get('sha256')
+    if not isinstance(hashes, dict) or any(name not in hashes for name in REQUIRED_FILES):
+        raise ValueError('Conversion runtime manifest is incomplete. Run Voice Studio setup in a new folder.')
+    for name in REQUIRED_FILES:
+        if not (root / name).is_file():
+            raise ValueError('Conversion runtime is missing ' + name + '. Reinstall in a new folder.')
+    return manifest
 
 
 def verify_runtime(root):
-    manifest = json.loads((root / 'installed.json').read_text(encoding='utf-8'))
-    if manifest['source_revision'] != SOURCE_REV or manifest['model_revision'] != MODEL_REV:
-        raise ValueError('Unsupported conversion runtime revision. Run Voice Studio setup.')
+    manifest = _runtime_manifest(root)
     for name, expected in manifest['sha256'].items():
         file = (root / name).resolve()
         if not file.is_relative_to(root.resolve()) or digest(file) != expected:

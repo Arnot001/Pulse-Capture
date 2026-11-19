@@ -63,4 +63,11 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--root', type=Path, default=runtime_root())
     args = parser.parse_args()
-    install(args.root)
+    try:
+        install(args.root)
+    except (OSError, ValueError, subprocess.CalledProcessError, zipfile.BadZipFile) as exc:
+        print(f'Voice Studio setup did not complete: {exc}', file=sys.stderr)
+        print('Recordings and existing installed runtimes were not replaced. '
+              'For an incomplete installation, correct the error and rerun with the same root. '
+              'For an already installed runtime, choose a new empty root.', file=sys.stderr)
+        raise SystemExit(1) from None

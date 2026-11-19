@@ -21,6 +21,9 @@ class VoiceoverStudio(tk.Toplevel):
         self.events = Queue()
         self.busy = False
         self.saved = None
+        from .api_credits_ui import CreditCounterPanel
+        self.credit_panel = CreditCounterPanel(self)
+        self.credit_panel.pack(side='bottom', fill='x')
         self.tabs = ttk.Notebook(self)
         self.tabs.pack(fill='both', expand=True)
         self.tts = tk.Frame(self.tabs, bg=t.BG)
@@ -105,6 +108,7 @@ class VoiceoverStudio(tk.Toplevel):
         try:
             while True:
                 path, reused, error = self.events.get_nowait()
+                self.credit_panel.refresh()
                 self.busy = False
                 self.make_button.configure(state="normal")
                 if error:
@@ -160,5 +164,6 @@ class VoiceoverStudio(tk.Toplevel):
     def close(self):
         # The background request may still finish and be charged; no retries.
         self.key.set("")
+        self.credit_panel.close()
         self.change_voice.close()
         self.destroy()

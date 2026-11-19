@@ -76,6 +76,26 @@ class VoiceStudioUITests(unittest.TestCase):
             finally:
                 studio.close()
 
+    def test_credit_counter_reconciles_and_flags_unknown_charge(self):
+        with patch.dict(os.environ, {'LOCALAPPDATA':str(self.folder)}):
+            studio = VoiceoverStudio(self.window)
+            try:
+                panel = studio.credit_panel
+                self.pump(lambda: not panel.pending)
+                with patch('editor.api_credits_ui.simpledialog.askfloat', return_value=20.):
+                    panel.set_balance()
+                self.pump(lambda: not panel.pending)
+                self.assertIn('$20.0000', panel.label.cget('text'))
+                voices = self.folder/'Pulse Capture/voiceovers'
+                voices.mkdir(parents=True, exist_ok=True)
+                (voices/'offline-test.attempt').write_text('Test fixture, no API request')
+                panel.refresh()
+                self.pump(lambda: not panel.pending)
+                self.assertIn('billing check needed', panel.label.cget('text'))
+                self.assertLessEqual(panel.winfo_y()+panel.winfo_height(), studio.winfo_height())
+            finally:
+                studio.close()
+
 
 if __name__ == '__main__':
     unittest.main()
