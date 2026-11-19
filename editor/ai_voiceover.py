@@ -95,16 +95,50 @@ def request_audio(payload, api_key):
 
 
 def valid_wav(path):
+    """Measure decoded PCM frames, not the untrusted RIFF header's declared size.
+
+    Streaming Speech responses may put 0xFFFFFFFF in the RIFF/data length
+    fields until stream completion. wave.getnframes() then claims hours of
+    audio although only seconds exist in the actual file.
+    """
     try:
+        path = Path(path)
+        if not 0 < path.stat().st_size <= MAX_FILE_BYTES:
+            raise ValueError("Speech WAV is empty or too large.")
         with wave.open(str(path), "rb") as wav:
-            if wav.getnchannels() not in (1, 2) or wav.getframerate() < 8000 or wav.getnframes() < 1:
-                raise ValueError("Unusable speech audio.")
-            length = wav.getnframes() / wav.getframerate()
-            if length > 90:
+            if (wav.getcomptype() != "NONE" or wav.getnchannels() not in (1, 2)
+                    or wav.getsampwidth() not in (1, 2, 3, 4)
+                    or not 8000 <= wav.getframerate() <= 96000):
+                raise ValueError("Unsupported speech WAV format.")
+            frame_width = wav.getnchannels() * wav.getsampwidth()
+            frame_limit = int(wav.getframerate() * 90) + 1
+            # Actual file size bounds the read even with placeholder chunk sizes.
+            data = wav.readframes(min(frame_limit, path.stat().st_size // frame_width + 1))
+            if len(data) % frame_width or not data:
+                raise ValueError("Speech WAV has incomplete PCM samples.")
+            frames = len(data) // frame_width
+            if frames > int(wav.getframerate() * 90):
                 raise ValueError("Generated speech exceeded 90 seconds.")
-            return length
+            return frames / wav.getframerate()
     except (EOFError, wave.Error, OSError) as exc:
-        raise ValueError("OpenAI did not return a valid WAV recording.") from exc
+        raise ValueError("OpenAI did not return a readable WAV recording.") from exc
+
+
+def normalize_wav(source, destination):
+    """Write a standard RIFF WAV with the real PCM length for FFmpeg and Windows."""
+    length = valid_wav(source)
+    with wave.open(str(source), "rb") as reader:
+        params = reader.getparams()
+        frame_width = reader.getnchannels() * reader.getsampwidth()
+        frames = reader.readframes(min(
+            int(reader.getframerate() * 90) + 1,
+            Path(source).stat().st_size // frame_width + 1))
+        with wave.open(str(destination), "wb") as writer:
+            writer.setnchannels(params.nchannels)
+            writer.setsampwidth(params.sampwidth)
+            writer.setframerate(params.framerate)
+            writer.writeframes(frames)
+    return length
 
 
 def generate(request, *, approval=False, api_key=None, root=None, sender=request_audio):
@@ -133,18 +167,27 @@ def generate(request, *, approval=False, api_key=None, root=None, sender=request
     except FileExistsError:
         raise ValueError("This narration already had one API attempt. No automatic paid retry.") from None
     blob = sender(request.payload(), api_key or os.environ["OPENAI_API_KEY"])
-    fd, tempname = tempfile.mkstemp(prefix="speech-", suffix=".wav", dir=folder)
+    # Save returned bytes durably before decoding: a successful paid request
+    # must never be discarded because of a local WAV metadata/validation bug.
+    received = folder / (ident + ".received.wav")
+    with received.open("xb") as handle:
+        handle.write(blob)
+    fd, tempname = tempfile.mkstemp(prefix="speech-normalized-", suffix=".wav", dir=folder)
+    os.close(fd)
     try:
-        with os.fdopen(fd, "wb") as handle:
-            handle.write(blob)
-        length = valid_wav(tempname)
+        length = normalize_wav(received, tempname)
         os.replace(tempname, wav_path)
-        # Save a useful human-readable transcript and settings, not the API key.
+        received.unlink(missing_ok=True)
+        # Store transcript and settings only; never persist the API key.
         metadata.write_text(json.dumps({
             "model": MODEL, "voice": request.voice, "style": request.style,
             "transcript": request.text, "duration_seconds": length,
             "ai_generated": True,
         }, ensure_ascii=False, indent=2), encoding="utf-8")
         return wav_path, False
+    except (ValueError, OSError) as exc:
+        raise ValueError(
+            f"Audio was received but could not be finalized: {exc}. "
+            f"The paid response is preserved at {received}; do not retry.") from exc
     finally:
         Path(tempname).unlink(missing_ok=True)
