@@ -52,6 +52,9 @@ class VoiceoverStudio(tk.Toplevel):
         self.listen_button = t.button(actions, "PLAY SAVED WAV", self.listen)
         self.listen_button.pack(side="left", padx=8)
         self.listen_button.configure(state="disabled")
+        self.attach_button = t.button(actions, "ADD AT PLAYHEAD", self.attach)
+        self.attach_button.pack(side="left", padx=8)
+        self.attach_button.configure(state="disabled")
         self.folder_button = t.button(actions, "OPEN LIBRARY", self.open_library)
         self.folder_button.pack(side="right")
         self.status = t.label(self, "No API request sent.", 10, t.MUTED, wraplength=635)
@@ -100,6 +103,7 @@ class VoiceoverStudio(tk.Toplevel):
                 else:
                     self.saved = Path(path)
                     self.listen_button.configure(state="normal")
+                    self.attach_button.configure(state="normal")
                     self.status.configure(text=("Reused saved audio (free): " if reused else
                                                 "Generated and saved: ") + str(self.saved), fg=t.GREEN)
         except Empty:
@@ -114,6 +118,29 @@ class VoiceoverStudio(tk.Toplevel):
                 winsound.PlaySound(str(self.saved), winsound.SND_FILENAME | winsound.SND_ASYNC)
             except (ImportError, RuntimeError, OSError):
                 self.status.configure(text="Could not play WAV through Windows audio.", fg=t.RED)
+
+    def attach(self):
+        """Place one narration clip on the current output timeline of Quick Edit."""
+        if not self.saved or not self.saved.is_file():
+            return
+        editor = self.master
+        if not getattr(editor, "media", None) or not getattr(editor, "trim", None):
+            self.status.configure(text="Open a video in Quick Edit before attaching narration.", fg=t.RED)
+            return
+        from dataclasses import replace
+        from .narration import Narration
+        elapsed = editor.cuts.source_elapsed(editor.position, editor.trim) / editor.edits.speed
+        total = editor.edits.output_duration(editor.cuts.kept_duration(editor.trim))
+        if elapsed >= total:
+            self.status.configure(text="Move the playhead inside the video first.", fg=t.RED)
+            return
+        track = Narration(str(self.saved), start=max(0., elapsed))
+        track.validate(total)
+        editor.stop_play()
+        editor.edits = replace(editor.edits, narration=track)
+        editor.note.configure(text=f"AI narration attached at {elapsed:.2f}s. Preview or export the video.", fg=t.GREEN)
+        editor.request_frame()
+        self.status.configure(text=f"Narration attached to output at {elapsed:.2f}s.", fg=t.GREEN)
 
     def open_library(self):
         folder = library_root()
