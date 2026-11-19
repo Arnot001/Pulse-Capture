@@ -20,3 +20,9 @@ jobs:
       - name: Offline voiceover unit tests (no API calls)
         shell: pwsh
         run: python -m unittest tests.test_ai_voiceover tests.test_ai_narration tests.test_editor_audio_preview tests.test_reaction_canvas -v
+      - name: Real FFmpeg narration render (synthetic video; zero API spend)
+        shell: pwsh
+        run: |
+          if (-not (Get-Command ffmpeg -ErrorAction SilentlyContinue)) { choco install ffmpeg -y --no-progress }
+          $env:PATH += ";C:\\ProgramData\\chocolatey\\bin"
+          python -m unittest tests.test_ai_narration_render -v
