@@ -5,11 +5,14 @@ from pathlib import Path
 import shutil
 import subprocess
 import threading
+import time
 import uuid
 
 from capture.ffmpeg_backend import process_options
 from .ai_voiceover import library_root
 from .voice_conversion import MODEL_URL, available, runtime_python, runtime_root
+from .voice_reference import check_cancel, extract_reference, reference_labels, validate_embedding
+from .voice_assets import digest
 
 CATEGORIES = ('All', 'Male', 'Female', 'Androgynous', 'Characters', 'Documentary', 'Comedy', 'Gaming', 'Dramatic')
 
@@ -30,6 +33,10 @@ class Voice:
     provenance: str = MODEL_URL + ' · MIT licensed stock speaker embedding'
     mode: str = 'Local CPU'
     cost: str = 'No API charge'
+    metadata_origin: str = 'Provider stock label; not an accent-conversion promise'
+    permission: str = 'MIT stock embedding'
+    reference_sha256: str = ''
+    reference_file: str = ''
 
     @property
     def installed(self):
@@ -65,7 +72,7 @@ class Catalogue:
                    ('jp', 'Japanese', 'Japanese', 'Japanese'), ('kr', 'Korean', 'Korean', 'Korean'),
                    ('zh', 'Chinese', 'Chinese', 'Chinese')]
         result = [Voice(key, label, str(runtime_root() / 'checkpoints/base_speakers/ses' / (key+'.pth')),
-                        language=language, accent=accent) for key, label, accent, language in entries]
+                        language=language, accent='Preserves source pronunciation') for key, label, accent, language in entries]
         result += [Voice(**value) for value in self.state['custom']]
         return result
 
@@ -95,6 +102,58 @@ class Catalogue:
     def used(self, ident):
         self.state['recent'] = [ident] + [x for x in self.state['recent'] if x != ident][:19]
         self.save()
+
+    def add_reference(self, reference, labels, cancel=None):
+        """Publish only a validated embedding and its immutable authorised source."""
+        labels = reference_labels(labels)
+        check_cancel(cancel)
+        with self.lock:
+            for value in self.state['custom']:
+                if value.get('reference_sha256') == reference.source_sha256 and Path(value['model']).is_file():
+                    return Voice(**value)
+        # Keep all intermediate output in the prepared reference's temporary folder.
+        embedding = reference.wav.with_suffix('.pth')
+        backend = extract_reference(reference, embedding, cancel)
+        validate_embedding(embedding, cancel)
+        check_cancel(cancel)
+        with self.lock:
+            # Another import may have completed while extraction was running.
+            for value in self.state['custom']:
+                if value.get('reference_sha256') == reference.source_sha256 and Path(value['model']).is_file():
+                    return Voice(**value)
+            ident = 'reference-' + uuid.uuid4().hex
+            self.root.mkdir(parents=True, exist_ok=True)
+            folder = self.root/ident
+            folder.mkdir()
+            model, original = folder/'speaker.pth', folder/reference.original.name
+            voice = Voice(ident, labels['name'], str(model),
+                          language=labels.get('language', 'Unspecified'),
+                          accent=labels.get('accent', 'Unspecified'),
+                          presentation=labels.get('presentation', 'Unspecified'),
+                          style=labels.get('style', 'Natural'), provider='Authorised reference',
+                          provenance=labels['provenance'], permission=labels['permission'],
+                          metadata_origin='User-provided labels; not provider-verified',
+                          reference_sha256=reference.source_sha256, reference_file=str(original))
+            appended = False
+            try:
+                shutil.copyfile(embedding, model)
+                shutil.copyfile(reference.original, original)
+                if digest(original) != reference.source_sha256:
+                    raise ValueError('Reference changed during import; nothing was added.')
+                details = dict(reference.info, source_name=reference.source_name,
+                               source_sha256=reference.source_sha256, embedding_sha256=digest(model),
+                               labels=labels, backend=backend, created_at=time.time(), schema=1)
+                (folder/'reference.json').write_text(json.dumps(details, ensure_ascii=False, indent=2), encoding='utf-8')
+                check_cancel(cancel)
+                self.state['custom'].append(asdict(voice))
+                appended = True
+                self.save()
+            except BaseException:
+                if appended:
+                    self.state['custom'].pop()
+                shutil.rmtree(folder)
+                raise
+            return voice
 
     def import_voice(self, manifest_path):
         """Import an embedding with explicit rights metadata, never arbitrary model code."""
@@ -132,7 +191,8 @@ class Catalogue:
             shutil.copyfileobj(source, target)
         permitted = {key: data[key] for key in ('language', 'accent', 'presentation', 'age', 'tone', 'style', 'categories') if key in data}
         voice = Voice(ident, data['name'], str(destination), provider='User supplied',
-                      provenance=data['permission'] + ': ' + data['provenance'], **permitted)
+                      provenance=data['permission'] + ': ' + data['provenance'],
+                      permission=data['permission'], metadata_origin='User-provided labels; not provider-verified', **permitted)
         self.state['custom'].append(asdict(voice))
         self.save()
         return voice

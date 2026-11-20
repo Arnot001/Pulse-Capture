@@ -69,12 +69,70 @@ def convert(runtime, source, destination, voice, mix=1., seed=0):
                       'seed': seed, 'samples': len(audio), 'sample_rate': rate}))
 
 
+def extract_reference(runtime, source, destination):
+    """OpenVoice ToneColorConverter.extract_se algorithm, without its TTS/VAD imports.
+
+    The pinned MIT source uses spectrogram -> ref_enc -> mean of segments.
+    Input decoding is handled by FFmpeg; no ASR, Silero or watermark downloads.
+    """
+    import numpy as np
+    import torch
+    from torch.nn import functional as F
+    sys.path.insert(0, str(Path(runtime) / 'source'))
+    from openvoice.models import SynthesizerTrn
+
+    torch.set_num_threads(4)
+    torch.manual_seed(0)
+    root = Path(runtime) / 'checkpoints'
+    config = json.loads((root / 'converter/config.json').read_text())
+    data = config['data']
+    rate, hop, fft = data['sampling_rate'], data['hop_length'], data['filter_length']
+    model = SynthesizerTrn(0, fft // 2 + 1, n_speakers=0, **config['model']).eval()
+    state = torch.load(root / 'converter/checkpoint.pth', map_location='cpu', weights_only=True)
+    model.load_state_dict(state['model'], strict=True)
+    with wave.open(str(source), 'rb') as reader:
+        if reader.getframerate() != rate or reader.getnchannels() != 1 or reader.getsampwidth() != 2:
+            raise ValueError('Reference must be mono PCM16 at 22050 Hz.')
+        if not 3 * rate <= reader.getnframes() <= 60 * rate:
+            raise ValueError('Reference must be 3–60 seconds.')
+        audio = torch.from_numpy(np.frombuffer(reader.readframes(reader.getnframes()), dtype='<i2').copy()).float()/32768
+    window = torch.hann_window(data['win_length'])
+    embeddings = []
+    with torch.inference_mode():
+        # Even chunks avoid a tiny final fragment. Reference-only segmentation
+        # never modifies narration timing or the existing conversion path.
+        for samples in audio.tensor_split(max(1, round(len(audio)/(10*rate)))):
+            frames = samples[:len(samples)//441*441].reshape(-1, 441)
+            if (frames.square().mean(1).sqrt() >= .0056).float().mean() < .2:
+                continue
+            padded = F.pad(samples.reshape(1, 1, -1), ((fft-hop)//2, (fft-hop)//2), mode='reflect').squeeze(1)
+            spec = torch.stft(padded, fft, hop_length=hop, win_length=data['win_length'],
+                              window=window, center=False, return_complex=True)
+            spec = (spec.abs().square() + 1e-6).sqrt()
+            embeddings.append(model.ref_enc(spec.transpose(1, 2)).unsqueeze(-1))
+        if not embeddings:
+            raise ValueError('Reference has too little audible speech. Choose a cleaner recording.')
+        result = torch.stack(embeddings).mean(0).cpu()
+    if result.shape != (1, 256, 1) or not torch.isfinite(result).all():
+        raise ValueError('Extraction did not produce a finite [1,256,1] embedding.')
+    torch.save(result, destination)
+    print(json.dumps({'backend':'OpenVoice V2 reference encoder', 'device':'cpu',
+                      'torch':torch.__version__, 'segments':len(embeddings), 'sample_rate':rate}))
+
+
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    for name in ('runtime', 'source', 'destination', 'voice'):
+    for name in ('runtime', 'source', 'destination'):
         parser.add_argument('--' + name, required=True)
+    parser.add_argument('--voice')
+    parser.add_argument('--extract-reference', action='store_true')
     parser.add_argument('--mix', type=float, default=1.)
     args = parser.parse_args()
     if not 0 <= args.mix <= 1:
         parser.error('Mix must be between 0 and 1.')
-    convert(args.runtime, args.source, args.destination, args.voice, args.mix)
+    if args.extract_reference:
+        extract_reference(args.runtime, args.source, args.destination)
+    elif args.voice:
+        convert(args.runtime, args.source, args.destination, args.voice, args.mix)
+    else:
+        parser.error('--voice is required for conversion')

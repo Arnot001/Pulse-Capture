@@ -14,6 +14,7 @@ from .voice_assets import VoiceSettings, import_audio, process_voice, waveform, 
 from .voice_catalogue import Catalogue, CATEGORIES
 from .voice_conversion import convert_voice, available
 from .voice_recording import MicrophoneRecorder, microphones
+from .voice_reference_ui import ReferenceVoiceDialog
 
 
 def button(parent, text, command, **kwargs):
@@ -29,6 +30,7 @@ class ChangeVoicePanel(tk.Frame):
         self.studio = studio
         self.original = self.converted = self.output = None
         self.busy = False
+        self.reference_dialog = None
         self.cancel = threading.Event()
         self.events = Queue()
         self.recorder = MicrophoneRecorder()
@@ -107,7 +109,7 @@ class ChangeVoicePanel(tk.Frame):
         row.pack(fill='x', padx=12)
         button(row, '★ FAVOURITE', self.favourite, padx=8).pack(side='left')
         button(row, 'IMPORT VOICE MANIFEST', self.import_model, padx=8).pack(side='left', padx=5)
-        t.label(row, 'Voice labels describe presentation. Unspecified metadata stays unclassified.', 9, t.MUTED).pack(side='left')
+        button(row, 'ADD REFERENCE VOICE', self.add_reference, padx=8).pack(side='left', padx=5)
         controls = tk.Frame(self, bg=t.BG)
         controls.pack(fill='x', padx=12, pady=5)
         for index, (key, low, high, step) in enumerate([('speed', .5, 2, .05), ('pitch', -12, 12, .5),
@@ -216,7 +218,8 @@ class ChangeVoicePanel(tk.Frame):
     def describe_voice(self, _event=None):
         voice = self.selected()
         if voice:
-            self.detail.configure(text=f'{voice.provider} · {voice.id} · {voice.mode} · {voice.cost}\n{voice.provenance}')
+            self.detail.configure(text=f'{voice.provider} · {voice.presentation} · {voice.style} · {voice.cost}\n'
+                f'{voice.metadata_origin} · {voice.permission}\n{voice.provenance}')
 
     def favourite(self):
         if voice := self.selected():
@@ -232,6 +235,35 @@ class ChangeVoicePanel(tk.Frame):
         path = filedialog.askopenfilename(parent=self, title='Import permitted OpenVoice speaker manifest', filetypes=[('Voice manifest', '*.json')])
         if path:
             self.background(lambda: ('catalogue', self.catalogue.import_voice(path)), 'Validating speaker permissions and model format…')
+
+    def add_reference(self):
+        if self.busy or self.recorder.active:
+            return
+        if self.reference_dialog is not None:
+            self.reference_dialog.lift()
+            return
+        path = filedialog.askopenfilename(parent=self, title='Choose an authorised speaker reference',
+                    filetypes=[('Reference audio', '*.wav *.mp3 *.flac *.m4a *.ogg')])
+        if path:
+            try:
+                self.ffmpeg()
+                self.reference_dialog = ReferenceVoiceDialog(self, path)
+            except Exception as exc:
+                self.status.configure(text=str(exc), fg=t.RED)
+
+    def reference_added(self, voice):
+        self.query.set('')
+        self.category.set('All')
+        self.favourites.set(False)
+        for variable in self.filters.values():
+            variable.set('All')
+        self.refresh_catalogue()
+        index = next(i for i, value in enumerate(self.visible) if value.id == voice.id)
+        self.listbox.selection_clear(0, 'end')
+        self.listbox.selection_set(index)
+        self.listbox.see(index)
+        self.describe_voice()
+        self.status.configure(text=f'{voice.name} is ready to reuse. Select narration and TRANSFORM · LOCAL.', fg=t.GREEN)
 
     def convert(self):
         voice = self.selected()
@@ -366,6 +398,8 @@ class ChangeVoicePanel(tk.Frame):
         self.timer = self.after(80, self.poll)
 
     def close(self):
+        if self.reference_dialog is not None:
+            self.reference_dialog.close()
         self.cancel.set()
         self.recorder.stop()
         if self.recorder.worker:

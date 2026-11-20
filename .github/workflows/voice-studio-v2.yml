@@ -27,7 +27,7 @@ jobs:
           $env:LOCALAPPDATA = Join-Path $env:RUNNER_TEMP 'pulse-voice-local'
           $env:PULSE_REACTION_LIBRARY = Join-Path $env:RUNNER_TEMP 'pulse-reactions'
           New-Item -ItemType Directory -Force -Path $env:LOCALAPPDATA, $env:PULSE_REACTION_LIBRARY | Out-Null
-          python -m unittest tests.test_ai_voiceover tests.test_api_credits tests.test_ai_narration tests.test_voice_studio_v2 tests.test_voice_runtime tests.test_voice_studio_render tests.test_editor_audio_preview tests.test_reaction_canvas -v
+          python -m unittest tests.test_ai_voiceover tests.test_api_credits tests.test_ai_narration tests.test_voice_studio_v2 tests.test_voice_reference tests.test_voice_runtime tests.test_voice_studio_render tests.test_editor_audio_preview tests.test_reaction_canvas -v
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Voice Studio Windows UI smoke (no live recording or paid requests)
         shell: pwsh

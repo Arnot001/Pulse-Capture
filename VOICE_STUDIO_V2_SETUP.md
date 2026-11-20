@@ -27,6 +27,20 @@ Exact PowerShell installation/update commands are supplied in the chat, not in t
 
 Stock labels describe the model provider's language/accent references. Conversion does not translate the words or promise a new accent. Gender and age are unclassified where the provider supplies no verified metadata. Voice presentation/category filters also support appropriately labelled user embeddings. Raw RVC checkpoints are not compatible with this OpenVoice importer.
 
+## Add an authorised reference voice
+
+**ADD REFERENCE VOICE** creates a new speaker embedding from audio. **IMPORT VOICE MANIFEST** remains the separate workflow for an existing OpenVoice `.pth` embedding.
+
+Choose a local WAV, MP3, FLAC, M4A or OGG file. The app checks a temporary private copy and reports its decoded duration and audible-audio estimate. References must be 3–60 seconds and at most 64 MB, with at least 3 seconds above the energy threshold. Prefer 10–30 seconds of clean speech from one speaker without music. These are application limits, not a guarantee that the audio contains suitable speech. Heavy clipping, silence, very short/long recordings and decode failures are rejected.
+
+Enter a display name, source/consent or licence details, and the applicable permission: own voice, speaker consent or licensed. Explicitly confirm permission to create and reuse the voice. Presentation, language, accent and style are optional manual classifications, visibly marked as user-provided rather than provider-verified. Do not use another person's identity without appropriate permission. A stock language/accent label does not promise to change the source pronunciation.
+
+**CREATE LOCAL VOICE** extracts and validates a float32, finite `[1,256,1]` speaker tensor, then adds it to the existing catalogue. The private library stores an exact reference copy, embedding, hashes and permission record. The selected source file and narration are unchanged. Reimporting the same file reuses its existing catalogue entry; it does not rename the entry or create another charge. Cancellation or failed extraction publishes no new entry. Choose the saved voice and use **TRANSFORM · LOCAL** as usual.
+
+No additional dependencies or models are needed beyond the installed CPU runtime (Torch 2.9.1+cpu, NumPy 2.3.5) and FFmpeg. The adapter follows the pinned OpenVoice `ToneColorConverter.extract_se` method: spectrogram, existing reference encoder, average of approximately ten-second reference segments. It skips segments with very little audible audio. It does not import the upstream convenience `se_extractor` wrapper, which adds librosa, pydub, faster-whisper and whisper_timestamped/Silero dependencies and potential model downloads. There is no transcription, automatic download or network request in this reference workflow. No installer changes are required.
+
+Reference segmentation affects only identity extraction. The existing narration conversion, pitch/speed defaults and pause-preservation path are unchanged. Extracting your own voice is useful for reuse, but converting your recording back into that same identity is not a demonstration of a different character. Use a contrasting authorised speaker reference and judge the result by listening; expressive quality and substantial male/female/character variety remain acceptance checks.
+
 ## API credit counter
 
 The footer is a **local estimate**, not a live OpenAI balance. **OPEN BILLING** opens the official account page. **SET BALANCE** records the USD amount you read there and reconciles the requests already present in this computer's Pulse libraries.
@@ -44,6 +58,7 @@ The separate continuous-preview work remains isolated. This preview uses the exi
 ## Sources checked 19 November 2026
 
 - [OpenVoice V2 model card and MIT licence](https://huggingface.co/myshell-ai/OpenVoiceV2)
+- [Pinned OpenVoice extraction implementation](https://github.com/myshell-ai/OpenVoice/blob/74a1d147b17a8c3092dd5430504bd83ef6c7eb23/openvoice/api.py) (checked 20 November 2026); its MIT notice is retained in `assets/licenses/LICENSE_OPENVOICE`.
 - [OpenAI speech model rates](https://developers.openai.com/api/docs/models/gpt-4o-mini-tts)
 - [OpenAI Costs API: administrator credentials and organization spending](https://developers.openai.com/api/reference/resources/admin/subresources/organization/subresources/usage/methods/costs)
 - [OpenAI deprecations](https://developers.openai.com/api/docs/deprecations): the existing speech endpoint/model retires on 6 January 2027. Its replacement uses a different API workflow; this release does not silently substitute it.

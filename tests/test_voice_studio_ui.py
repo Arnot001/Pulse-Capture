@@ -3,12 +3,14 @@ from dataclasses import replace
 import os
 from pathlib import Path
 import shutil
+import threading
 import time
 import unittest
 from unittest.mock import patch
 
 from editor.ai_voiceover_ui import VoiceoverStudio
 from editor.voice_assets import import_audio
+from editor.voice_catalogue import Voice
 from tests import test_pulse_plan_ui as fixture
 from tests.test_voice_studio_v2 import tone
 
@@ -95,6 +97,72 @@ class VoiceStudioUITests(unittest.TestCase):
                 self.assertLessEqual(panel.winfo_y()+panel.winfo_height(), studio.winfo_height())
             finally:
                 studio.close()
+
+    def test_reference_dialog_requires_permission_and_selects_added_voice(self):
+        with patch.dict(os.environ, {'LOCALAPPDATA':str(self.folder)}):
+            source = self.folder/'reference.wav'
+            tone(source, seconds=4)
+            studio = VoiceoverStudio(self.window)
+            try:
+                panel = studio.change_voice
+                self.pump(lambda: not panel.busy)
+                with patch('editor.voice_studio_panel.filedialog.askopenfilename', return_value=str(source)):
+                    panel.add_reference()
+                dialog = panel.reference_dialog
+                self.pump(lambda: not dialog.busy)
+                self.assertIsNotNone(dialog.reference)
+                self.assertIn('4.00 seconds', dialog.info.cget('text'))
+                temporary = dialog.reference.wav.parent
+                with patch.object(panel.catalogue, 'add_reference') as add:
+                    dialog.create()
+                    add.assert_not_called()
+                dialog.values['name'].set('Local test voice')
+                dialog.values['permission'].set('own voice')
+                dialog.values['provenance'].set('Generated test fixture, no person')
+                dialog.consent.set(True)
+                from dataclasses import asdict
+                def add(reference, labels, cancel):
+                    voice = Voice('test-ref', labels['name'], 'missing.pth', metadata_origin='User-provided')
+                    panel.catalogue.state['custom'].append(asdict(voice))
+                    return voice
+                with patch.object(panel.catalogue, 'add_reference', side_effect=add):
+                    dialog.create()
+                    self.pump(lambda: panel.reference_dialog is None)
+                self.assertEqual(panel.selected().id, 'test-ref')
+                self.assertFalse(temporary.exists())
+                self.assertFalse(self.errors)
+            finally:
+                studio.close()
+
+    def test_closing_studio_cancels_reference_work_and_removes_temporary_audio(self):
+        with patch.dict(os.environ, {'LOCALAPPDATA':str(self.folder)}):
+            source = self.folder/'reference-cancel.wav'
+            tone(source, seconds=4)
+            studio = VoiceoverStudio(self.window)
+            panel = studio.change_voice
+            self.pump(lambda: not panel.busy)
+            with patch('editor.voice_studio_panel.filedialog.askopenfilename', return_value=str(source)):
+                panel.add_reference()
+            dialog = panel.reference_dialog
+            self.pump(lambda: not dialog.busy)
+            temporary = dialog.reference.wav.parent
+            dialog.values['name'].set('Cancellation test')
+            dialog.values['permission'].set('own voice')
+            dialog.values['provenance'].set('Generated test fixture')
+            dialog.consent.set(True)
+            started = threading.Event()
+            def work(reference, labels, cancel):
+                started.set()
+                if not cancel.wait(5):
+                    raise RuntimeError('Cancel signal was not delivered')
+                raise ValueError('Cancelled')
+            with patch.object(panel.catalogue, 'add_reference', side_effect=work):
+                dialog.create()
+                self.pump(started.is_set)
+                studio.close()
+                self.pump(lambda: not temporary.exists())
+            self.assertTrue(source.exists())
+            self.assertFalse(self.errors)
 
 
 if __name__ == '__main__':
