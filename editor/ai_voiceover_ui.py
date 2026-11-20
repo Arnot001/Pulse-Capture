@@ -13,19 +13,26 @@ from .ai_voiceover import SpeechRequest, STYLES, VOICES, generate, library_root
 class VoiceoverStudio(tk.Toplevel):
     def __init__(self, parent):
         super().__init__(parent)
-        self.title("Pulse Capture · AI Voiceover Studio")
+        self.title("Pulse Capture · Voice Studio")
         self.configure(bg=t.BG)
-        self.geometry("680x510")
-        self.minsize(540, 430)
+        self.geometry("1020x820")
+        self.minsize(960, 760)
         self.transient(parent)
         self.events = Queue()
         self.busy = False
         self.saved = None
-        t.label(self, "AI VOICEOVER STUDIO", 18, t.CYAN, True).pack(anchor="w", padx=20, pady=(18, 6))
-        t.label(self, "Write narration, choose a style and generate a reusable local WAV.", 10, t.MUTED).pack(anchor="w", padx=20)
-        self.script = tk.Text(self, height=8, wrap="word", bg=t.CONTROL, fg=t.TEXT, insertbackground=t.CYAN)
+        from .api_credits_ui import CreditCounterPanel
+        self.credit_panel = CreditCounterPanel(self)
+        self.credit_panel.pack(side='bottom', fill='x')
+        self.tabs = ttk.Notebook(self)
+        self.tabs.pack(fill='both', expand=True)
+        self.tts = tk.Frame(self.tabs, bg=t.BG)
+        self.tabs.add(self.tts, text='TEXT TO VOICE')
+        t.label(self.tts, "AI VOICEOVER STUDIO", 18, t.CYAN, True).pack(anchor="w", padx=20, pady=(18, 6))
+        t.label(self.tts, "Write narration, choose a style and generate a reusable local WAV.", 10, t.MUTED).pack(anchor="w", padx=20)
+        self.script = tk.Text(self.tts, height=8, wrap="word", bg=t.CONTROL, fg=t.TEXT, insertbackground=t.CYAN)
         self.script.pack(fill="both", expand=True, padx=20, pady=(12, 8))
-        controls = tk.Frame(self, bg=t.BG)
+        controls = tk.Frame(self.tts, bg=t.BG)
         controls.pack(fill="x", padx=20)
         self.voice = tk.StringVar(value="marin")
         self.style = tk.StringVar(value="Dry British")
@@ -35,17 +42,17 @@ class VoiceoverStudio(tk.Toplevel):
         t.label(controls, "Delivery", 10).grid(row=0, column=2, padx=(10,0))
         self.style_box = ttk.Combobox(controls, textvariable=self.style, values=tuple(STYLES), state="readonly", width=20)
         self.style_box.grid(row=0, column=3, padx=8)
-        keyrow = tk.Frame(self, bg=t.BG)
+        keyrow = tk.Frame(self.tts, bg=t.BG)
         keyrow.pack(fill="x", padx=20, pady=12)
         t.label(keyrow, "API key", 10).pack(side="left")
         self.key = tk.StringVar(value=os.environ.get("OPENAI_API_KEY", ""))
         self.key_entry = tk.Entry(keyrow, textvariable=self.key, show="•", width=42)
         self.key_entry.pack(side="left", padx=8, fill="x", expand=True)
-        t.label(self, "Audio is generated only after confirmation. Each unique request is attempted once. "
-                "Prices vary; this screen cannot guarantee a GBP charge. "
+        t.label(self.tts, "Audio is generated only after confirmation. Each unique request is attempted once. "
+                "Published rates: $0.60 per million text-input tokens and $12 per million audio-output tokens. Final charge varies. "
                 "OpenAI has announced retirement of this speech endpoint on 6 Jan 2027.",
                 9, t.MUTED, wraplength=635, justify="left").pack(anchor="w", padx=20)
-        actions = tk.Frame(self, bg=t.BG)
+        actions = tk.Frame(self.tts, bg=t.BG)
         actions.pack(fill="x", padx=20, pady=12)
         self.make_button = t.button(actions, "GENERATE VOICE", self.make, accent=True)
         self.make_button.pack(side="left")
@@ -57,8 +64,11 @@ class VoiceoverStudio(tk.Toplevel):
         self.attach_button.configure(state="disabled")
         self.folder_button = t.button(actions, "OPEN LIBRARY", self.open_library)
         self.folder_button.pack(side="right")
-        self.status = t.label(self, "No API request sent.", 10, t.MUTED, wraplength=635)
+        self.status = t.label(self.tts, "No API request sent.", 10, t.MUTED, wraplength=635)
         self.status.pack(fill="x", padx=20, pady=(0, 14))
+        from .voice_studio_panel import ChangeVoicePanel
+        self.change_voice = ChangeVoicePanel(self.tabs, self)
+        self.tabs.add(self.change_voice, text='CHANGE MY VOICE')
         self.after(100, self.poll)
         self.protocol("WM_DELETE_WINDOW", self.close)
 
@@ -98,6 +108,7 @@ class VoiceoverStudio(tk.Toplevel):
         try:
             while True:
                 path, reused, error = self.events.get_nowait()
+                self.credit_panel.refresh()
                 self.busy = False
                 self.make_button.configure(state="normal")
                 if error:
@@ -153,4 +164,6 @@ class VoiceoverStudio(tk.Toplevel):
     def close(self):
         # The background request may still finish and be charged; no retries.
         self.key.set("")
+        self.credit_panel.close()
+        self.change_voice.close()
         self.destroy()

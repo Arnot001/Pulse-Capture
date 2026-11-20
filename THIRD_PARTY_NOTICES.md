@@ -1,5 +1,14 @@
 # Third-party components
 
+The local reference-speaker extraction adapter follows the OpenVoice
+ToneColorConverter.extract_se algorithm, Copyright 2024 MyShell.ai, MIT licensed.
+The full notice is in `assets/licenses/LICENSE_OPENVOICE`. The pinned source is
+https://github.com/myshell-ai/OpenVoice/tree/74a1d147b17a8c3092dd5430504bd83ef6c7eb23
+and the separately installed OpenVoice V2 model is MIT licensed:
+https://huggingface.co/myshell-ai/OpenVoiceV2.
+Reference audio and generated speaker embeddings are private user assets and
+are not bundled. Their permissions are separate from the software licence.
+
 Bundled caption font: DejaVu Sans Bold. Copyright Bitstream, with DejaVu changes
 in the public domain and applicable Arev notices. The complete license is included
 in `assets/licenses/LICENSE_DEJAVU`. The font is distributed unmodified.
