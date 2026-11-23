@@ -13,6 +13,7 @@ from capture.ffmpeg_backend import discover
 from capture.hotkey import GlobalHotkey
 from capture.models import CaptureOptions
 from capture.recorder import Recorder, State
+from capture.privacy_launcher import launch_privacy_screen
 from capture.window_picker import list_windows, validate_window
 from .region_overlay import RegionOverlay
 from . import theme as t
@@ -175,6 +176,13 @@ class CaptureApp(tk.Tk):
             9, t.MUTED, anchor='w')
         self.watermark_note.pack(fill='x', pady=(6, 0))
         self.watermark_changed()
+
+        privacy = t.Card(body, '05', 'PRIVACY DESKTOP')
+        privacy.pack(fill='x', pady=(0, 10))
+        t.label(privacy.body, 'Custom background, two pinned shortcuts, and optional icon/taskbar hiding.',
+                9, t.MUTED, wraplength=490, justify='left').pack(anchor='w')
+        self.privacy_button = t.button(privacy.body, 'OPEN PRIVACY DESKTOP', self.open_privacy_desktop)
+        self.privacy_button.pack(fill='x', pady=(8, 0))
 
         self.record_button = t.button(body, '●   START RECORDING', self.toggle, accent=True,
                                        font=(t.FONT, -17, 'bold'))
@@ -471,6 +479,17 @@ class CaptureApp(tk.Tk):
             self.hotkey_on.set(False)
             self.show_error(str(exc))
         self.persist()
+
+    def open_privacy_desktop(self):
+        try:
+            current = getattr(self, '_privacy_process', None)
+            self._privacy_process, opened = launch_privacy_screen(current)
+            if not opened:
+                messagebox.showinfo('Privacy Desktop',
+                                    'Privacy Screen is already running. Use its controls window or the show-controls hotkey.',
+                                    parent=self)
+        except (OSError, RuntimeError) as exc:
+            messagebox.showerror('Privacy Desktop', str(exc), parent=self)
 
     def open_quick_edit(self):
         if not self.backend or (self.recorder and self.recorder.busy):
