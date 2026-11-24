@@ -118,6 +118,7 @@ class EditorWindow(tk.Toplevel):
 
         # The save controls no longer take an entire oversized bottom section.
         bottom = tk.Frame(self, bg=t.BG)
+        self.footer = bottom
         bottom.pack(side='bottom', fill='x', padx=18, pady=(2, 7))
         footer = tk.Frame(bottom, bg=t.BG)
         footer.pack(fill='x')
@@ -463,15 +464,62 @@ class EditorWindow(tk.Toplevel):
         t.label(panel, 'Adds a new logo. A logo already in the recording cannot be removed.',
                 9, t.MUTED).pack(anchor='w')
 
+    def paint_tool_buttons(self):
+        """Keep the current tool discoverable without filling the header."""
+        for name, button in self.tool_buttons.items():
+            active = self.inspector_visible and self.tool.get() == name
+            button.configure(
+                bg=t.CYAN if active else t.CONTROL,
+                fg=t.BG if active else t.TEXT)
+
+    def toggle_tool(self, name):
+        if self.inspector_visible and self.tool.get() == name:
+            self.hide_inspector()
+        else:
+            self.select_tool(name)
+
     def select_tool(self, name):
+        if name not in self.panels:
+            raise ValueError('Unknown editor tool.')
         self.tool.set(name)
         self.show_tool()
+
+    def hide_inspector(self):
+        if not self.inspector_visible:
+            return
+        self.stop_play()
+        self.inspector.pack_forget()
+        self.inspector_visible = False
+        # When no tool is open, show the actual edited picture rather than
+        # lingering source crop/privacy guides from the previous panel.
+        self.tool.set('TRIM')
+        self.video.active = False
+        self.video.drag = None
+        self.video.media_drag = None
+        self.video.zoom_drag = False
+        self.cut_tools.refresh()
+        self.overlay_tools.refresh()
+        self.music_tools.refresh()
+        self.polish_tools.refresh()
+        self.paint_tool_buttons()
+        if self.media and self.trim:
+            self.update_timeline()
+        self.request_frame()
 
     def show_tool(self):
         self.stop_play()
         for panel in self.panels.values():
             panel.pack_forget()
-        self.panels[self.tool.get()].pack(fill='both', expand=True, padx=12, pady=10)
+        self.panels[self.tool.get()].pack(
+            fill='both', expand=True, padx=12, pady=8)
+        self.inspector_title.configure(
+            text=self.tool_titles[self.tool.get()].upper() + '  //  SETTINGS')
+        if not self.inspector_visible:
+            self.inspector.pack(
+                side='bottom', fill='x', padx=16, pady=(0, 3),
+                before=self.footer)
+            self.inspector_visible = True
+        self.paint_tool_buttons()
         self.video.active = self.tool.get() == 'CROP'
         self.video.drag = None
         self.video.media_drag = None
