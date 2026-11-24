@@ -65,7 +65,7 @@ def audio_preview_command(ffmpeg, media, source_position, trim, cuts=None,
                          f'concat=n={len(labels)}:v=0:a=1[joined]')
             combined = 'joined'
         source_filters = list(audio_tempo_filters(edits.speed))
-        if edits.music.enabled and edits.music.original_volume != 1:
+        if edits.music.original_volume != 1:
             source_filters.append(f'volume={edits.music.original_volume:g}')
         source_filters.append('aresample=async=1:first_pts=0')
         graph.append(f'[{combined}]{",".join(source_filters)}[source]')
