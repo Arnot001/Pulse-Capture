@@ -76,15 +76,23 @@ Requires the optional `PyAudioWPatch` installation (`py -3.13 -m pip install
 -r requirements-audio.txt`); recording never uses a paid API. Every retake
 creates a different file.
 
-- Click the recorded take in Commentary Studio to view its waveform and adjust
-  **start/end**, **source in**, **voice level**, **game/background gain**, and
-  **fade in/out**. Choose **APPLY EDIT**. The original file stays unchanged.
+- Click the recorded take to view its waveform and adjust **start/end**,
+  **source in** and **fade in/out**. The Audio Mixer provides separate percentage
+  sliders for **Commentary Volume** (0–200%; selected take only) and
+  **Original Video Audio** (0–100%; entire video, including when Music is off).
+  Enable **Auto Duck While I Speak** to reduce the existing background mix only
+  during the selected take; its separate Background During Commentary slider
+  sets that level (0–100%). Leave Auto Duck off for steady gameplay sound.
+  Click **APPLY CHANGES** to update both playback and exported MP4s. Changes are
+  undoable; all original recordings remain unchanged.
 - Put the editor playhead inside the take and click **SPLIT AT PLAYHEAD** for two
   independently editable clips. VOICE blocks also support timeline dragging,
   edge trimming, right-click Delete and Ctrl+Z/Ctrl+Y undo. Deleting removes
   only the timeline reference, not your WAV.
-- Use **ORIGINAL** / **CURRENT** to listen to the two voice variants. **USE
-  ORIGINAL VOICE** switches back without deleting the converted audio.
+- Use **CURRENT VOICE** / **ORIGINAL VOICE** and the large
+  **PLAY TAKE / PAUSE / STOP** buttons to audition only your selected recording.
+  **RESTORE ORIGINAL** changes which voice is used in the final video without
+  deleting either saved WAV.
 - **PITCH / SPEED ONLY** runs a local FFmpeg voice effect (requires a build with
   the `rubberband` audio filter for pitch/tempo changes). This is not neural
   voice identity conversion.
@@ -95,9 +103,12 @@ creates a different file.
   nothing downloads from the editor itself. Conversion runs locally with no
   OpenAI API charge and depends on a completed pinned runtime. The model's
   speaker labels do not guarantee any accent or expressive result.
-- The edited commentary is mixed into audible preview and exported MP4s on the
-  output clock after trims/cuts/speed. Game audio is ducked while you speak;
-  other AI narration and SFX still work independently. Source-file edits,
+- Edited commentary is mixed into audible preview and exported MP4s on the
+  output clock after trims/cuts/speed. Optional Auto Duck attenuates the
+  background mix (game audio, music and other bed sounds) only while the
+  selected take plays; it does not modify the original video file. The global
+  video-audio slider is shared with the Music panel's **ORIGINAL** level, so
+  either screen uses the same volume setting. Source-file edits,
   playback speed changes *after* recording, and audio-device latency should be
   manually checked for sync before publishing; real device timing varies.
 - No automatic transcript, word-level editing or voice-cloning import panel is

@@ -25,6 +25,7 @@ class CommentaryClip:
     fade_in: float = 0.025
     fade_out: float = 0.045
     original_file: str = ""
+    auto_duck: bool = True
 
     @property
     def title(self):
@@ -40,6 +41,8 @@ class CommentaryClip:
             candidate = Path(path).resolve()
             if candidate.parent != root or candidate.suffix.lower() != ".wav" or not candidate.is_file():
                 raise ValueError("Use a saved Pulse commentary WAV; original recording is protected.")
+        if type(self.auto_duck) is not bool:
+            raise ValueError('Auto duck must be on or off.')
         original = wav_info(self.original_file or self.file)
         current = wav_info(self.file)
         if (not all(type(x) in (float, int) and math.isfinite(x) for x in
@@ -139,7 +142,7 @@ def add_commentary(inputs, graph, bed, cues, duration, offset=0.0):
         filters.append(f'adelay={round(delay*48000)}S:all=1')
         graph.append(f'[{input_index}:a:0]' + ','.join(filters) + f'[{track}]')
         labels.append(track)
-        if cue.background_gain < 1:
+        if cue.auto_duck and cue.background_gain < 1:
             gains.append(
                 f'if(between(t,{delay:.9f},{delay+overlap:.9f}),'
                 f'{cue.background_gain:g},1)')

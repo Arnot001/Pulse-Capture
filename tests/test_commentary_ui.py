@@ -111,6 +111,7 @@ class CommentaryUITests(unittest.TestCase):
 
     def test_selected_take_transport_uses_only_edited_source_range(self):
         studio=self.make_studio()
+        self.pump_until(lambda: not studio._busy)
         with patch.dict(os.environ, {'LOCALAPPDATA':self.temp.name}):
             original=self.make_take(studio)
             cue=self.window.edits.commentary_clips[0]
@@ -169,6 +170,48 @@ class CommentaryUITests(unittest.TestCase):
             self.window.undo_timeline()
             self.assertEqual(len(self.window.edits.commentary_clips),2)
             self.assertTrue(original.is_file())
+
+    def test_sliders_update_voice_video_and_optional_auto_duck(self):
+        studio=self.make_studio()
+        with patch.dict(os.environ,{'LOCALAPPDATA':self.temp.name}):
+            original=self.make_take(studio)
+            self.assertEqual(studio.voice_slider.cget('to'), 2.0)
+            self.assertEqual(studio.video_slider.cget('to'), 1.0)
+            self.assertEqual(studio.duck_slider.cget('to'), 1.0)
+            studio.volume_var.set(1.5)
+            studio.video_var.set(.35)
+            studio.background_var.set(.20)
+            studio.duck_var.set(False)
+            studio._toggle_duck()
+            self.assertEqual(studio.duck_slider.cget('state'), 'disabled')
+            studio.apply()
+            cue=self.window.edits.commentary_clips[0]
+            self.assertAlmostEqual(cue.volume, 1.5)
+            self.assertAlmostEqual(cue.background_gain, .20)
+            self.assertFalse(cue.auto_duck)
+            self.assertAlmostEqual(self.window.edits.music.original_volume, .35)
+            self.assertEqual(self.window.music_tools.original_volume.get(), '35%')
+            studio.duck_var.set(True)
+            studio._toggle_duck()
+            self.assertEqual(studio.duck_slider.cget('state'), 'normal')
+            studio.apply()
+            self.assertTrue(self.window.edits.commentary_clips[0].auto_duck)
+            self.window.undo_timeline()
+            self.assertFalse(self.window.edits.commentary_clips[0].auto_duck)
+            self.assertTrue(original.is_file())
+
+    def test_video_volume_slider_works_without_any_commentary(self):
+        studio=self.make_studio()
+        self.assertEqual(self.window.edits.commentary_clips, ())
+        studio.video_var.set(.4)
+        studio.apply()
+        self.assertAlmostEqual(self.window.edits.music.original_volume, .4)
+        self.assertEqual(self.window.music_tools.original_volume.get(), '40%')
+        studio.close()
+        self.window.music_tools.changed()
+        self.assertAlmostEqual(self.window.edits.music.original_volume, .4)
+        self.window.undo_timeline()
+        self.assertAlmostEqual(self.window.edits.music.original_volume, 1.)
 
     def test_converted_voice_is_switchable_back_to_original(self):
         studio=self.make_studio()

@@ -112,6 +112,19 @@ class CommentaryTests(unittest.TestCase):
         self.assertEqual(inputs.count('-i'),2)
         self.assertEqual(add_commentary(inputs,graph,'source',(cue,),1,offset=4),'source')
 
+    def test_auto_duck_off_keeps_background_gain_unmodified(self):
+        cue=self.clip(background_gain=.15,auto_duck=False)
+        graph=[]
+        inputs=['-i','source.mp4']
+        self.assertEqual(
+            add_commentary(inputs,graph,'source',(cue,),duration=3),
+            'commentarymix')
+        self.assertIn('amix=inputs=2',';'.join(graph))
+        self.assertNotIn('between(t,',';'.join(graph))
+        self.assertNotIn('0.15,1)', ';'.join(graph))
+        with self.assertRaises(ValueError):
+            self.clip(auto_duck='False').validate(8.)
+
     def test_no_original_audio_bed_still_supports_voice(self):
         clip=self.clip()
         state=self.state(clip)
