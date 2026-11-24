@@ -27,6 +27,16 @@ jobs:
       - name: Media timeline tests
         shell: pwsh
         run: python -m unittest tests.test_imported_media tests.test_timeline_drag -v
+      - name: Install FFmpeg for real media render
+        shell: pwsh
+        run: |
+          choco install ffmpeg -y --no-progress
+          if (-not (Get-Command ffmpeg -ErrorAction SilentlyContinue) -or -not (Get-Command ffprobe -ErrorAction SilentlyContinue)) {
+            throw 'FFmpeg and FFprobe must be installed to verify a real export.'
+          }
+      - name: Real MP4 media render
+        shell: pwsh
+        run: python -m unittest tests.test_imported_media_render -v
       - name: Full regression suite
         shell: pwsh
         run: python -m unittest discover -q
