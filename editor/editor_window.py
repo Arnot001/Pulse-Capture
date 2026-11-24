@@ -220,7 +220,7 @@ class EditorWindow(tk.Toplevel):
         rail = tk.Frame(workspace, bg=t.PANEL, width=116)
         rail.pack(side='left', fill='y', padx=(0, 10))
         rail.pack_propagate(False)
-        t.label(rail, 'TOOLS', 10, t.CYAN, True).pack(anchor='w', padx=10, pady=(13, 8))
+        t.label(rail, 'TOOLS', 10, t.CYAN, True).pack(anchor='w', padx=10, pady=(7, 4))
         self.add_menu = tk.Menubutton(
             rail, text='+  ADD  ▾', bg=t.CYAN, fg=t.BG,
             activebackground=t.LINE, activeforeground=t.TEXT,
@@ -235,7 +235,7 @@ class EditorWindow(tk.Toplevel):
         add_actions.add_command(label='Sound Effect', command=lambda: self.open_reactions('sfx'))
         add_actions.add_command(label='Effects', command=lambda: self.open_reactions('effects'))
         self.add_menu.configure(menu=add_actions, state='disabled')
-        self.add_menu.pack(fill='x', padx=8, pady=(0, 10))
+        self.add_menu.pack(fill='x', padx=8, pady=(0, 5))
         self.controls.append(self.add_menu)
         self.tool_buttons = {}
         self.tool_titles = {
@@ -247,9 +247,9 @@ class EditorWindow(tk.Toplevel):
             button = t.button(
                 rail, caption, lambda tool=name: self.toggle_tool(tool))
             button.configure(
-                padx=5, pady=5, font=(t.FONT, -10, 'bold'),
+                padx=5, pady=2, font=(t.FONT, -10, 'bold'),
                 state='disabled')
-            button.pack(fill='x', padx=8, pady=2)
+            button.pack(fill='x', padx=8, pady=1)
             self.tool_buttons[name] = button
             self.controls.append(button)
 
