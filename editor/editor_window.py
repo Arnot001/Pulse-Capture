@@ -204,6 +204,7 @@ class EditorWindow(tk.Toplevel):
             sashrelief='flat', showhandle=True, handlesize=13,
             relief='flat', bd=0)
         self.work_panes.pack(side='left', fill='both', expand=True)
+        self.work_panes.bind('<ButtonRelease-1>', self._remember_inspector_width)
 
         # Existing tool panels use the same models/handlers but now dock to
         # the right of the preview, not beneath it.
@@ -495,6 +496,44 @@ class EditorWindow(tk.Toplevel):
         t.label(panel, 'Adds a new logo. A logo already in the recording cannot be removed.',
                 9, t.MUTED).pack(anchor='w')
 
+    def tool_canvas_xview(self, *args):
+        self.tool_canvas.xview(*args)
+
+    def _inspector_canvas_resized(self, event=None):
+        """Let narrow panels fill the right dock while wider tools can scroll."""
+        if not hasattr(self, 'tool_canvas_item'):
+            return
+        viewport = event.width if event is not None else self.tool_canvas.winfo_width()
+        requested = self.panel_area.winfo_reqwidth()
+        self.tool_canvas.itemconfigure(
+            self.tool_canvas_item, width=max(1, viewport, requested))
+        self._inspector_content_resized()
+
+    def _inspector_content_resized(self, _event=None):
+        self.tool_canvas.configure(scrollregion=self.tool_canvas.bbox('all'))
+
+    def _inspector_wheel(self, event):
+        if not self.inspector_visible:
+            return
+        if event.state & 0x1:
+            self.tool_canvas.xview_scroll(-1 if event.delta > 0 else 1, 'units')
+        else:
+            self.tool_canvas.yview_scroll(-1 if event.delta > 0 else 1, 'units')
+        return 'break'
+
+    def _remember_inspector_width(self, _event=None):
+        if self.inspector_visible:
+            width = self.inspector.winfo_width()
+            if width > 250:
+                self.inspector_width = width
+
+    def _refresh_inspector_view(self):
+        """Recompute scroll bounds for every newly selected tool."""
+        if not self.inspector_visible or self.closed or self.closing:
+            return
+        self._inspector_canvas_resized()
+        self.tool_canvas.configure(scrollregion=self.tool_canvas.bbox('all'))
+
     def paint_tool_buttons(self):
         """Keep the current tool discoverable without filling the header."""
         for name, button in self.tool_buttons.items():
@@ -519,7 +558,8 @@ class EditorWindow(tk.Toplevel):
         if not self.inspector_visible:
             return
         self.stop_play()
-        self.inspector.pack_forget()
+        self._remember_inspector_width()
+        self.work_panes.forget(self.inspector)
         self.inspector_visible = False
         # When no tool is open, show the actual edited picture rather than
         # lingering source crop/privacy guides from the previous panel.
@@ -546,10 +586,15 @@ class EditorWindow(tk.Toplevel):
         self.inspector_title.configure(
             text=self.tool_titles[self.tool.get()].upper() + '  //  SETTINGS')
         if not self.inspector_visible:
-            self.inspector.pack(
-                side='bottom', fill='x', padx=16, pady=(0, 3),
-                before=self.footer)
+            self.work_panes.add(
+                self.inspector, minsize=280, width=self.inspector_width,
+                stretch='never')
             self.inspector_visible = True
+        # Existing inspector entries may be much wider than the dock; their
+        # scrollbars make them usable without forcing video out of sight.
+        self.tool_canvas.xview_moveto(0)
+        self.tool_canvas.yview_moveto(0)
+        self.after_idle(self._refresh_inspector_view)
         self.paint_tool_buttons()
         self.video.active = self.tool.get() == 'CROP'
         self.video.drag = None
