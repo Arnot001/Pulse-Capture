@@ -6,6 +6,7 @@ from .privacy_preview import PrivacyPreview
 from .reaction_geometry import clamp, positioned, visual_bounds
 from .reaction_library import ReactionLibrary
 from .imported_media import media_bounds, with_media_position
+from .edit_history import EditHistory, EditSnapshot
 from ui import theme as t
 
 
@@ -114,6 +115,7 @@ class ReactionPreview(PrivacyPreview):
         self.selected_media_index = index if index is not None and 0 <= index < len(cues) else None
         if self.selected_media_index is not None:
             self.selected_visual = None
+            self.visual_drag = None
         if notify:
             dialog = self.window.media_dialog
             if dialog is not None and not dialog.closed:
@@ -173,6 +175,11 @@ class ReactionPreview(PrivacyPreview):
             mode = 'move'
         cue = self.window.edits.media_clips[index]
         self.focus_set()
+        current = EditSnapshot(self.window.trim, self.window.cuts, self.window.edits)
+        if (self.window.timeline_history is None or
+                self.window.timeline_history.current != current):
+            self.window.timeline_history = EditHistory(current)
+        self.window.timeline_history.begin()
         self.media_drag = dict(mode=mode, original=cue,
                                box=media_bounds(cue, *self.window.edits.encoded_size(self.media)),
                                point=self.output_point(event.x, event.y),
@@ -196,7 +203,8 @@ class ReactionPreview(PrivacyPreview):
             return
         cues[index] = cue
         w.edits = replace(w.edits, media_clips=tuple(cues))
-        w.timeline_history = None
+        if w.timeline_history is not None:
+            w.timeline_history.record(EditSnapshot(w.trim, w.cuts, w.edits))
         if gesture is not None:
             gesture['expected'] = w.edits.media_clips
         if w.media_dialog is not None and not w.media_dialog.closed:
@@ -213,6 +221,8 @@ class ReactionPreview(PrivacyPreview):
                 or self.bounds() != gesture['viewport']
                 or w.edits.media_clips != gesture['expected']):
             self.media_drag = None
+            if w.timeline_history:
+                w.timeline_history.end()
             return
         cue, box = gesture['original'], gesture['box']
         x, y = self.output_point(event.x, event.y)
@@ -366,6 +376,8 @@ class ReactionPreview(PrivacyPreview):
             if event is not None:
                 self.move_media(event)
             self.media_drag = None
+            if self.window.timeline_history:
+                self.window.timeline_history.end()
             self.draw_overlay()
             return
         if self.visual_drag is not None:
@@ -383,6 +395,8 @@ class ReactionPreview(PrivacyPreview):
                     and self.window.edits.media_clips == gesture['expected']):
                 self.selected_media_index = gesture['index']
                 self.apply_media(gesture['original'])
+            if self.window.timeline_history:
+                self.window.timeline_history.end()
             self.draw_overlay()
             return 'break'
         gesture, self.visual_drag = self.visual_drag, None
