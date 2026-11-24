@@ -7,6 +7,7 @@ import tempfile
 import unittest
 import wave
 
+from editor.commentary_effects import EFFECTS, voice_effect_filters, validate_effect
 from editor.commentary import (
     CommentaryClip, adjust_timing, add_commentary, split_clip, validate_commentary)
 from editor.cuts import CutPlan
@@ -124,6 +125,39 @@ class CommentaryTests(unittest.TestCase):
         self.assertNotIn('0.15,1)', ';'.join(graph))
         with self.assertRaises(ValueError):
             self.clip(auto_duck='False').validate(8.)
+
+    def test_voice_effects_are_validated_and_added_to_only_selected_takes(self):
+        self.assertEqual(EFFECTS, ('None','Echo','Reverb','Chorus'))
+        self.assertEqual(voice_effect_filters('None', .6), [])
+        self.assertEqual(voice_effect_filters('Reverb', 0.), [])
+        for effect, marker in (('Echo','aecho='),('Reverb','aecho='),('Chorus','chorus=')):
+            with self.subTest(effect=effect):
+                cue=self.clip(effect=effect,effect_strength=.6)
+                cue.validate(8.)
+                inputs=['-i','video.mp4']
+                graph=[]
+                self.assertEqual(add_commentary(inputs,graph,'source',(cue,),3),
+                                 'commentarymix')
+                self.assertIn(marker, ';'.join(graph))
+                self.assertIn('atrim=duration=2.000000000', ';'.join(graph))
+                self.assertEqual(inputs.count('-i'),2)
+        for effect,amount in (('Other',.5),('Echo',-1),('Chorus',1.01),
+                              ('Reverb',float('nan')),('Echo',True)):
+            with self.subTest(effect=effect,amount=amount):
+                with self.assertRaises(ValueError):
+                    validate_effect(effect,amount)
+
+    def test_effect_preserved_across_split_and_non_destructive_reversion(self):
+        cue=self.clip(effect='Chorus',effect_strength=.8)
+        left,right=split_clip(cue,2.)
+        self.assertEqual((left.effect,right.effect),('Chorus','Chorus'))
+        self.assertEqual((left.effect_strength,right.effect_strength),(.8,.8))
+        with self.assertRaises(ValueError):
+            self.clip(effect='invalid').validate(8.)
+        converted=cue.with_file(self.fx)
+        self.assertEqual(converted.effect,'Chorus')
+        self.assertEqual(converted.with_file(self.raw).effect,'Chorus')
+        self.assertTrue(self.raw.is_file())
 
     def test_no_original_audio_bed_still_supports_voice(self):
         clip=self.clip()
