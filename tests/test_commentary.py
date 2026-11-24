@@ -93,10 +93,10 @@ class CommentaryTests(unittest.TestCase):
         original = self.clip()
         changed = original.with_file(self.fx)
         self.assertEqual(changed.original_file,str(self.raw))
-        self.assertEqual(changed.file,str(self.fx))
+        self.assertEqual(Path(changed.file).resolve(),self.fx.resolve())
         self.assertAlmostEqual(changed.duration,2.)
         restored=changed.with_file(self.raw)
-        self.assertEqual(restored.file,str(self.raw))
+        self.assertEqual(Path(restored.file).resolve(),self.raw.resolve())
         self.assertEqual(self.raw.stat().st_size,288044)
 
     def test_overlapping_ducking_and_preview_offset_graph(self):
@@ -120,7 +120,7 @@ class CommentaryTests(unittest.TestCase):
         graph=command[command.index('-filter_complex')+1]
         self.assertIn('anullsrc=r=48000',graph)
         self.assertIn('commentarymix',graph)
-        self.assertIn(str(self.raw),command)
+        self.assertIn(str(self.raw.resolve()),command)
 
     def test_one_voice_block_drag_trim_delete_and_history(self):
         clip=self.clip()
