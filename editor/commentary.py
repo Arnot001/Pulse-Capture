@@ -10,6 +10,7 @@ from pathlib import Path
 
 from .ai_voiceover import library_root
 from .voice_assets import wav_info
+from .commentary_effects import validate_effect, voice_effect_filters
 
 MAX_CLIPS = 24
 
@@ -26,6 +27,8 @@ class CommentaryClip:
     fade_out: float = 0.045
     original_file: str = ""
     auto_duck: bool = True
+    effect: str = 'None'
+    effect_strength: float = 0.5
 
     @property
     def title(self):
@@ -43,6 +46,7 @@ class CommentaryClip:
                 raise ValueError("Use a saved Pulse commentary WAV; original recording is protected.")
         if type(self.auto_duck) is not bool:
             raise ValueError('Auto duck must be on or off.')
+        validate_effect(self.effect, self.effect_strength)
         original = wav_info(self.original_file or self.file)
         current = wav_info(self.file)
         if (not all(type(x) in (float, int) and math.isfinite(x) for x in
@@ -133,12 +137,16 @@ def add_commentary(inputs, graph, bed, cues, duration, offset=0.0):
         tail_left = max(0., cue.end - overlap_b)
         fade_end = max(0., cue.fade_out - tail_left)
         filters = [f'atrim=start={skip:.9f}:duration={overlap:.9f}',
-                   'asetpts=PTS-STARTPTS', 'aresample=48000',
-                   f'volume={cue.volume:g}']
+                   'asetpts=PTS-STARTPTS', 'aresample=48000']
+        filters.extend(voice_effect_filters(cue.effect, cue.effect_strength))
+        filters.append(f'volume={cue.volume:g}')
         if fade_start:
             filters.append(f'afade=t=in:d={min(fade_start, overlap/2):.9f}')
         if fade_end:
             filters.append(f'afade=t=out:st={max(0.,overlap-fade_end):.9f}:d={min(fade_end,overlap):.9f}')
+        # Bound the wet tail to this clip before placing it on the output clock.
+        # Neither reverb nor echo can bleed into the next timeline clip.
+        filters.append(f'atrim=duration={overlap:.9f}')
         filters.append(f'adelay={round(delay*48000)}S:all=1')
         graph.append(f'[{input_index}:a:0]' + ','.join(filters) + f'[{track}]')
         labels.append(track)
