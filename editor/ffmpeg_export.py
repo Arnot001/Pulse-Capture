@@ -51,7 +51,7 @@ def _cut_filter_graph(media, trim, cuts, source_crop=None):
 
 def _source_audio_filters(edits, out_duration):
     filters = audio_tempo_filters(edits.speed)
-    if edits.music.enabled and edits.music.original_volume != 1:
+    if edits.music.original_volume != 1:
         filters.append(f'volume={edits.music.original_volume:g}')
     fade = fade_seconds(out_duration)
     if edits.fade.fade_in:
