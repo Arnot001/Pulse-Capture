@@ -42,6 +42,59 @@ def microphones():
         manager.terminate()
 
 
+def microphone_formats(device):
+    """Probe only the user's selected input, never change devices silently.
+
+    Some Windows generic recording devices report two channels but reject
+    mono capture, or reject the default sample rate at a different channel
+    count. Keep the list small and deterministic to avoid PortAudio thrashing.
+    """
+    maximum = int(device.get('maxInputChannels', 0))
+    if maximum < 1:
+        raise ValueError('Selected input does not have a recording channel.')
+    reported = device.get('defaultSampleRate')
+    rates = []
+    try:
+        nominal = round(float(reported))
+        if 8000 <= nominal <= 96000:
+            rates.append(nominal)
+    except (TypeError, ValueError, OverflowError):
+        pass
+    for rate in (48000, 44100):
+        if rate not in rates:
+            rates.append(rate)
+    channels = [1] + ([2] if maximum >= 2 else [])
+    return [(rate, channel) for rate in rates[:3] for channel in channels]
+
+
+def open_microphone(manager, audio, device_index, device):
+    """Try supported mono/stereo PCM on one explicit device only.
+
+    Return the stream's real channel count and sample rate for the WAV header.
+    No fallback to system loopback, another input, or implicit defaults.
+    """
+    attempted = []
+    for rate, channels in microphone_formats(device):
+        try:
+            stream = manager.open(
+                format=audio.paInt16, channels=channels, rate=rate,
+                input=True, input_device_index=device_index,
+                frames_per_buffer=1024)
+            return stream, rate, channels
+        except (OSError, ValueError) as exc:
+            attempted.append(f'{rate}Hz/{channels}ch: {exc}')
+    name = device.get('name', 'Unknown recording input')
+    details = '; '.join(attempted)
+    raise ValueError(
+        f"Windows couldn't open recording input '{name}' (#{device_index}). "
+        f"Tested {details}. In Windows Settings > System > Sound > Input, "
+        "check that a real microphone is connected, selected as default and "
+        "responds to speech. Check Settings > Privacy & security > Microphone "
+        "and allow desktop apps to access the mic. Close apps using the "
+        "microphone exclusively, then refresh the device list."
+    )
+
+
 class MicrophoneRecorder:
     def __init__(self, root=None):
         self.root = root
@@ -87,11 +140,10 @@ class MicrophoneRecorder:
             device = manager.get_device_info_by_index(device_index)
             if not is_microphone(device):
                 raise ValueError('Select a microphone, not system audio.')
-            self.rate = int(device['defaultSampleRate'])
-            stream = manager.open(format=audio.paInt16, channels=1, rate=self.rate,
-                                  input=True, input_device_index=device_index, frames_per_buffer=1024)
+            stream, self.rate, channels = open_microphone(
+                manager, audio, device_index, device)
             with self.path.open('xb') as handle, wave.open(handle, 'wb') as writer:
-                writer.setnchannels(1)
+                writer.setnchannels(channels)
                 writer.setsampwidth(2)
                 writer.setframerate(self.rate)
                 self.started_at = time.monotonic()
@@ -102,14 +154,19 @@ class MicrophoneRecorder:
                     self.level = max(map(abs, samples), default=0) / 32768
                     if not self.paused.is_set():
                         writer.writeframesraw(block)
-                        self.frames += len(samples)
+                        self.frames += len(samples) // channels
             if not self.frames:
                 raise ValueError('No microphone samples captured. Original take retained.')
             metadata(self.path, {'kind': 'microphone', 'device': device['name'],
+                                 'device_index': device_index, 'channels': channels,
+                                 'sample_rate': self.rate,
                                  'pause_behavior': 'Record-button pauses omitted; spoken silences preserved'})
             self.events.put(('saved', self.path))
         except Exception as exc:
-            self.events.put(('error', f'{exc} Take retained at {self.path}'))
+            retained = (f' Original WAV retained at {self.path}.'
+                        if self.path is not None and self.path.is_file() else
+                        ' No audio file was created.')
+            self.events.put(('error', f'{exc}{retained}'))
         finally:
             if stream:
                 stream.stop_stream()
