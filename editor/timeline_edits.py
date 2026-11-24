@@ -104,10 +104,39 @@ def change_timing(state, key, start, end, media):
 
 
 def remove_blocks(state, keys, media):
-    keys=set(keys);edits=state.edits
-    edits=replace(edits,text=replace(edits.text,captions=tuple(c for i,c in enumerate(edits.text.captions) if ('caption',i) not in keys)),
-                  sounds=tuple(c for i,c in enumerate(edits.sounds) if ('sound',i) not in keys),
-                  overlays=tuple(c for i,c in enumerate(edits.overlays) if ('overlay',i) not in keys),
-                  media_clips=tuple(c for i,c in enumerate(edits.media_clips) if ('media',i) not in keys))
+    """Delete editable output-track items only; never remove original footage.
+
+    Non-destructive: the source recordings, imported images/audio and media
+    library remain untouched. This function is shared by menu and keyboard
+    deletion so Ctrl+Z can restore the exact immutable EditSnapshot.
+    """
+    keys = set(keys)
+    edits = state.edits
+    allowed = ({('caption', i) for i in range(len(edits.text.captions))}
+               | {('sound', i) for i in range(len(edits.sounds))}
+               | {('overlay', i) for i in range(len(edits.overlays))}
+               | {('media', i) for i in range(len(edits.media_clips))}
+               | {('crop_key', i) for i in range(len(edits.crop_motion.keyframes))})
+    if edits.music.enabled:
+        allowed.add(('music', 0))
+    if edits.zoom.enabled:
+        allowed.add(('zoom', 0))
+    if not keys or not keys.issubset(allowed):
+        raise ValueError('Select an editable timeline item to delete. Original video is protected.')
+
+    edits = replace(
+        edits,
+        text=replace(edits.text, captions=tuple(
+            c for i, c in enumerate(edits.text.captions) if ('caption', i) not in keys)),
+        sounds=tuple(c for i, c in enumerate(edits.sounds) if ('sound', i) not in keys),
+        overlays=tuple(c for i, c in enumerate(edits.overlays) if ('overlay', i) not in keys),
+        media_clips=tuple(c for i, c in enumerate(edits.media_clips) if ('media', i) not in keys),
+        crop_motion=replace(edits.crop_motion, keyframes=tuple(
+            c for i, c in enumerate(edits.crop_motion.keyframes) if ('crop_key', i) not in keys)),
+        music=(replace(edits.music, enabled=False) if ('music', 0) in keys else edits.music),
+        zoom=(replace(edits.zoom, enabled=False) if ('zoom', 0) in keys else edits.zoom),
+    )
     edits.validate(media)
-    return replace(state,edits=edits)
+    from .reactions import validate_cues
+    validate_cues(edits.sounds, edits.overlays, duration(state))
+    return replace(state, edits=edits)
