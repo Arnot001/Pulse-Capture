@@ -52,8 +52,10 @@ class CommentaryStudio(tk.Toplevel):
         self.start_var = tk.StringVar(value='0')
         self.end_var = tk.StringVar(value='0')
         self.source_var = tk.StringVar(value='0')
-        self.volume_var = tk.StringVar(value='1')
-        self.background_var = tk.StringVar(value='.50')
+        self.volume_var = tk.DoubleVar(value=1.)
+        self.background_var = tk.DoubleVar(value=.5)
+        self.video_var = tk.DoubleVar(value=editor.edits.music.original_volume)
+        self.duck_var = tk.BooleanVar(value=True)
         self.fadein_var = tk.StringVar(value='.025')
         self.fadeout_var = tk.StringVar(value='.045')
         self.voice_var = tk.StringVar(value='')
@@ -180,14 +182,37 @@ class CommentaryStudio(tk.Toplevel):
         self._field(timing, 0, 0, 'START IN VIDEO', self.start_var)
         self._field(timing, 0, 1, 'END IN VIDEO', self.end_var)
         self._field(timing, 0, 2, 'SKIP FROM RECORDING', self.source_var)
-        t.label(self.content, 'MIX & FADES', 10, t.CYAN, True).pack(
-            anchor='w', padx=19, pady=(8, 2))
-        mixing = tk.Frame(self.content, bg=t.BG)
-        mixing.pack(fill='x', padx=16)
-        self._field(mixing, 0, 0, 'VOICE VOLUME (0–2)', self.volume_var)
-        self._field(mixing, 0, 1, 'GAME VOLUME (0–1)', self.background_var)
-        self._field(mixing, 0, 2, 'FADE IN (SEC)', self.fadein_var)
-        self._field(mixing, 0, 3, 'FADE OUT (SEC)', self.fadeout_var)
+        t.label(self.content, 'AUDIO MIXER', 11, t.CYAN, True).pack(
+            anchor='w', padx=19, pady=(10, 5))
+        mixer = tk.Frame(self.content, bg=t.PANEL)
+        mixer.pack(fill='x', padx=18)
+        self.voice_slider = self._volume_slider(
+            mixer, '🎙  COMMENTARY VOLUME', self.volume_var, 0, 2, .05,
+            'This selected recording only · 100% = normal voice')
+        self.video_slider = self._volume_slider(
+            mixer, '🔊  ORIGINAL VIDEO AUDIO', self.video_var, 0, 1, .01,
+            'Whole video, even when no commentary is playing')
+        duck_head = tk.Frame(mixer, bg=t.PANEL)
+        duck_head.pack(fill='x', padx=13, pady=(6, 0))
+        self.duck_switch = tk.Checkbutton(
+            duck_head, text='AUTO DUCK WHILE I SPEAK',
+            variable=self.duck_var, command=self._toggle_duck,
+            bg=t.PANEL, fg=t.TEXT, selectcolor=t.CONTROL,
+            activebackground=t.PANEL, activeforeground=t.TEXT,
+            disabledforeground=t.MUTED, font=(t.FONT, -11, 'bold'),
+            bd=0)
+        self.duck_switch.pack(side='left')
+        t.label(duck_head, 'Optional · selected take', 9, t.MUTED).pack(side='right')
+        self.duck_slider = self._volume_slider(
+            mixer, 'BACKGROUND DURING COMMENTARY', self.background_var,
+            0, 1, .01, 'Only while speaking; 25% makes game/music much quieter')
+        fades = tk.Frame(self.content, bg=t.BG)
+        fades.pack(fill='x', padx=16, pady=(8, 0))
+        self._field(fades, 0, 0, 'FADE IN (SEC)', self.fadein_var)
+        self._field(fades, 0, 1, 'FADE OUT (SEC)', self.fadeout_var)
+        t.label(self.content,
+                'Set your levels, then click APPLY CHANGES. Hear the complete mix using PLAY in Quick Edit.',
+                9, t.MUTED).pack(anchor='w', padx=19, pady=(6, 1))
         actions = tk.Frame(self.content, bg=t.BG)
         actions.pack(fill='x', padx=18, pady=(9, 10))
         self.apply_button = self._button(actions, '✓  APPLY CHANGES', self.apply, True)
@@ -249,6 +274,29 @@ class CommentaryStudio(tk.Toplevel):
         tk.Entry(group, textvariable=variable, width=8, bg=t.CONTROL,
                  fg=t.TEXT, insertbackground=t.CYAN, relief='flat',
                  font=(t.FONT, -11)).pack(fill='x', ipady=7)
+
+    def _volume_slider(self, parent, title, variable, lower, upper, step, hint):
+        row = tk.Frame(parent, bg=t.PANEL)
+        row.pack(fill='x', padx=13, pady=(9, 2))
+        top = tk.Frame(row, bg=t.PANEL)
+        top.pack(fill='x')
+        t.label(top, title, 10, t.TEXT, True).pack(side='left')
+        percent = t.label(top, f'{round(variable.get()*100)}%', 12, t.CYAN, True)
+        percent.pack(side='right')
+        scale = tk.Scale(
+            row, variable=variable, from_=lower, to=upper, resolution=step,
+            orient='horizontal', showvalue=False, length=525,
+            bg=t.PANEL, fg=t.TEXT, troughcolor=t.CONTROL,
+            activebackground=t.CYAN, highlightthickness=0,
+            sliderlength=20, bd=0, command=lambda value:
+            percent.configure(text=f'{round(float(value)*100)}%'))
+        scale.pack(fill='x', pady=(2, 0))
+        t.label(row, hint, 9, t.MUTED).pack(anchor='w', pady=(0, 3))
+        return scale
+
+    def _toggle_duck(self):
+        self.duck_slider.configure(
+            state='normal' if self.duck_var.get() else 'disabled')
 
     def _sync_preview_buttons(self):
         take = self.chosen() is not None
@@ -374,6 +422,7 @@ class CommentaryStudio(tk.Toplevel):
             self.on_select()
         else:
             self.stop_take()
+            self.video_var.set(self.editor.edits.music.original_volume)
             self.draw_wave()
             self._sync_preview_buttons()
 
@@ -390,10 +439,14 @@ class CommentaryStudio(tk.Toplevel):
         self._selected = idx
         cue = cues[idx]
         for var,value in ((self.start_var,cue.start),(self.end_var,cue.end),
-                          (self.source_var,cue.source_in),(self.volume_var,cue.volume),
-                          (self.background_var,cue.background_gain),
+                          (self.source_var,cue.source_in),
                           (self.fadein_var,cue.fade_in),(self.fadeout_var,cue.fade_out)):
             var.set(f'{value:.3f}')
+        self.volume_var.set(cue.volume)
+        self.background_var.set(cue.background_gain)
+        self.duck_var.set(cue.auto_duck)
+        self.video_var.set(self.editor.edits.music.original_volume)
+        self._toggle_duck()
         self.draw_wave()
         self._sync_preview_buttons()
 
@@ -432,7 +485,7 @@ class CommentaryStudio(tk.Toplevel):
         self.wave.create_text(8,7,text=f'{audition.upper()} voice waveform · original retained',
                               anchor='w',fill=t.MUTED,font=(t.FONT,-8))
 
-    def _commit(self, cues, select=None):
+    def _commit(self, cues, select=None, video_gain=None):
         self.stop_take()
         editor = self.editor
         if not editor.media or editor.exporter.busy or editor.closing:
@@ -440,7 +493,12 @@ class CommentaryStudio(tk.Toplevel):
         total = editor.edits.output_duration(editor.cuts.kept_duration(editor.trim))
         validate_commentary(cues,total)
         before = EditSnapshot(editor.trim,editor.cuts,editor.edits)
-        updated = replace(editor.edits, commentary_clips=tuple(cues))
+        music = editor.edits.music
+        if video_gain is not None:
+            # This is the SAME source level used by the Music panel. The
+            # shared export/preview engines now honour it even with Music OFF.
+            music = replace(music, original_volume=video_gain)
+        updated = replace(editor.edits, commentary_clips=tuple(cues), music=music)
         updated.validate(editor.media)
         if editor.timeline_history is None or editor.timeline_history.current != before:
             editor.timeline_history = EditHistory(before)
@@ -448,10 +506,12 @@ class CommentaryStudio(tk.Toplevel):
         editor.timeline_history.record(replace(before,edits=updated))
         editor.stop_play()
         editor.edits = updated
+        editor.music_tools.sync()
         editor.update_timeline()
         editor.request_frame()
-        editor.note.configure(text='Commentary updated. Original WAV preserved.',fg=t.GREEN)
+        editor.note.configure(text='Commentary mix updated. Original WAV preserved.',fg=t.GREEN)
         self.refresh(select)
+        self.video_var.set(editor.edits.music.original_volume)
 
     def _show_recording_hud(self):
         """Keep gameplay visible while the microphone records in the background."""
@@ -563,19 +623,21 @@ class CommentaryStudio(tk.Toplevel):
 
     def apply(self):
         idx=self.chosen()
-        if idx is None:
-            return
         cues=list(self.editor.edits.commentary_clips)
-        cue=cues[idx]
         try:
-            cues[idx]=replace(
-                cue,start=float(self.start_var.get()),end=float(self.end_var.get()),
-                source_in=float(self.source_var.get()),
-                volume=float(self.volume_var.get()),
-                background_gain=float(self.background_var.get()),
-                fade_in=float(self.fadein_var.get()),fade_out=float(self.fadeout_var.get()))
-            self._commit(cues,idx)
-            self.message('Commentary edit applied. Ctrl+Z restores the previous settings.')
+            if idx is not None:
+                cue=cues[idx]
+                cues[idx]=replace(
+                    cue,start=float(self.start_var.get()),end=float(self.end_var.get()),
+                    source_in=float(self.source_var.get()),
+                    volume=float(self.volume_var.get()),
+                    background_gain=float(self.background_var.get()),
+                    auto_duck=bool(self.duck_var.get()),
+                    fade_in=float(self.fadein_var.get()),fade_out=float(self.fadeout_var.get()))
+            self._commit(cues,idx,video_gain=float(self.video_var.get()))
+            self.message(
+                'Audio levels saved · play the main editor to hear the complete mix. '
+                'Ctrl+Z restores the previous levels.')
         except (ValueError,IndexError) as exc:
             self.message(str(exc),True)
 
