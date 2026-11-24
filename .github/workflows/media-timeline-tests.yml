@@ -30,7 +30,7 @@ jobs:
           python -m py_compile editor/imported_media.py editor/imported_media_ui.py editor/editor_window.py editor/reaction_preview.py editor/reactions.py editor/playback_preview.py editor/preview.py
       - name: Media timeline tests
         shell: pwsh
-        run: python -m unittest tests.test_imported_media tests.test_imported_media_preview tests.test_timeline_drag -v
+        run: python -m unittest tests.test_imported_media tests.test_imported_media_preview tests.test_timeline_drag tests.test_timeline_delete -v
       - name: Full regression suite
         shell: pwsh
         run: python -m unittest discover -q

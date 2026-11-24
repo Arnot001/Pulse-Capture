@@ -83,6 +83,13 @@ locations and are never edited, moved, or uploaded.
   aspect ratio. Dragging a full-frame Cutaway turns it into a movable picture
   layer. Press Esc during dragging to cancel; Ctrl+Z/Ctrl+Y supports timeline
   undo/redo. These editing guides never appear in the exported video.
+- **Delete on the timeline:** right-click a photo/video, caption, emoji/GIF,
+  sound effect, music or motion block to open **Delete from timeline**.
+  Or left-click to select it, then press **Delete** or **Backspace** while the
+  timeline has focus. Use **Ctrl+Z** to undo and **Ctrl+Y** to redo.
+  Original video/cut markers cannot be deleted this way; imported files,
+  recording and saved assets are never removed from disk. The command is
+  disabled during export. Right-clicking an empty track does nothing.
 - The Photos / Video inspector also supports precise **X POSITION %**,
   **Y POSITION %** (0–100% of available travel) and **SIZE %** (5–100%).
   Placement applies to picture-in-picture mode; Cutaway always fills the

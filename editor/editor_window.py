@@ -19,7 +19,7 @@ from .playback_preview import PlaybackPreview
 from .audio_preview import AudioPlayback
 from .timeline import Timeline
 from .edit_history import EditHistory, EditSnapshot
-from .timeline_edits import blocks as timeline_blocks, duration as timeline_duration, change_timing
+from .timeline_edits import blocks as timeline_blocks, duration as timeline_duration, change_timing, remove_blocks
 from .reaction_preview import ReactionPreview
 from .overlay_tools import OverlayTools
 from .music_tools import MusicTools
@@ -229,7 +229,8 @@ class EditorWindow(tk.Toplevel):
             activeforeground=t.TEXT, disabledforeground=t.MUTED, bd=0)
         self.audio_toggle.pack(side='right', padx=(0, 10))
         self.timeline = Timeline(preview_area, self.seek, self.drag_trim,
-                                 self.begin_clip_drag,self.change_clip_drag,self.end_clip_drag)
+                                 self.begin_clip_drag,self.change_clip_drag,self.end_clip_drag,
+                                 self.delete_timeline_item)
         self.timeline.on_output_seek = self.seek_output_time
         self.timeline.grid(row=2, column=0, sticky='ew')
 
@@ -702,6 +703,43 @@ class EditorWindow(tk.Toplevel):
             self.media_dialog.refresh()
         self.request_frame()
 
+    def delete_timeline_item(self, key):
+        """One undoable operation for right-click and Delete key on a timeline block."""
+        if not self.media or self.exporter.busy or self.closing:
+            return
+        if key not in {block.key for block in self.timeline.clip_blocks
+                       if block.kind in self.timeline.DELETABLE}:
+            return
+        self.stop_play()
+        if self._timing_drag_key is not None:
+            self.end_clip_drag()
+        before = EditSnapshot(self.trim, self.cuts, self.edits)
+        try:
+            after = remove_blocks(before, (key,), self.media)
+        except (ValueError, IndexError) as exc:
+            self.note.configure(text=str(exc), fg=t.RED)
+            return
+        if self.timeline_history is None or self.timeline_history.current != before:
+            self.timeline_history = EditHistory(before)
+        self.timeline_history.end()
+        self.timeline_history.record(after)
+        self.edits = after.edits
+        self.timeline.selected_key = None
+        # Don't retain a selection reference to a removed media/emoji index.
+        self.video.select_media(None, notify=False)
+        self.video.select_visual(None)
+        self.update_timeline()
+        self.overlay_tools.refresh()
+        self.music_tools.sync()
+        self.music_tools.refresh()
+        self.polish_tools.sync()
+        self.polish_tools.refresh()
+        if self.media_dialog and not self.media_dialog.closed:
+            self.media_dialog.refresh()
+        self.request_frame()
+        self.note.configure(text=f'Deleted {key[0].replace("_", " ")} from timeline · Ctrl+Z to undo.',
+                            fg=t.CYAN)
+
     def undo_timeline(self, _event=None):
         if not self.timeline_history or not self.media or self.exporter.busy:return
         state=EditSnapshot(self.trim,self.cuts,self.edits)
@@ -710,7 +748,12 @@ class EditorWindow(tk.Toplevel):
         self.stop_play()
         restored=self.timeline_history.undo()
         self.edits=restored.edits
+        self.timeline.selected_key = None
+        self.video.select_media(None, notify=False)
+        self.video.select_visual(None)
         self.update_timeline();self.overlay_tools.refresh();self.request_frame()
+        self.music_tools.sync();self.music_tools.refresh()
+        self.polish_tools.sync();self.polish_tools.refresh()
         if self.media_dialog and not self.media_dialog.closed:self.media_dialog.refresh()
         return 'break'
 
@@ -722,7 +765,12 @@ class EditorWindow(tk.Toplevel):
         self.stop_play()
         restored=self.timeline_history.redo()
         self.edits=restored.edits
+        self.timeline.selected_key = None
+        self.video.select_media(None, notify=False)
+        self.video.select_visual(None)
         self.update_timeline();self.overlay_tools.refresh();self.request_frame()
+        self.music_tools.sync();self.music_tools.refresh()
+        self.polish_tools.sync();self.polish_tools.refresh()
         if self.media_dialog and not self.media_dialog.closed:self.media_dialog.refresh()
         return 'break'
 

@@ -6,17 +6,24 @@ from .models import TrimRange, format_time
 
 class Timeline(tk.Canvas):
     """Source-clock trim row and output-clock draggable visual/audio tracks."""
+
+    MOVEABLE = frozenset(('caption', 'overlay', 'sound', 'media'))
+    DELETABLE = frozenset(('caption', 'overlay', 'sound', 'media', 'music', 'crop_key', 'zoom'))
     TRACK_TOP = 68
     TRACK_HEIGHT = 24
     TRACK_LABELS = ('VIDEO', 'MEDIA', 'CAPTIONS', 'EMOJIS / GIFS', 'SFX', 'VOICE', 'MUSIC', 'MOTION')
 
     def __init__(self, parent, on_seek, on_trim, on_clip_begin=None,
-                 on_clip_change=None, on_clip_end=None):
+                 on_clip_change=None, on_clip_end=None, on_clip_delete=None):
         super().__init__(parent, height=273, bg=t.BG, highlightthickness=0, cursor='hand2')
         self.on_seek, self.on_trim = on_seek, on_trim
         self.on_clip_begin = on_clip_begin
         self.on_clip_change = on_clip_change
         self.on_clip_end = on_clip_end
+        self.on_clip_delete = on_clip_delete
+        self.selected_key = None
+        self._delete_menu = tk.Menu(self, tearoff=0)
+        self._delete_menu.add_command(label='Delete from timeline', command=self.delete_selected)
         self.clip_blocks = ()
         self.output_duration = 0.0
         self.clip_drag = None
@@ -36,6 +43,10 @@ class Timeline(tk.Canvas):
         self.bind('<B1-Motion>', self.move)
         self.bind('<ButtonRelease-1>', self.release)
         self.bind('<MouseWheel>', self.zoom_wheel)
+        self.bind('<Button-3>', self.right_click)
+        self.bind('<Delete>', self.delete_selected)
+        self.bind('<BackSpace>', self.delete_selected)
+        self.bind('<Escape>', self.clear_selection)
 
     def x(self, seconds):
         return 14 + seconds / self.media.duration * max(1, self.winfo_width() - 28)
@@ -67,27 +78,78 @@ class Timeline(tk.Canvas):
         self.draw()
         return 'break' 
 
-    def block_hit(self, x, y):
+    def block_at(self, x, y, allowed=None):
+        """Hit-test only drawn blocks, never the source video/cut controls.
+
+        Prefer a short motion keyframe over an overlapping whole-clip zoom bar.
+        """
         if not self.media or self.output_duration <= 0:
             return None
         track = int((y-self.TRACK_TOP)//self.TRACK_HEIGHT)
         if track < 0 or track >= len(self.TRACK_LABELS):
             return None
-        for block in reversed(self.clip_blocks):
-            if block.track != track or block.kind not in ('caption','overlay','sound','media'):
+        if not (14 <= x <= self.winfo_width()-14):
+            return None
+        choices = []
+        for order, block in enumerate(self.clip_blocks):
+            if block.track != track or (allowed is not None and block.kind not in allowed):
                 continue
-            left, right = self.block_x(block.start), self.block_x(block.end)
+            if block.end < self.view_start or block.start > self.view_start+self.visible_span():
+                continue
+            left = max(14, self.block_x(block.start))
+            right = max(left+4, min(self.winfo_width()-14, self.block_x(block.end)))
             if left-4 <= x <= right+4:
-                edge = min(9, max(4,(right-left)/4))
-                mode = ('left' if x <= left+edge else
-                        'right' if x >= right-edge else 'move')
-                return block, mode
-        return None
+                choices.append((block.end-block.start, -order, block))
+        return min(choices, default=(None, None, None), key=lambda v:(v[0], v[1]))[2]
+
+    def block_hit(self, x, y):
+        block = self.block_at(x, y, self.MOVEABLE)
+        if block is None:
+            return None
+        left, right = self.block_x(block.start), self.block_x(block.end)
+        edge = min(9, max(4, (right-left)/4))
+        mode = ('left' if x <= left+edge else
+                'right' if x >= right-edge else 'move')
+        return block, mode
+
+    def clear_selection(self, _event=None):
+        if self.selected_key is not None:
+            self.selected_key = None
+            self.draw()
+        return 'break'
+
+    def right_click(self, event):
+        if not self.enabled:
+            return 'break'
+        block = self.block_at(event.x, event.y, self.DELETABLE)
+        if block is None:
+            return 'break'
+        self.selected_key = block.key
+        self.focus_set()
+        self.draw()
+        try:
+            self._delete_menu.tk_popup(event.x_root, event.y_root)
+        finally:
+            self._delete_menu.grab_release()
+        return 'break'
+
+    def delete_selected(self, _event=None):
+        if not self.enabled or self.on_clip_delete is None:
+            return 'break'
+        key = self.selected_key
+        if key is not None and any(block.key == key and block.kind in self.DELETABLE
+                                   for block in self.clip_blocks):
+            self.on_clip_delete(key)
+        return 'break'
 
     def draw(self):
         self.delete('all')
         if not self.media:
             return
+        if self.selected_key is not None and not any(
+                block.key == self.selected_key and block.kind in self.DELETABLE
+                for block in self.clip_blocks):
+            self.selected_key = None
         right = self.winfo_width() - 14
         self.create_rectangle(14, 12, right, 36, fill=t.CONTROL, outline='')
         start, end = self.x(self.trim.start), self.x(self.trim.end)
@@ -136,10 +198,12 @@ class Timeline(tk.Canvas):
                 a=max(14,self.block_x(block.start));b=min(right,self.block_x(block.end))
                 y=self.TRACK_TOP+block.track*self.TRACK_HEIGHT
                 if b-a < 4:b=a+4
-                editable=block.kind in ('caption','overlay','sound','media')
+                editable=block.kind in self.MOVEABLE
+                selected=block.key==self.selected_key
                 fill=('#185e70' if editable else '#344653')
-                stroke=('#60e2ff' if editable else '#526474')
-                self.create_rectangle(a,y+2,b,y+21,fill=fill,outline=stroke,width=1)
+                stroke=(t.CYAN if selected else '#60e2ff' if editable else '#526474')
+                self.create_rectangle(a,y+2,b,y+21,fill=fill,outline=stroke,
+                                      width=2 if selected else 1)
                 if editable:
                     self.create_line(a+4,y+5,a+4,y+18,fill='#8aebff',width=2)
                     self.create_line(b-4,y+5,b-4,y+18,fill='#8aebff',width=2)
@@ -181,6 +245,11 @@ class Timeline(tk.Canvas):
     def begin(self, event):
         if not self.media or not self.enabled:
             return
+        selected=self.block_at(event.x,event.y,self.DELETABLE)
+        self.selected_key=selected.key if selected else None
+        if selected is not None:
+            self.focus_set()
+        self.draw()
         hit=self.block_hit(event.x,event.y)
         if hit is not None:
             block, mode=hit
@@ -189,6 +258,9 @@ class Timeline(tk.Canvas):
                             block.end if mode=='right' else self.block_seconds(event.x))
             self.drag='clip'
             if self.on_clip_begin:self.on_clip_begin(block.key)
+            return
+        if selected is not None:
+            # Non-movable items (music/zoom/crop keys) can be selected and deleted.
             return
         if event.y >= self.TRACK_TOP:
             # Clicking an empty track seeks on the output clock.
