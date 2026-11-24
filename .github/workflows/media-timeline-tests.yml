@@ -23,14 +23,20 @@ jobs:
       - name: Syntax checks
         shell: pwsh
         run: |
-          python -m py_compile editor/imported_media.py editor/imported_media_ui.py editor/editor_window.py editor/reactions.py editor/playback_preview.py editor/preview.py
+          python -m py_compile editor/imported_media.py editor/imported_media_ui.py editor/editor_window.py editor/reaction_preview.py editor/reactions.py editor/playback_preview.py editor/preview.py
       - name: Media timeline tests
         shell: pwsh
-        run: python -m unittest tests.test_imported_media tests.test_timeline_drag -v
+        run: python -m unittest tests.test_imported_media tests.test_imported_media_preview tests.test_timeline_drag -v
       - name: Install FFmpeg for real media render
         shell: pwsh
         run: |
-          choco install ffmpeg -y --no-progress
+          for ($attempt=1; $attempt -le 4; $attempt++) {
+            choco install ffmpeg -y --no-progress
+            if ((Get-Command ffmpeg -ErrorAction SilentlyContinue) -and
+                (Get-Command ffprobe -ErrorAction SilentlyContinue)) { break }
+            Write-Host "FFmpeg feed unavailable, retry $attempt/4"
+            Start-Sleep -Seconds (3 * $attempt)
+          }
           if (-not (Get-Command ffmpeg -ErrorAction SilentlyContinue) -or -not (Get-Command ffprobe -ErrorAction SilentlyContinue)) {
             throw 'FFmpeg and FFprobe must be installed to verify a real export.'
           }
