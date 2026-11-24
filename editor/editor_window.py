@@ -211,45 +211,106 @@ class EditorWindow(tk.Toplevel):
         for widget in self.controls:
             widget.configure(state='disabled')
 
-        preview_area = tk.Frame(self, bg=t.BG)
-        preview_area.pack(fill='both', expand=True, padx=28)
-        self.video = ReactionPreview(preview_area, self.crop_changed, self.overlay_tools.mask_changed,
-                                    self.polish_tools.focus_changed, window=self, bg='#060a10',
-                                    highlightbackground=t.LINE, highlightthickness=1, height=260)
-        preview_area.rowconfigure(0, weight=1)
-        preview_area.columnconfigure(0, weight=1)
-        self.video.grid(row=0, column=0, sticky='nsew')
+        workspace = tk.Frame(self, bg=t.BG)
+        workspace.pack(fill='both', expand=True, padx=16, pady=(5, 4))
+
+        # Tools move down a narrow vertical rail; clicking one opens its
+        # dedicated inspector. No panel takes preview height by default.
+        rail = tk.Frame(workspace, bg=t.PANEL, width=116)
+        rail.pack(side='left', fill='y', padx=(0, 10))
+        rail.pack_propagate(False)
+        t.label(rail, 'TOOLS', 10, t.CYAN, True).pack(anchor='w', padx=10, pady=(13, 8))
+        self.add_menu = tk.Menubutton(
+            rail, text='+  ADD  ▾', bg=t.CYAN, fg=t.BG,
+            activebackground=t.LINE, activeforeground=t.TEXT,
+            relief='flat', borderwidth=0, padx=7, pady=8,
+            font=(t.FONT, -10, 'bold'), cursor='hand2')
+        add_actions = tk.Menu(
+            self.add_menu, tearoff=0, bg=t.PANEL, fg=t.TEXT,
+            activebackground=t.CYAN, activeforeground=t.BG)
+        add_actions.add_command(label='Photo / Video', command=self.open_imported_media)
+        add_actions.add_command(label='Emoji', command=lambda: self.open_reactions('emoji'))
+        add_actions.add_command(label='GIF / Reaction', command=lambda: self.open_reactions('gif'))
+        add_actions.add_command(label='Sound Effect', command=lambda: self.open_reactions('sfx'))
+        add_actions.add_command(label='Effects', command=lambda: self.open_reactions('effects'))
+        self.add_menu.configure(menu=add_actions, state='disabled')
+        self.add_menu.pack(fill='x', padx=8, pady=(0, 10))
+        self.controls.append(self.add_menu)
+        self.tool_buttons = {}
+        self.tool_titles = {
+            'TRIM': 'Trim', 'CUT': 'Cut', 'FORMAT': 'Canvas',
+            'CROP': 'Crop', 'BRAND': 'Watermark', 'TEXT': 'Text',
+            'PRIVACY': 'Privacy', 'MOTION': 'Motion',
+            'MUSIC': 'Music', 'FINISH': 'Export'}
+        for name, caption in self.tool_titles.items():
+            button = t.button(
+                rail, caption, lambda tool=name: self.toggle_tool(tool))
+            button.configure(
+                padx=5, pady=5, font=(t.FONT, -10, 'bold'),
+                state='disabled')
+            button.pack(fill='x', padx=8, pady=2)
+            self.tool_buttons[name] = button
+            self.controls.append(button)
+
+        preview_area = tk.Frame(workspace, bg=t.BG)
+        preview_area.pack(side='left', fill='both', expand=True)
+        self.preview_split = tk.PanedWindow(
+            preview_area, orient='vertical', bg=t.BG,
+            sashwidth=8, sashrelief='flat',
+            relief='flat', bd=0, showhandle=False)
+        self.preview_split.pack(fill='both', expand=True)
+        self.video = ReactionPreview(
+            self.preview_split, self.crop_changed,
+            self.overlay_tools.mask_changed,
+            self.polish_tools.focus_changed,
+            window=self, bg='#060a10',
+            highlightbackground=t.LINE, highlightthickness=1,
+            height=350)
+        self.preview_split.add(self.video, minsize=160, stretch='always')
         self.video.bind('<Configure>', self.resize_preview)
-        self.video.create_text(350, 120, text='Opening your video…', fill=t.MUTED, tags='placeholder')
-        transport = tk.Frame(preview_area, bg=t.BG)
-        transport.grid(row=1, column=0, sticky='ew', pady=(8, 0))
+        self.video.create_text(
+            350, 120, text='Opening your video…',
+            fill=t.MUTED, tags='placeholder')
+        timeline_space = tk.Frame(self.preview_split, bg=t.BG)
+        self.preview_split.add(
+            timeline_space, minsize=115, stretch='never')
+        transport = tk.Frame(timeline_space, bg=t.BG)
+        transport.pack(fill='x', pady=(2, 2))
         self.play_button = t.button(transport, '▶  PLAY', self.play_preview)
         self.pause_button = t.button(transport, '⏸  PAUSE', self.pause_preview)
         self.stop_button = t.button(transport, '■  STOP', self.stop_preview)
         for button in (self.play_button, self.pause_button, self.stop_button):
-            button.configure(state='disabled')
+            button.configure(state='disabled', padx=10, pady=6)
         self.play_button.pack(side='left')
-        self.pause_button.pack(side='left', padx=(8, 0))
-        self.stop_button.pack(side='left', padx=(8, 0))
-        self.clock = t.label(transport, '0:00.000 / 0:00.000', 11, t.TEXT)
-        self.clock.pack(side='left', padx=16)
-        self.preview_note = t.label(transport, 'Preparing audio preview…', 9, t.MUTED)
+        self.pause_button.pack(side='left', padx=(5, 0))
+        self.stop_button.pack(side='left', padx=(5, 0))
+        self.clock = t.label(
+            transport, '0:00.000 / 0:00.000', 10, t.TEXT)
+        self.clock.pack(side='left', padx=12)
+        self.preview_note = t.label(
+            transport, 'Preparing audio preview…', 9, t.MUTED)
         self.preview_note.pack(side='right')
-        self.quality_picker = ttk.Combobox(transport,textvariable=self.preview_quality,
-            values=('360p','480p','720p'),state='readonly',width=5)
-        self.quality_picker.pack(side='right',padx=6)
-        self.quality_picker.bind('<<ComboboxSelected>>',self.quality_changed)
+        self.quality_picker = ttk.Combobox(
+            transport, textvariable=self.preview_quality,
+            values=('360p', '480p', '720p'),
+            state='readonly', width=5)
+        self.quality_picker.pack(side='right', padx=5)
+        self.quality_picker.bind(
+            '<<ComboboxSelected>>', self.quality_changed)
         self.audio_toggle = tk.Checkbutton(
             transport, text='SOUND ON', variable=self.audio_on,
             command=self.toggle_audio, bg=t.BG, fg=t.CYAN,
             selectcolor=t.CONTROL, activebackground=t.BG,
-            activeforeground=t.TEXT, disabledforeground=t.MUTED, bd=0)
-        self.audio_toggle.pack(side='right', padx=(0, 10))
-        self.timeline = Timeline(preview_area, self.seek, self.drag_trim,
-                                 self.begin_clip_drag,self.change_clip_drag,self.end_clip_drag,
-                                 self.delete_timeline_item)
+            activeforeground=t.TEXT, disabledforeground=t.MUTED,
+            bd=0)
+        self.audio_toggle.pack(side='right', padx=(0, 7))
+        self.timeline = Timeline(
+            timeline_space, self.seek, self.drag_trim,
+            self.begin_clip_drag, self.change_clip_drag,
+            self.end_clip_drag, self.delete_timeline_item)
         self.timeline.on_output_seek = self.seek_output_time
-        self.timeline.grid(row=2, column=0, sticky='ew')
+        self.timeline.pack(fill='x')
+        self.paint_tool_buttons()
 
     def add_segments(self, parent, variable, choices, command):
         segments = t.Segments(parent, variable, choices, command)
