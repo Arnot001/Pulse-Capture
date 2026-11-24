@@ -8,11 +8,11 @@ class Timeline(tk.Canvas):
     """Source-clock trim row and output-clock draggable visual/audio tracks."""
     TRACK_TOP = 68
     TRACK_HEIGHT = 24
-    TRACK_LABELS = ('VIDEO', 'CAPTIONS', 'EMOJIS / GIFS', 'SFX', 'VOICE', 'MUSIC', 'MOTION')
+    TRACK_LABELS = ('VIDEO', 'MEDIA', 'CAPTIONS', 'EMOJIS / GIFS', 'SFX', 'VOICE', 'MUSIC', 'MOTION')
 
     def __init__(self, parent, on_seek, on_trim, on_clip_begin=None,
                  on_clip_change=None, on_clip_end=None):
-        super().__init__(parent, height=249, bg=t.BG, highlightthickness=0, cursor='hand2')
+        super().__init__(parent, height=273, bg=t.BG, highlightthickness=0, cursor='hand2')
         self.on_seek, self.on_trim = on_seek, on_trim
         self.on_clip_begin = on_clip_begin
         self.on_clip_change = on_clip_change
@@ -74,7 +74,7 @@ class Timeline(tk.Canvas):
         if track < 0 or track >= len(self.TRACK_LABELS):
             return None
         for block in reversed(self.clip_blocks):
-            if block.track != track or block.kind not in ('caption','overlay','sound'):
+            if block.track != track or block.kind not in ('caption','overlay','sound','media'):
                 continue
             left, right = self.block_x(block.start), self.block_x(block.end)
             if left-4 <= x <= right+4:
@@ -136,7 +136,7 @@ class Timeline(tk.Canvas):
                 a=max(14,self.block_x(block.start));b=min(right,self.block_x(block.end))
                 y=self.TRACK_TOP+block.track*self.TRACK_HEIGHT
                 if b-a < 4:b=a+4
-                editable=block.kind in ('caption','overlay','sound')
+                editable=block.kind in ('caption','overlay','sound','media')
                 fill=('#185e70' if editable else '#344653')
                 stroke=('#60e2ff' if editable else '#526474')
                 self.create_rectangle(a,y+2,b,y+21,fill=fill,outline=stroke,width=1)

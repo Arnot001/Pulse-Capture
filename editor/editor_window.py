@@ -42,6 +42,7 @@ class EditorWindow(tk.Toplevel):
         self.pulse_candidate = pulse_candidate
         self.auto_dialog = None
         self.auto_children = set()
+        self.media_dialog = None
         self.exporter = ExportJob(backend, verify_short=auto_candidate is not None)
         self.metadata = Queue()
         self.closed = self.closing = self.playing = False
@@ -109,6 +110,10 @@ class EditorWindow(tk.Toplevel):
         self.source_label = t.label(intro, self.path.name, 9, t.MUTED, anchor='w')
         reaction_row = tk.Frame(intro, bg=t.BG)
         reaction_row.pack(side='right')
+        media_button = t.button(reaction_row, 'PHOTOS / VIDEO', self.open_imported_media)
+        media_button.configure(padx=7, pady=4, font=(t.FONT, -9, 'bold'))
+        media_button.pack(side='left', padx=2)
+        self.controls.append(media_button)
         for label, kind in (('REACTION AUDIO', 'sfx'), ('EMOJIS', 'emoji'), ('GIFS / REACTIONS', 'gif'), ('EFFECTS', 'effects')):
             button = t.button(reaction_row, label, lambda k=kind: self.open_reactions(k))
             button.configure(padx=6, pady=4, font=(t.FONT, -9, 'bold'))
@@ -233,6 +238,16 @@ class EditorWindow(tk.Toplevel):
         segments.pack(fill='x', pady=(0, 6))
         self.controls.extend(b for _, b in segments.buttons)
         return segments
+
+    def open_imported_media(self):
+        if not self.media or self.exporter.busy or self.closing:
+            return
+        if self.media_dialog and not self.media_dialog.closed:
+            self.media_dialog.deiconify()
+            self.media_dialog.lift()
+            return
+        from .imported_media_ui import ImportedMediaDialog
+        self.media_dialog = ImportedMediaDialog(self)
 
     def open_voiceover_studio(self):
         """Open the standalone narration generator without changing video edit state."""
@@ -681,6 +696,8 @@ class EditorWindow(tk.Toplevel):
         if self._timing_drag_key is None:return
         self._timing_drag_key=None
         self.overlay_tools.refresh()
+        if self.media_dialog and not self.media_dialog.closed:
+            self.media_dialog.refresh()
         self.request_frame()
 
     def undo_timeline(self, _event=None):
@@ -692,6 +709,7 @@ class EditorWindow(tk.Toplevel):
         restored=self.timeline_history.undo()
         self.edits=restored.edits
         self.update_timeline();self.overlay_tools.refresh();self.request_frame()
+        if self.media_dialog and not self.media_dialog.closed:self.media_dialog.refresh()
         return 'break'
 
     def redo_timeline(self, _event=None):
@@ -703,6 +721,7 @@ class EditorWindow(tk.Toplevel):
         restored=self.timeline_history.redo()
         self.edits=restored.edits
         self.update_timeline();self.overlay_tools.refresh();self.request_frame()
+        if self.media_dialog and not self.media_dialog.closed:self.media_dialog.refresh()
         return 'break'
 
     def update_selection_label(self):

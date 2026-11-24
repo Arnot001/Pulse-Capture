@@ -203,7 +203,7 @@ def add_visuals(args, graph, input_label, overlays, width, height, sample_time=N
 
 def augment_export(args, edits, duration, width, height, bands=None):
     """Extend an existing export command, preserving its video/audio transforms."""
-    if not edits.sounds and not edits.overlays and not edits.narration:
+    if not edits.sounds and not edits.overlays and not edits.narration and not edits.media_clips:
         return args
     args = list(args)
     output = args.pop()
@@ -234,6 +234,9 @@ def augment_export(args, edits, duration, width, height, bands=None):
     # add_* uses the existing input count to assign stream indexes.
     inputs = ['-i']*args.count('-i')
     initial = len(inputs)
+    if edits.media_clips:
+        from .imported_media import add_media
+        video = add_media(inputs, graph, video.strip('[]'), edits.media_clips, width, height)
     video = add_visuals(inputs, graph, video.strip('[]'), edits.overlays, width, height, bands=bands)
     if edits.sounds:
         audio = add_sounds(inputs, graph, audio, edits.sounds, duration)

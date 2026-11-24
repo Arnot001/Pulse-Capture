@@ -26,7 +26,7 @@ class DummyTimeline:
         self.drag=None
         self.clip_drag=None
         self.clip_blocks=(SimpleNamespace(kind='overlay',index=0,key=('overlay',0),
-                           track=2,start=5,end=15,label='emoji.skull'),)
+                           track=3,start=5,end=15,label='emoji.skull'),)
         self.changed=[]
         self.begun=[]
         self.ended=0
@@ -44,7 +44,7 @@ class TimelinePointerTests(unittest.TestCase):
     def event(self,x,y):return SimpleNamespace(x=x,y=y)
     def test_middle_move_preserves_duration(self):
         w=DummyTimeline()
-        y=w.TRACK_TOP+2*w.TRACK_HEIGHT+12
+        y=w.TRACK_TOP+3*w.TRACK_HEIGHT+12
         w.begin(self.event(w.block_x(10),y))
         w.move(self.event(w.block_x(13),y))
         self.assertEqual(w.changed[-1][0],('overlay',0))
@@ -53,7 +53,7 @@ class TimelinePointerTests(unittest.TestCase):
         w.release(self.event(0,0))
         self.assertEqual(w.ended,1)
     def test_left_and_right_handles_resize(self):
-        w=DummyTimeline();y=w.TRACK_TOP+2*w.TRACK_HEIGHT+12
+        w=DummyTimeline();y=w.TRACK_TOP+3*w.TRACK_HEIGHT+12
         w.begin(self.event(w.block_x(5)+1,y))
         w.move(self.event(w.block_x(7),y))
         self.assertAlmostEqual(w.changed[-1][1],7)
@@ -64,7 +64,7 @@ class TimelinePointerTests(unittest.TestCase):
         self.assertAlmostEqual(w.changed[-1][1],5)
         self.assertAlmostEqual(w.changed[-1][2],18)
     def test_clamped_at_end(self):
-        w=DummyTimeline();y=w.TRACK_TOP+2*w.TRACK_HEIGHT+12
+        w=DummyTimeline();y=w.TRACK_TOP+3*w.TRACK_HEIGHT+12
         w.begin(self.event(w.block_x(10),y))
         w.move(self.event(w.block_x(28),y))
         self.assertAlmostEqual(w.changed[-1][1],20)
