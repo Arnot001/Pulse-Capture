@@ -18,6 +18,7 @@ from .voice_assets import VoiceSettings, process_voice, wav_info, waveform
 from .voice_catalogue import Catalogue
 from .voice_conversion import available, convert_voice, MODEL_URL
 from .voice_recording import MicrophoneRecorder, microphones
+from .commentary_playback import TakePlayback
 
 
 class CommentaryStudio(tk.Toplevel):
@@ -32,6 +33,8 @@ class CommentaryStudio(tk.Toplevel):
         # No grab: the user must be able to watch/scrub the parent video.
         self.events = Queue()
         self.recorder = MicrophoneRecorder()
+        self.player = TakePlayback()
+        self._pending_play = None
         self.catalogue = Catalogue()
         self.devices = []
         self.voices = []
@@ -57,6 +60,9 @@ class CommentaryStudio(tk.Toplevel):
         self.pitch_var = tk.DoubleVar(value=0.)
         self.speed_var = tk.DoubleVar(value=1.)
         self.mix_var = tk.DoubleVar(value=1.)
+        self.audition_var = tk.StringVar(value='current')
+        self.status_bar = tk.Frame(self, bg=t.BG)
+        self.status_bar.pack(side='bottom', fill='x', padx=17, pady=(4, 9))
         # Scroll the studio vertically on smaller Windows laptops; never
         # clip the bottom Convert/Cancel controls behind an oversized dialog.
         self.view = tk.Canvas(self, bg=t.BG, bd=0, highlightthickness=0)
@@ -94,99 +100,155 @@ class CommentaryStudio(tk.Toplevel):
 
     def _build(self):
         heading = tk.Frame(self.content, bg=t.BG)
-        heading.pack(fill='x', padx=16, pady=(12, 6))
-        t.label(heading, '🎙  COMMENTARY STUDIO', 17, t.CYAN, True).pack(side='left')
-        self.record_hint = t.label(
-            heading, 'Record locally · originals never overwritten', 9, t.MUTED)
-        self.record_hint.pack(side='right')
+        heading.pack(fill='x', padx=16, pady=(12, 5))
+        t.label(heading, '🎙  COMMENTARY STUDIO', 16, t.CYAN, True).pack(side='left')
+        t.label(heading, 'Record · Review · Edit · Convert', 10, t.MUTED).pack(side='right')
+
+        t.label(self.content, '01   RECORD A TAKE', 11, t.CYAN, True).pack(
+            anchor='w', padx=19, pady=(8, 4))
         record = tk.Frame(self.content, bg=t.PANEL)
-        record.pack(fill='x', padx=16, pady=4)
-        t.label(record, 'MIC', 9, t.MUTED, True).pack(side='left', padx=7)
+        record.pack(fill='x', padx=16, pady=(0, 4))
+        t.label(record, 'MICROPHONE', 10, t.TEXT, True).pack(side='left', padx=(12, 7))
         self.device_picker = ttk.Combobox(
-            record, values=(), textvariable=self.mic, state='readonly', width=27)
-        self.device_picker.pack(side='left', padx=4, pady=7)
-        self.record_button = self._button(record, '● RECORD + PLAY', self.record, True)
-        self.record_button.configure(state='disabled')  # Enable only after input discovery.
-        self.stop_button = self._button(record, '■ STOP & SAVE', self.stop)
-        self.stop_button.configure(state='disabled')
+            record, values=(), textvariable=self.mic, state='readonly', width=29)
+        self.device_picker.pack(side='left', padx=(0, 8), pady=10)
+        self.record_button = self._button(record, '●  RECORD + VIDEO', self.record, True)
+        self.record_button.configure(state='disabled', padx=12, pady=9,
+                                     font=(t.FONT, -10, 'bold'))
+        self.stop_button = self._button(record, '■  STOP & SAVE', self.stop)
+        self.stop_button.configure(state='disabled', padx=11, pady=9)
         self.reload_mics_button = self._button(record, '↻ REFRESH', self.reload_mics)
         self.level_meter = ttk.Progressbar(self.content, maximum=1.0)
-        self.level_meter.pack(fill='x', padx=20, pady=(1, 6))
-        t.label(self.content, 'Use headphones to avoid recording gameplay sound through the mic. The video starts when microphone capture is ready.',
-                9, t.MUTED).pack(anchor='w', padx=18)
+        self.level_meter.pack(fill='x', padx=20, pady=(1, 2))
+        t.label(self.content,
+                'Records while your video plays. Headphones prevent speaker sound bleeding into the mic.',
+                9, t.MUTED).pack(anchor='w', padx=19, pady=(0, 7))
 
         clip_head = tk.Frame(self.content, bg=t.BG)
-        clip_head.pack(fill='x', padx=18, pady=(11, 3))
-        t.label(clip_head, 'VOICE TIMELINE · RECORDINGS', 10, t.CYAN, True).pack(side='left')
-        t.label(clip_head, 'Select a take to edit, split or convert', 9, t.MUTED).pack(side='right')
+        clip_head.pack(fill='x', padx=18, pady=(8, 5))
+        t.label(clip_head, '02   LISTEN & EDIT', 11, t.CYAN, True).pack(side='left')
+        t.label(clip_head, 'Choose a take below', 10, t.MUTED).pack(side='right')
         holder = tk.Frame(self.content, bg=t.BG)
         holder.pack(fill='x', padx=18)
         self.clips = tk.Listbox(
-            holder, height=4, bg=t.CONTROL, fg=t.TEXT,
-            selectbackground=t.LINE, activestyle='none',
-            exportselection=False)
+            holder, height=3, bg=t.CONTROL, fg=t.TEXT,
+            font=(t.FONT, -11), selectbackground=t.LINE,
+            activestyle='none', exportselection=False)
         self.clips.pack(side='left', fill='both', expand=True)
         self.clips.bind('<<ListboxSelect>>', self.on_select)
         scroll = ttk.Scrollbar(holder, orient='vertical', command=self.clips.yview)
         scroll.pack(side='right', fill='y')
         self.clips.configure(yscrollcommand=scroll.set)
 
-        self.wave = tk.Canvas(self.content, height=63, bg=t.PANEL, highlightthickness=0)
-        self.wave.pack(fill='x', padx=18, pady=(5, 5))
+        self.wave = tk.Canvas(self.content, height=72, bg=t.PANEL, highlightthickness=0)
+        self.wave.pack(fill='x', padx=18, pady=(7, 5))
         self.wave.bind('<Configure>', lambda _: self.draw_wave())
-        fields = tk.Frame(self.content, bg=t.BG)
-        fields.pack(fill='x', padx=16, pady=(2, 5))
-        values = [('START',self.start_var),('END',self.end_var),
-                  ('SOURCE IN',self.source_var),('VOICE LEVEL',self.volume_var),
-                  ('GAME LEVEL',self.background_var),('FADE IN',self.fadein_var),
-                  ('FADE OUT',self.fadeout_var)]
-        for index, (label, var) in enumerate(values):
-            group = tk.Frame(fields, bg=t.BG)
-            group.grid(row=index//4, column=index%4, sticky='ew', padx=3, pady=2)
-            fields.columnconfigure(index%4, weight=1)
-            t.label(group, label, 8, t.MUTED, True).pack(anchor='w')
-            tk.Entry(group, textvariable=var, width=8, bg=t.CONTROL, fg=t.TEXT,
-                     insertbackground=t.CYAN, relief='flat').pack(fill='x', ipady=4)
-        edit = tk.Frame(self.content, bg=t.BG)
-        edit.pack(fill='x', padx=18, pady=(3, 8))
-        self.apply_button = self._button(edit,'APPLY EDIT',self.apply)
-        self.split_button = self._button(edit,'SPLIT AT PLAYHEAD',self.split)
-        self.seek_button = self._button(edit,'JUMP TO CLIP',self.seek)
-        self.delete_button = self._button(edit,'DELETE FROM VIDEO',self.remove)
-        self.original_button = self._button(edit,'USE ORIGINAL VOICE',self.use_original)
 
-        convert_header = tk.Frame(self.content, bg=t.BG)
-        convert_header.pack(fill='x', padx=18, pady=(2, 5))
-        t.label(convert_header, 'VOICE ALTERNATOR · LOCAL', 10, t.CYAN, True).pack(side='left')
+        playback = tk.Frame(self.content, bg=t.PANEL)
+        playback.pack(fill='x', padx=18, pady=(0, 3))
+        source = tk.Frame(playback, bg=t.PANEL)
+        source.pack(fill='x', padx=12, pady=(7, 4))
+        t.label(source, 'HEAR', 10, t.TEXT, True).pack(side='left', padx=(0, 10))
+        self.audition_choices = t.Segments(
+            source, self.audition_var,
+            (('current', 'CURRENT VOICE'), ('original', 'ORIGINAL VOICE')),
+            self.on_audition_change)
+        self.audition_choices.pack(side='left', fill='x', expand=True)
+        transport = tk.Frame(playback, bg=t.PANEL)
+        transport.pack(fill='x', padx=12, pady=(0, 9))
+        self.play_take_button = self._button(
+            transport, '▶  PLAY TAKE', self.play_take, True)
+        self.pause_take_button = self._button(
+            transport, '⏸  PAUSE', self.pause_take)
+        self.stop_take_button = self._button(
+            transport, '■  STOP', self.stop_take)
+        for button in (self.play_take_button, self.pause_take_button,
+                       self.stop_take_button):
+            button.configure(font=(t.FONT, -12, 'bold'), padx=19, pady=10,
+                             state='disabled')
+        self.playback_clock = t.label(
+            transport, '0:00 / 0:00', 12, t.TEXT, True)
+        self.playback_clock.pack(side='right', padx=(8, 2))
+        t.label(self.content,
+                'These buttons play the selected voice only. Use PLAY in the video editor to hear the full mix.',
+                9, t.MUTED).pack(anchor='w', padx=20, pady=(0, 7))
+
+        t.label(self.content, 'EDIT POSITION · SECONDS', 10, t.CYAN, True).pack(
+            anchor='w', padx=19, pady=(5, 2))
+        timing = tk.Frame(self.content, bg=t.BG)
+        timing.pack(fill='x', padx=16)
+        self._field(timing, 0, 0, 'START IN VIDEO', self.start_var)
+        self._field(timing, 0, 1, 'END IN VIDEO', self.end_var)
+        self._field(timing, 0, 2, 'SKIP FROM RECORDING', self.source_var)
+        t.label(self.content, 'MIX & FADES', 10, t.CYAN, True).pack(
+            anchor='w', padx=19, pady=(8, 2))
+        mixing = tk.Frame(self.content, bg=t.BG)
+        mixing.pack(fill='x', padx=16)
+        self._field(mixing, 0, 0, 'VOICE VOLUME (0–2)', self.volume_var)
+        self._field(mixing, 0, 1, 'GAME VOLUME (0–1)', self.background_var)
+        self._field(mixing, 0, 2, 'FADE IN (SEC)', self.fadein_var)
+        self._field(mixing, 0, 3, 'FADE OUT (SEC)', self.fadeout_var)
+        actions = tk.Frame(self.content, bg=t.BG)
+        actions.pack(fill='x', padx=18, pady=(9, 10))
+        self.apply_button = self._button(actions, '✓  APPLY CHANGES', self.apply, True)
+        self.split_button = self._button(actions, '✂  SPLIT AT PLAYHEAD', self.split)
+        self.seek_button = self._button(actions, '⌖  GO TO TAKE', self.seek)
+        self.delete_button = self._button(actions, '✕  REMOVE FROM VIDEO', self.remove)
+        for button in (self.apply_button, self.split_button,
+                       self.seek_button, self.delete_button):
+            button.configure(font=(t.FONT, -10, 'bold'), padx=11, pady=9)
+
+        t.label(self.content, '03   VOICE ALTERNATOR', 11, t.CYAN, True).pack(
+            anchor='w', padx=19, pady=(7, 5))
+        convert_header = tk.Frame(self.content, bg=t.PANEL)
+        convert_header.pack(fill='x', padx=18)
+        t.label(convert_header, 'TARGET VOICE', 10, t.TEXT, True).pack(
+            side='left', padx=(10, 9), pady=8)
         self.voice_picker = ttk.Combobox(
             convert_header, textvariable=self.voice_var, state='readonly',
-            values=(), width=27)
-        self.voice_picker.pack(side='right')
+            values=(), width=30)
+        self.voice_picker.pack(side='left', fill='x', expand=True, padx=(0, 10), pady=8)
         knobs = tk.Frame(self.content, bg=t.PANEL)
-        knobs.pack(fill='x', padx=18)
+        knobs.pack(fill='x', padx=18, pady=(2, 0))
         for index, (title, var, low, high, step) in enumerate(
-                (('PITCH',self.pitch_var,-12,12,.5),
-                 ('SPEED',self.speed_var,.5,2,.05),
-                 ('VOICE MIX',self.mix_var,0,1,.05))):
+                (('PITCH', self.pitch_var, -12, 12, .5),
+                 ('SPEED', self.speed_var, .5, 2, .05),
+                 ('VOICE MIX', self.mix_var, 0, 1, .05))):
             block = tk.Frame(knobs, bg=t.PANEL)
-            block.grid(row=0, column=index, sticky='ew', padx=8, pady=4)
-            knobs.columnconfigure(index,weight=1)
-            t.label(block,title,9,t.MUTED,True).pack(anchor='w')
-            tk.Scale(block,variable=var,from_=low,to=high,resolution=step,
-                     orient='horizontal',bg=t.PANEL,fg=t.TEXT,
-                     troughcolor=t.CONTROL,highlightthickness=0,
-                     length=175).pack(fill='x')
+            block.grid(row=0, column=index, sticky='ew', padx=10, pady=6)
+            knobs.columnconfigure(index, weight=1)
+            t.label(block, title, 10, t.TEXT, True).pack(anchor='w')
+            tk.Scale(block, variable=var, from_=low, to=high, resolution=step,
+                     orient='horizontal', bg=t.PANEL, fg=t.TEXT,
+                     troughcolor=t.CONTROL, highlightthickness=0,
+                     length=170).pack(fill='x')
         controls = tk.Frame(self.content, bg=t.BG)
-        controls.pack(fill='x', padx=18, pady=(7, 2))
-        self.convert_button = self._button(controls,'CONVERT · OPENVOICE',self.convert,True)
-        self.process_button = self._button(controls,'PITCH / SPEED ONLY',self.process)
-        self.listen_original_button = self._button(controls,'▶ ORIGINAL',lambda:self.listen('original'))
-        self.listen_result_button = self._button(controls,'▶ CURRENT',lambda:self.listen('current'))
-        self.cancel_button = self._button(controls,'CANCEL PROCESS',self._cancel.set)
+        controls.pack(fill='x', padx=18, pady=(7, 8))
+        self.convert_button = self._button(
+            controls, '⚡  CONVERT VOICE', self.convert, True)
+        self.process_button = self._button(
+            controls, 'PITCH / SPEED ONLY', self.process)
+        self.original_button = self._button(
+            controls, '↶  RESTORE ORIGINAL', self.use_original)
+        self.cancel_button = self._button(
+            controls, 'CANCEL PROCESS', self._cancel.set)
+
+        # Persistent status: the user can see errors/results without having to
+        # scroll past the voice alternator.
         self.status = t.label(
-            self.content, 'Preparing microphone…', 9, t.MUTED,
-            anchor='w', justify='left', wraplength=770)
-        self.status.pack(fill='x', padx=18, pady=(5, 6))
+            self.status_bar, 'Preparing microphone…', 10, t.MUTED,
+            anchor='w', justify='left', wraplength=790)
+        self.status.pack(fill='x', padx=2)
+        self._sync_preview_buttons()
+
+    def _field(self, parent, row, column, title, variable):
+        group = tk.Frame(parent, bg=t.BG)
+        group.grid(row=row, column=column, sticky='ew', padx=4, pady=3)
+        parent.columnconfigure(column, weight=1)
+        t.label(group, title, 9, t.TEXT, True).pack(anchor='w', pady=(0, 2))
+        tk.Entry(group, textvariable=variable, width=8, bg=t.CONTROL,
+                 fg=t.TEXT, insertbackground=t.CYAN, relief='flat',
+                 font=(t.FONT, -11)).pack(fill='x', ipady=7)
 
     def message(self, value, error=False):
         if not self._closing:
