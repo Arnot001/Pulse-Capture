@@ -61,11 +61,13 @@ def preview_command(ffmpeg, media, position, width, height, edits=None, source_v
                                                 kept_duration, output_time, trim=trim, cuts=cuts, source_position=position)
         if edits.branding.enabled:
             args += ['-i', str(watermark_path())]
-        if edits.overlays:
+        if edits.overlays or edits.media_clips:
             from .reactions import add_visuals
+            from .imported_media import add_media
             graph = [filters] if complex_graph else [f'[0:v:0]{filters}[v]']
             out_w, out_h = edits.encoded_size(media)
-            visual = add_visuals(args, graph, 'v', edits.overlays, out_w, out_h, output_time, edits.bands(media))
+            visual = add_media(args, graph, 'v', edits.media_clips, out_w, out_h, sample_time=output_time)
+            visual = add_visuals(args, graph, visual, edits.overlays, out_w, out_h, output_time, edits.bands(media))
             graph.append(f'[{visual}]null[reactionpreview]')
             filters = ';'.join(graph)
             args += ['-filter_complex_threads', '1', '-filter_complex',

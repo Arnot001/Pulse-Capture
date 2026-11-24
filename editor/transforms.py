@@ -144,10 +144,13 @@ class EditOptions:
     narration: object | None = None
     overlays: tuple = ()
     comedy_bands: tuple | None = None
+    media_clips: tuple = ()
 
     def validate(self, media):
         from .reactions import validate_cues
         validate_cues(self.sounds, self.overlays)
+        from .imported_media import validate_clips
+        validate_clips(self.media_clips)
         if self.narration is not None:
             from .narration import Narration
             if not isinstance(self.narration, Narration):

@@ -64,6 +64,49 @@ fades. The built-ins are synthesized locally from Pulse-owned recipes and use no
 third-party audio samples. The workflow below describes this development branch.
 See `V06_PRIVACY_VERIFICATION.md` for Privacy verification and limits.
 
+## Photo and video Media track (Phase A)
+
+Quick Edit now has a **PHOTOS / VIDEO** button and a dedicated **MEDIA**
+lane between Video and Captions. Use **ADD PHOTO** (PNG, JPG, WEBP) or
+**ADD VIDEO** (MP4, MOV, MKV, WEBM). Imported files stay in their original
+locations and are never edited, moved, or uploaded.
+
+- New clips appear at the current output-time playhead, defaulting to a
+  five-second duration (or shorter if the source/output ends).
+- Drag a media block to move it, or drag either edge to change its timeline
+  start/end. Open **PHOTOS / VIDEO** for numeric start, duration and
+  video source start. Duration cannot exceed the remaining video source.
+- **Cutaway** fills the output area (letterboxing as necessary);
+  **Picture in picture** places a smaller video/photo in the upper right.
+- Pause at a time where the media is visible, then click it on the **preview
+  frame**. Drag it to move; drag a cyan corner to resize while preserving its
+  aspect ratio. Dragging a full-frame Cutaway turns it into a movable picture
+  layer. Press Esc during dragging to cancel; Ctrl+Z/Ctrl+Y supports timeline
+  undo/redo. These editing guides never appear in the exported video.
+- **Delete on the timeline:** right-click a photo/video, caption, emoji/GIF,
+  sound effect, music or motion block to open **Delete from timeline**.
+  Or left-click to select it, then press **Delete** or **Backspace** while the
+  timeline has focus. Use **Ctrl+Z** to undo and **Ctrl+Y** to redo.
+  Original video/cut markers cannot be deleted this way; imported files,
+  recording and saved assets are never removed from disk. The command is
+  disabled during export. Right-clicking an empty track does nothing.
+- The Photos / Video inspector also supports precise **X POSITION %**,
+  **Y POSITION %** (0–100% of available travel) and **SIZE %** (5–100%).
+  Placement applies to picture-in-picture mode; Cutaway always fills the
+  canvas. When editing crop, motion or privacy rectangles, use those tools
+  separately so mouse gestures cannot conflict.
+- The edited preview, continuous playback and MP4 export share the same
+  compositor. Times follow the output after trim, cuts and speed changes.
+- In Phase A, imported video clips are **silent**; the original recording's
+  soundtrack, music and AI voiceover are unaffected. Image/video placement,
+  fades, crop, imported clip audio and full insert/append editing are later
+  features.
+- Avoid more than a few simultaneous videos on a low-spec laptop. A maximum
+  of 16 imported clips is enforced. Keep imported files at their current
+  paths until export finishes.
+- To test: `python -m unittest tests.test_imported_media tests.test_timeline_drag -v`
+  then `python -m unittest discover -q`.
+
 ## Quick Edit
 
 Click **Quick Edit** after recording to open the latest video. You can also

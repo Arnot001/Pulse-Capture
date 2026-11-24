@@ -38,7 +38,9 @@ def playback_command(ffmpeg, media, start, end, trim, cuts, edits, width, height
         cuts.kept_duration(trim),trim=trim,cuts=cuts,clock_offset=offset,source_offset=start)
     graph=[filters] if complex_graph else [f'[0:v:0]{filters}[v]']
     out_w,out_h=edits.encoded_size(media)
-    current=add_visuals(args,graph,'v',edits.overlays,out_w,out_h,bands=edits.bands(media))
+    from .imported_media import add_media
+    current=add_media(args,graph,'v',edits.media_clips,out_w,out_h,offset=offset/edits.speed)
+    current=add_visuals(args,graph,current,edits.overlays,out_w,out_h,bands=edits.bands(media))
     graph.append(f'[{current}]setpts=PTS-STARTPTS,format=yuv420p,scale={width}:{height}:flags=bilinear,setsar=1[playback]')
     return args+['-filter_complex_threads','1','-filter_complex',';'.join(graph),
         '-map','[playback]','-an','-t',f'{(end-start)/edits.speed:.9f}',
