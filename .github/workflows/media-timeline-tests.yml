@@ -11,6 +11,10 @@ on:
       - '.github/workflows/media-timeline-tests.yml'
   workflow_dispatch:
 
+concurrency:
+  group: media-timeline-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   windows-regressions:
     runs-on: windows-latest
@@ -27,22 +31,27 @@ jobs:
       - name: Media timeline tests
         shell: pwsh
         run: python -m unittest tests.test_imported_media tests.test_imported_media_preview tests.test_timeline_drag -v
-      - name: Install FFmpeg for real media render
-        shell: pwsh
-        run: |
-          for ($attempt=1; $attempt -le 4; $attempt++) {
-            choco install ffmpeg -y --no-progress
-            if ((Get-Command ffmpeg -ErrorAction SilentlyContinue) -and
-                (Get-Command ffprobe -ErrorAction SilentlyContinue)) { break }
-            Write-Host "FFmpeg feed unavailable, retry $attempt/4"
-            Start-Sleep -Seconds (3 * $attempt)
-          }
-          if (-not (Get-Command ffmpeg -ErrorAction SilentlyContinue) -or -not (Get-Command ffprobe -ErrorAction SilentlyContinue)) {
-            throw 'FFmpeg and FFprobe must be installed to verify a real export.'
-          }
-      - name: Real MP4 media render
-        shell: pwsh
-        run: python -m unittest tests.test_imported_media_render -v
       - name: Full regression suite
         shell: pwsh
         run: python -m unittest discover -q
+
+  linux-real-media-render:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Ensure FFmpeg and FFprobe are available
+        shell: bash
+        run: |
+          if ! command -v ffmpeg >/dev/null || ! command -v ffprobe >/dev/null; then
+            sudo apt-get update -qq
+            sudo apt-get install -y ffmpeg
+          fi
+          ffmpeg -version | head -n 1
+          ffprobe -version | head -n 1
+      - name: Verify real MP4 photo and resizable PiP placements
+        shell: bash
+        run: python -m unittest tests.test_imported_media_render -v
