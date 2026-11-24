@@ -15,8 +15,8 @@ class ImportedMediaDialog(tk.Toplevel):
         self.window = window
         self.closed = False
         self.title('PULSE // CAPTURE — PHOTOS & VIDEO')
-        self.geometry('790x520')
-        self.minsize(650, 460)
+        self.geometry('790x590')
+        self.minsize(650, 500)
         self.configure(bg=t.BG)
         self.transient(window)
         self.protocol('WM_DELETE_WINDOW', self.close)
@@ -27,7 +27,7 @@ class ImportedMediaDialog(tk.Toplevel):
         t.label(top, 'MEDIA TIMELINE', 18, t.TEXT, True).pack(side='left')
         t.button(top, 'ADD PHOTO', lambda: self.add('photo'), accent=True).pack(side='right', padx=(8, 0))
         t.button(top, 'ADD VIDEO', lambda: self.add('video')).pack(side='right')
-        t.label(self, 'Place images or silent video over the recording. Drag clips on the MEDIA track to move or resize them.',
+        t.label(self, 'Select media on the preview to move or resize it. The MEDIA track controls duration.',
                 9, t.MUTED).pack(anchor='w', padx=18, pady=(0, 9))
 
         frame = tk.Frame(self, bg=t.BG)
@@ -58,6 +58,19 @@ class ImportedMediaDialog(tk.Toplevel):
         self.layout = tk.StringVar(value=LAYOUTS[0])
         layout = ttk.Combobox(group, textvariable=self.layout, state='readonly', values=LAYOUTS, width=22)
         layout.pack(side='left')
+        t.label(group, 'Cutaway fills the screen; PiP supports dragging.',
+                9, t.MUTED).pack(side='left', padx=10)
+        for col, (key, title, initial) in enumerate((
+            ('x', 'X POSITION %', '100'), ('y', 'Y POSITION %', '0'),
+            ('scale', 'SIZE %', '38'))):
+            item = tk.Frame(controls, bg=t.PANEL)
+            item.grid(row=2, column=col, sticky='ew', padx=8, pady=(0, 9))
+            t.label(item, title, 9, t.MUTED, True).pack(anchor='w')
+            var = tk.StringVar(value=initial)
+            self.vars[key] = var
+            tk.Entry(item, textvariable=var, bg=t.CONTROL, fg=t.TEXT,
+                     insertbackground=t.CYAN, relief='flat',
+                     font=(t.MONO, -14)).pack(fill='x', ipady=5, pady=(4, 0))
 
         buttons = tk.Frame(self, bg=t.BG)
         buttons.pack(fill='x', padx=18, pady=(11, 0))
@@ -110,6 +123,8 @@ class ImportedMediaDialog(tk.Toplevel):
             self.items.selection_set(current)
             self.items.see(current)
             self.select_clip()
+        else:
+            self.window.video.select_media(None, notify=False)
 
     def chosen_index(self):
         indices = self.items.curselection()
@@ -126,6 +141,18 @@ class ImportedMediaDialog(tk.Toplevel):
         self.vars['duration'].set(format_time(cue.duration))
         self.vars['source_in'].set(format_time(cue.source_in))
         self.layout.set(cue.layout)
+        self.window.video.select_media(self.chosen_index(), notify=False)
+        for key in ('x', 'y', 'scale'):
+            self.vars[key].set(f'{getattr(cue, key) * 100:.1f}')
+
+    def sync_from_canvas(self, index):
+        if self.closed or not self.winfo_exists():
+            return
+        self.items.selection_clear(0, 'end')
+        if index is not None and 0 <= index < self.items.size():
+            self.items.selection_set(index)
+            self.items.see(index)
+            self.select_clip()
 
     def add(self, kind):
         try:
@@ -161,8 +188,15 @@ class ImportedMediaDialog(tk.Toplevel):
             start = parse_time(self.vars['start'].get())
             length = parse_time(self.vars['duration'].get())
             source_in = parse_time(self.vars['source_in'].get()) if original.kind == 'video' else 0
+            try:
+                x = float(self.vars['x'].get()) / 100
+                y = float(self.vars['y'].get()) / 100
+                size = float(self.vars['scale'].get()) / 100
+            except ValueError as exc:
+                raise ValueError('Enter numeric X, Y and Size percentages.') from exc
             cues[index] = replace(original, start=start, end=start + length,
-                                  source_in=source_in, layout=self.layout.get())
+                                  source_in=source_in, layout=self.layout.get(),
+                                  x=x, y=y, scale=size)
             self._set_clips(cues, index)
             self.message.configure(text='Media timing updated. The original file was not modified.', fg=t.CYAN)
         except (ValueError, IndexError) as exc:

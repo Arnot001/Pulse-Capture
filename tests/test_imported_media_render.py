@@ -52,7 +52,8 @@ class ImportedMediaRenderTests(unittest.TestCase):
             edits = EditOptions(media_clips=(
                 MediaClip(str(photo), 'photo', .5, 1.5, layout='Cutaway'),
                 MediaClip(str(broll), 'video', 2., 3., 0., broll_meta.duration,
-                          layout='Picture in picture'),
+                          layout='Picture in picture', x=.1, y=1., scale=.5,
+                          source_width=broll_meta.width, source_height=broll_meta.height),
             ))
             command = build_export_command(ffmpeg, media, TrimRange(0., media.duration), output, edits)
             rendered = subprocess.run(command, capture_output=True, timeout=75)
@@ -77,10 +78,10 @@ class ImportedMediaRenderTests(unittest.TestCase):
             self.assertGreater(photo_colour[1], photo_colour[0] + 60)
             self.assertGreater(photo_colour[1], photo_colour[2] + 60)
             pip_frame = frame(2.5)
-            pip_colour = pixel(pip_frame, 275, 45)
+            pip_colour = pixel(pip_frame, 40, 130)
             self.assertGreater(pip_colour[0], pip_colour[1] + 60)
             self.assertGreater(pip_colour[0], pip_colour[2] + 60)
-            background = pixel(pip_frame, 60, 150)
+            background = pixel(pip_frame, 275, 45)
             self.assertGreater(background[2], background[0] + 60)
 
 

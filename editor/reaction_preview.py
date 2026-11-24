@@ -5,6 +5,8 @@ import math
 from .privacy_preview import PrivacyPreview
 from .reaction_geometry import clamp, positioned, visual_bounds
 from .reaction_library import ReactionLibrary
+from .imported_media import media_bounds, with_media_position
+from .edit_history import EditHistory, EditSnapshot
 from ui import theme as t
 
 
@@ -15,6 +17,8 @@ class ReactionPreview(PrivacyPreview):
         self.visual_drag = None
         self.render_context = None
         self.asset_metadata = {}
+        self.selected_media_index = None
+        self.media_drag = None
         super().__init__(parent, on_crop, on_privacy, on_zoom, **kwargs)
         self.bind('<Escape>', self.cancel_visual_drag)
 
@@ -80,6 +84,178 @@ class ReactionPreview(PrivacyPreview):
         self.sync_dialogs()
         self.draw_overlay()
 
+
+    def media_ready(self):
+        w = self.window
+        if not (self.enabled and self.photo and not self.source_view and w.media and w.trim
+                and not w.playing and not w.closing and not w.exporter.busy
+                and w.tool.get() not in ('CROP', 'PRIVACY', 'MOTION') and self.render_context):
+            return False
+        actual = self.render_context
+        current = self.context()
+        # Media clips change on every mouse move. Keep the selection guide live
+        # while FFmpeg is rendering the next preview frame in the background.
+        return (actual[:3] == current[:3]
+                and replace(actual[3], media_clips=()) == replace(current[3], media_clips=()))
+
+    def media_rect(self, cue):
+        viewport = self.bounds()
+        if viewport is None:
+            return None
+        left, top, w, h = viewport
+        width, height = self.window.edits.encoded_size(self.media)
+        box = media_bounds(cue, width, height)
+        return (left + box.x*w/width, top + box.y*h/height,
+                left + (box.x+box.width)*w/width,
+                top + (box.y+box.height)*h/height)
+
+    def select_media(self, index, notify=True):
+        # The inspector refreshes numeric fields while a drag is in progress.
+        # Reselecting the same clip must not cancel that active gesture.
+        if self.media_drag is not None and self.media_drag['index'] != index:
+            self.media_drag = None
+        cues = self.window.edits.media_clips
+        self.selected_media_index = index if index is not None and 0 <= index < len(cues) else None
+        if self.selected_media_index is not None:
+            self.selected_visual = None
+            self.visual_drag = None
+        if notify:
+            dialog = self.window.media_dialog
+            if dialog is not None and not dialog.closed:
+                dialog.sync_from_canvas(self.selected_media_index)
+        self.draw_overlay()
+
+    def draw_media_guide(self):
+        self.delete('media-guide')
+        i = self.selected_media_index
+        if not self.media_ready() or i is None or not 0 <= i < len(self.window.edits.media_clips):
+            return
+        cue = self.window.edits.media_clips[i]
+        if not cue.start <= self.output_time() < cue.end:
+            return
+        rect = self.media_rect(cue)
+        if rect is None:
+            return
+        self.create_rectangle(*rect, outline=t.CYAN, width=2, tags='media-guide')
+        for name, x, y in self.media_handles(rect):
+            self.create_rectangle(x-5, y-5, x+5, y+5, fill=t.CYAN, outline=t.BG,
+                                  tags='media-guide')
+        self.create_text(rect[0]+5, max(10,rect[1]-9), text=cue.title[:35],
+                         anchor='w', fill=t.CYAN, font=(t.FONT,-9,'bold'), tags='media-guide')
+        self.tag_raise('media-guide')
+
+    @staticmethod
+    def media_handles(rect):
+        x1, y1, x2, y2 = rect
+        return [('nw', x1, y1), ('ne', x2, y1), ('sw', x1, y2), ('se', x2, y2)]
+
+    def begin_media(self, event):
+        if not self.media_ready():
+            return False
+        index = self.selected_media_index
+        mode = None
+        if index is not None and 0 <= index < len(self.window.edits.media_clips):
+            cue = self.window.edits.media_clips[index]
+            if cue.start <= self.output_time() < cue.end:
+                rect = self.media_rect(cue)
+                if rect:
+                    mode = next((name for name, x, y in self.media_handles(rect)
+                                 if abs(event.x-x) <= 9 and abs(event.y-y) <= 9), None)
+        if mode is None:
+            index = None
+            for i in reversed(range(len(self.window.edits.media_clips))):
+                cue = self.window.edits.media_clips[i]
+                if not cue.start <= self.output_time() < cue.end:
+                    continue
+                rect = self.media_rect(cue)
+                if rect and rect[0] <= event.x <= rect[2] and rect[1] <= event.y <= rect[3]:
+                    index = i
+                    break
+            if index is None:
+                self.select_media(None)
+                return False
+            self.select_media(index)
+            mode = 'move'
+        cue = self.window.edits.media_clips[index]
+        self.focus_set()
+        current = EditSnapshot(self.window.trim, self.window.cuts, self.window.edits)
+        if (self.window.timeline_history is None or
+                self.window.timeline_history.current != current):
+            self.window.timeline_history = EditHistory(current)
+        self.window.timeline_history.begin()
+        self.media_drag = dict(mode=mode, original=cue,
+                               box=media_bounds(cue, *self.window.edits.encoded_size(self.media)),
+                               point=self.output_point(event.x, event.y),
+                               context=self.context()[:3], viewport=self.bounds(),
+                               expected=self.window.edits.media_clips, index=index)
+        self.window.note.configure(
+            text='Drag media to move · corner handles resize with aspect ratio locked · Esc cancels.',
+            fg=t.CYAN)
+        return True
+
+    def apply_media(self, cue):
+        gesture = self.media_drag
+        index = gesture['index'] if gesture is not None else self.selected_media_index
+        w = self.window
+        if index is None or not 0 <= index < len(w.edits.media_clips):
+            return
+        total = w.edits.output_duration(w.cuts.kept_duration(w.trim))
+        cue.validate(total)
+        cues = list(w.edits.media_clips)
+        if cues[index] == cue:
+            return
+        cues[index] = cue
+        w.edits = replace(w.edits, media_clips=tuple(cues))
+        if w.timeline_history is not None:
+            w.timeline_history.record(EditSnapshot(w.trim, w.cuts, w.edits))
+        if gesture is not None:
+            gesture['expected'] = w.edits.media_clips
+        if w.media_dialog is not None and not w.media_dialog.closed:
+            w.media_dialog.sync_from_canvas(index)
+        self.draw_overlay()
+        w.request_frame()
+
+    def move_media(self, event):
+        gesture = self.media_drag
+        if gesture is None:
+            return
+        w = self.window
+        if (not self.media_ready() or gesture['context'] != self.context()[:3]
+                or self.bounds() != gesture['viewport']
+                or w.edits.media_clips != gesture['expected']):
+            self.media_drag = None
+            if w.timeline_history:
+                w.timeline_history.end()
+            return
+        cue, box = gesture['original'], gesture['box']
+        x, y = self.output_point(event.x, event.y)
+        px, py = gesture['point']
+        width, height = w.edits.encoded_size(self.media)
+        mode = gesture['mode']
+        if mode == 'move':
+            if cue.layout == 'Cutaway':
+                proposed = replace(cue, layout='Picture in picture', scale=.60)
+                target = media_bounds(proposed, width, height)
+                left, top = x - target.width/2, y - target.height/2
+            else:
+                proposed = cue
+                left, top = box.x+x-px, box.y+y-py
+        else:
+            sx = -1 if 'w' in mode else 1
+            sy = -1 if 'n' in mode else 1
+            factor = max(.05, 1.0 + ((x-px)*sx/max(2,box.width)
+                                    + (y-py)*sy/max(2,box.height))/2)
+            original_scale = 1.0 if cue.layout == 'Cutaway' else cue.scale
+            proposed = replace(cue, layout='Picture in picture',
+                               scale=clamp(original_scale*factor, .05, 1.0))
+            target = media_bounds(proposed, width, height)
+            left = box.x+box.width-target.width if sx < 0 else box.x
+            top = box.y+box.height-target.height if sy < 0 else box.y
+        try:
+            self.apply_media(with_media_position(proposed, left, top, width, height))
+        except ValueError as exc:
+            self.window.note.configure(text=str(exc), fg=t.RED)
+
     def handles(self, rect):
         x1, y1, x2, y2 = rect
         return [('nw', x1, y1), ('ne', x2, y1), ('sw', x1, y2), ('se', x2, y2),
@@ -87,6 +263,7 @@ class ReactionPreview(PrivacyPreview):
 
     def draw_overlay(self):
         super().draw_overlay()
+        self.draw_media_guide()
         self.delete('visual-guide')
         if not self.visual_ready():
             self.visual_drag = None
@@ -112,6 +289,8 @@ class ReactionPreview(PrivacyPreview):
         self.tag_raise('visual-guide')
 
     def begin(self, event):
+        if self.begin_media(event):
+            return
         if not self.visual_ready():
             return super().begin(event)
         mode = None
@@ -159,6 +338,9 @@ class ReactionPreview(PrivacyPreview):
         w.request_frame()
 
     def move(self, event):
+        if self.media_drag is not None:
+            self.move_media(event)
+            return
         gesture = self.visual_drag
         if gesture is None:
             return super().move(event)
@@ -193,6 +375,14 @@ class ReactionPreview(PrivacyPreview):
             self.window.note.configure(text=str(exc), fg=t.RED)
 
     def finish(self, event=None):
+        if self.media_drag is not None:
+            if event is not None:
+                self.move_media(event)
+            self.media_drag = None
+            if self.window.timeline_history:
+                self.window.timeline_history.end()
+            self.draw_overlay()
+            return
         if self.visual_drag is not None:
             if event is not None:
                 self.move(event)
@@ -202,6 +392,16 @@ class ReactionPreview(PrivacyPreview):
         super().finish(event)
 
     def cancel_visual_drag(self, _=None):
+        if self.media_drag is not None:
+            gesture, self.media_drag = self.media_drag, None
+            if (self.media_ready() and self.context()[:3] == gesture['context']
+                    and self.window.edits.media_clips == gesture['expected']):
+                self.selected_media_index = gesture['index']
+                self.apply_media(gesture['original'])
+            if self.window.timeline_history:
+                self.window.timeline_history.end()
+            self.draw_overlay()
+            return 'break'
         gesture, self.visual_drag = self.visual_drag, None
         if (gesture and self.visual_ready() and self.context() == gesture['context']
                 and self.window.edits.overlays == gesture['expected']):

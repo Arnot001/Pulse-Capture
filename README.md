@@ -78,6 +78,16 @@ locations and are never edited, moved, or uploaded.
   video source start. Duration cannot exceed the remaining video source.
 - **Cutaway** fills the output area (letterboxing as necessary);
   **Picture in picture** places a smaller video/photo in the upper right.
+- Pause at a time where the media is visible, then click it on the **preview
+  frame**. Drag it to move; drag a cyan corner to resize while preserving its
+  aspect ratio. Dragging a full-frame Cutaway turns it into a movable picture
+  layer. Press Esc during dragging to cancel; Ctrl+Z/Ctrl+Y supports timeline
+  undo/redo. These editing guides never appear in the exported video.
+- The Photos / Video inspector also supports precise **X POSITION %**,
+  **Y POSITION %** (0–100% of available travel) and **SIZE %** (5–100%).
+  Placement applies to picture-in-picture mode; Cutaway always fills the
+  canvas. When editing crop, motion or privacy rectangles, use those tools
+  separately so mouse gestures cannot conflict.
 - The edited preview, continuous playback and MP4 export share the same
   compositor. Times follow the output after trim, cuts and speed changes.
 - In Phase A, imported video clips are **silent**; the original recording's
