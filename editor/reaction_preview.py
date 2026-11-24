@@ -110,7 +110,10 @@ class ReactionPreview(PrivacyPreview):
                 top + (box.y+box.height)*h/height)
 
     def select_media(self, index, notify=True):
-        self.media_drag = None
+        # The inspector refreshes numeric fields while a drag is in progress.
+        # Reselecting the same clip must not cancel that active gesture.
+        if self.media_drag is not None and self.media_drag['index'] != index:
+            self.media_drag = None
         cues = self.window.edits.media_clips
         self.selected_media_index = index if index is not None and 0 <= index < len(cues) else None
         if self.selected_media_index is not None:
