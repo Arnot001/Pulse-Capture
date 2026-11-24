@@ -144,6 +144,37 @@ class CommentaryRenderTests(unittest.TestCase):
         self.assertLess(during/normal,1.25)
         self.assertGreater(voice,200)
 
+    def test_echo_reverb_chorus_applied_to_both_real_mp4_and_audio_preview(self):
+        original=self.mic.read_bytes()
+        for effect,marker in (('Echo','aecho='),('Reverb','aecho='),
+                              ('Chorus','chorus=')):
+            with self.subTest(effect=effect):
+                cue=replace(self.cue,effect=effect,effect_strength=.8,
+                            auto_duck=False)
+                edits=replace(self.edits,commentary_clips=(cue,))
+                out=self.output.with_name('fx-'+effect.lower()+'.mp4')
+                command=build_export_command(
+                    self.ffmpeg,self.media,self.trim,out,edits,cuts=self.cuts)
+                graph=command[command.index('-filter_complex')+1]
+                self.assertIn(marker,graph)
+                self.assertIn('atrim=duration=1.400000000',graph)
+                result=subprocess.run(command,capture_output=True,timeout=75)
+                self.assertEqual(result.returncode,0,
+                                 result.stderr.decode('utf8',errors='replace')[-1800:])
+                self.assertGreater(out.stat().st_size,1000)
+                pcm=self._pcm([self.ffmpeg,'-v','error','-nostdin',
+                               '-i',str(out),'-map','0:a:0',
+                               '-ar','48000','-ac','1',
+                               '-c:a','pcm_s16le','-f','s16le','pipe:1'])
+                self.assertAlmostEqual(len(pcm)/48000,4.,delta=.12)
+                self.assertGreater(frequency_level(pcm,660,1.1),70)
+                preview=audio_preview_command(
+                    self.ffmpeg,self.media,1.,self.trim,self.cuts,
+                    edits,seek_input=True)
+                pgraph=preview[preview.index('-filter_complex')+1]
+                self.assertIn(marker,pgraph)
+        self.assertEqual(self.mic.read_bytes(),original)
+
     def test_seeked_audio_preview_keeps_original_beat_and_voice_alignment(self):
         # Listen from 1.4s: only the 1.4s+ part of the original commentary
         # is present, without replaying the opening 400 milliseconds.
