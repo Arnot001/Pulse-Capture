@@ -7,7 +7,7 @@ from .pulse_plan import timeline_positions
 from .reaction_library import ReactionLibrary
 
 
-TRACKS=('VIDEO','CAPTIONS','EMOJIS / GIFS','SOUND EFFECTS','VOICE','MUSIC','MOTION')
+TRACKS=('VIDEO','MEDIA','CAPTIONS','EMOJIS / GIFS','SOUND EFFECTS','VOICE','MUSIC','MOTION')
 
 
 @dataclass(frozen=True)
@@ -40,19 +40,21 @@ def blocks(state, plan=None, library=None):
     values=[];edits=state.edits;total=duration(state)
     for index,cue in enumerate(edits.text.captions):
         a,b=output_time(cue.start,state),output_time(cue.end,state)
-        if b>a:values.append(TimelineBlock('caption',index,1,a,b,cue.text.replace('\n',' / ')))
+        if b>a:values.append(TimelineBlock('caption',index,2,a,b,cue.text.replace('\n',' / ')))
+    for index,cue in enumerate(edits.media_clips):
+        values.append(TimelineBlock('media',index,1,cue.start,cue.end,cue.title))
     for index,cue in enumerate(edits.overlays):
-        values.append(TimelineBlock('overlay',index,2,cue.start,cue.end,cue.asset_id))
+        values.append(TimelineBlock('overlay',index,3,cue.start,cue.end,cue.asset_id))
     library=library or ReactionLibrary()
     for index,cue in enumerate(edits.sounds):
         voice=getattr(cue,'track','sfx')=='voice'
-        values.append(TimelineBlock('sound',index,4 if voice else 3,cue.at,min(total,cue.at+cue.length(library)),cue.asset_id))
+        values.append(TimelineBlock('sound',index,5 if voice else 4,cue.at,min(total,cue.at+cue.length(library)),cue.asset_id))
     if edits.music.enabled:
-        values.append(TimelineBlock('music',0,5,getattr(edits.music,'at',0),total,edits.music.track))
+        values.append(TimelineBlock('music',0,6,getattr(edits.music,'at',0),total,edits.music.track))
     for index,key in enumerate(edits.crop_motion.keyframes):
         at=output_time(key.time,state)
-        values.append(TimelineBlock('crop_key',index,6,at,at,'Crop'))
-    if edits.zoom.enabled:values.append(TimelineBlock('zoom',0,6,0,total,f'Zoom {edits.zoom.factor:g}×'))
+        values.append(TimelineBlock('crop_key',index,7,at,at,'Crop'))
+    if edits.zoom.enabled:values.append(TimelineBlock('zoom',0,7,0,total,f'Zoom {edits.zoom.factor:g}×'))
     if plan:
         for index,(item,(a,b)) in enumerate(zip(plan['timeline'],timeline_positions(plan))):
             a,b=output_time(a,state),output_time(b,state)
@@ -84,6 +86,12 @@ def change_timing(state, key, start, end, media):
     elif kind=='overlay':
         cues=list(edits.overlays);cues[index]=replace(cues[index],start=start,end=end)
         edits=replace(edits,overlays=tuple(cues))
+    elif kind=='media':
+        cues=list(edits.media_clips)
+        cues[index]=replace(cues[index],start=start,end=end)
+        from .imported_media import validate_clips
+        validate_clips(cues,total)
+        edits=replace(edits,media_clips=tuple(cues))
     elif kind=='sound':
         cues=list(edits.sounds);cue=cues[index]
         cues[index]=replace(cue,at=start,duration=end-start)
@@ -99,6 +107,7 @@ def remove_blocks(state, keys, media):
     keys=set(keys);edits=state.edits
     edits=replace(edits,text=replace(edits.text,captions=tuple(c for i,c in enumerate(edits.text.captions) if ('caption',i) not in keys)),
                   sounds=tuple(c for i,c in enumerate(edits.sounds) if ('sound',i) not in keys),
-                  overlays=tuple(c for i,c in enumerate(edits.overlays) if ('overlay',i) not in keys))
+                  overlays=tuple(c for i,c in enumerate(edits.overlays) if ('overlay',i) not in keys),
+                  media_clips=tuple(c for i,c in enumerate(edits.media_clips) if ('media',i) not in keys))
     edits.validate(media)
     return replace(state,edits=edits)
