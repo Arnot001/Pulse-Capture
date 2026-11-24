@@ -126,7 +126,7 @@ class EditorWindow(tk.Toplevel):
         messages.pack(side='left', fill='x', expand=True)
         self.note = t.label(
             messages, 'Opening your video…', 9, t.MUTED, anchor='w',
-            justify='left', wraplength=710)
+            justify='left', wraplength=480)
         self.note.pack(fill='x')
         self.destination = t.label(
             messages, 'Export creates a new copy · original is untouched',
@@ -258,7 +258,8 @@ class EditorWindow(tk.Toplevel):
         self.preview_split = tk.PanedWindow(
             preview_area, orient='vertical', bg=t.BG,
             sashwidth=8, sashrelief='flat',
-            relief='flat', bd=0, showhandle=False)
+            relief='flat', bd=0, showhandle=True,
+            handlesize=12, handlepad=8)
         self.preview_split.pack(fill='both', expand=True)
         self.video = ReactionPreview(
             self.preview_split, self.crop_changed,
@@ -288,9 +289,10 @@ class EditorWindow(tk.Toplevel):
         self.clock = t.label(
             transport, '0:00.000 / 0:00.000', 10, t.TEXT)
         self.clock.pack(side='left', padx=12)
+        # Audio status remains available to diagnostics, but the transport bar
+        # shows only playback controls; the old explanatory note crowded small PCs.
         self.preview_note = t.label(
             transport, 'Preparing audio preview…', 9, t.MUTED)
-        self.preview_note.pack(side='right')
         self.quality_picker = ttk.Combobox(
             transport, textvariable=self.preview_quality,
             values=('360p', '480p', '720p'),
