@@ -57,6 +57,22 @@ class CommentaryUITests(unittest.TestCase):
         self.assertEqual(len(w.edits.commentary_clips),0)
         self.assertGreater(studio.wave.winfo_width(),100)
 
+    def test_recording_floats_stop_controls_and_leaves_video_visible(self):
+        studio=self.make_studio()
+        studio.devices=[dict(index=0,name='Test microphone')]
+        studio.device_picker.configure(values=('Test microphone',))
+        studio.device_picker.current(0)
+        with patch.object(studio.recorder,'start') as start:
+            studio.record()
+            self.root.update()
+            start.assert_called_once_with(0)
+            self.assertTrue(studio._hud.winfo_ismapped())
+            self.assertFalse(studio.winfo_ismapped())
+            self.assertGreater(self.window.video.winfo_width(),250)
+            studio._hide_recording_hud()
+            self.root.update()
+            self.assertTrue(studio.winfo_ismapped())
+
     def test_record_take_edit_split_undo_and_revert_audio(self):
         studio=self.make_studio()
         with patch.dict(os.environ,{'LOCALAPPDATA':self.temp.name}):
