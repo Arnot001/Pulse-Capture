@@ -32,8 +32,8 @@ class EditorWindow(tk.Toplevel):
         super().__init__(parent)
         self.title('PULSE // CAPTURE — QUICK EDIT')
         self.configure(bg=t.BG)
-        self.geometry(f'980x{min(850, self.winfo_screenheight()-100)}')
-        self.minsize(760, 700)
+        self.geometry(f'1180x{min(900, self.winfo_screenheight()-80)}')
+        self.minsize(840, 650)
         self.path, self.backend, self.on_close = Path(path), backend, on_close
         self.media = self.trim = self.preview = self.audio_player = None
         self.playback = None
@@ -83,82 +83,99 @@ class EditorWindow(tk.Toplevel):
         threading.Thread(target=load, daemon=True).start()
 
     def _build(self):
-        tk.Frame(self, height=3, bg=t.CYAN).pack(fill='x')
+        # Workspace-first shell: compact header, collapsible tools, real video space.
+        tk.Frame(self, height=2, bg=t.CYAN).pack(fill='x')
         header = tk.Frame(self, bg=t.BG)
-        header.pack(fill='x', padx=28, pady=(14, 6))
-        t.label(header, 'PULSE', 21, bold=True).pack(side='left')
-        t.label(header, ' // CAPTURE', 15, t.CYAN).pack(side='left')
-        t.label(header, 'QUICK EDIT', 10, t.MUTED, True).pack(side='right')
-        self.auto_button = t.button(header, 'AUTO EDIT', self.open_auto_edit)
-        self.auto_button.configure(pady=5, state='disabled')
-        self.auto_button.pack(side='right', padx=12)
-        self.controls.append(self.auto_button)
-        self.voiceover_button = t.button(header, 'AI VOICEOVER', self.open_voiceover_studio)
-        self.voiceover_button.configure(pady=5, state='disabled')
-        self.voiceover_button.pack(side='right', padx=4)
-        self.controls.append(self.voiceover_button)
-        self.roast_button = t.button(header, 'ROAST STUDIO · JSON', self.open_roast_studio)
-        self.roast_button.configure(pady=5, state='disabled')
-        self.roast_button.pack(side='right', padx=4)
-        self.controls.append(self.roast_button)
+        header.pack(fill='x', padx=18, pady=(8, 2))
+        t.label(header, 'PULSE', 19, bold=True).pack(side='left')
+        t.label(header, ' // CAPTURE', 13, t.CYAN).pack(side='left')
+        self.workspace_menu = tk.Menubutton(
+            header, text='WORKSPACES  ▾', bg=t.CONTROL, fg=t.TEXT,
+            activebackground=t.LINE, activeforeground=t.TEXT,
+            relief='flat', borderwidth=0, padx=12, pady=7,
+            font=(t.FONT, -10, 'bold'), cursor='hand2')
+        self.workspace_actions = tk.Menu(
+            self.workspace_menu, tearoff=0, bg=t.PANEL, fg=t.TEXT,
+            activebackground=t.CYAN, activeforeground=t.BG)
+        for caption, action in (
+            ('Quick Edit', None),
+            ('Auto Edit', self.open_auto_edit),
+            ('AI Voiceover', self.open_voiceover_studio),
+            ('Roast Studio', self.open_roast_studio)):
+            self.workspace_actions.add_command(
+                label=caption, command=action,
+                state='disabled' if action is None else 'normal')
         if self.pulse_candidate:
-            recipe_button = t.button(header, 'EDIT PULSE PLAN', self.open_pulse_plan)
-            recipe_button.pack(side='right', padx=4)
-            self.controls.append(recipe_button)
-        intro = tk.Frame(self, bg=t.BG)
-        intro.pack(fill='x', padx=28, pady=(0, 12))
-        self.source_label = t.label(intro, self.path.name, 9, t.MUTED, anchor='w')
-        reaction_row = tk.Frame(intro, bg=t.BG)
-        reaction_row.pack(side='right')
-        media_button = t.button(reaction_row, 'PHOTOS / VIDEO', self.open_imported_media)
-        media_button.configure(padx=7, pady=4, font=(t.FONT, -9, 'bold'))
-        media_button.pack(side='left', padx=2)
-        self.controls.append(media_button)
-        for label, kind in (('REACTION AUDIO', 'sfx'), ('EMOJIS', 'emoji'), ('GIFS / REACTIONS', 'gif'), ('EFFECTS', 'effects')):
-            button = t.button(reaction_row, label, lambda k=kind: self.open_reactions(k))
-            button.configure(padx=6, pady=4, font=(t.FONT, -9, 'bold'))
-            button.pack(side='left', padx=2)
-            self.controls.append(button)
-        self.source_label.pack(side='left', fill='x', expand=True, pady=(4, 0))
+            self.workspace_actions.add_separator()
+            self.workspace_actions.add_command(label='Edit Pulse Plan',
+                                               command=self.open_pulse_plan)
+        self.workspace_menu.configure(menu=self.workspace_actions)
+        self.workspace_menu.pack(side='right')
+        self.controls.append(self.workspace_menu)
+        self.source_label = t.label(
+            self, self.path.name, 9, t.MUTED, anchor='w')
+        self.source_label.pack(fill='x', padx=18, pady=(0, 2))
 
-        # Bottom controls stay reachable when the window is resized.
+        # The save controls no longer take an entire oversized bottom section.
         bottom = tk.Frame(self, bg=t.BG)
-        bottom.pack(side='bottom', fill='x', padx=28, pady=(0, 18))
-        self.note = t.label(bottom, 'Opening your video…', 10, t.MUTED, anchor='w', justify='left', wraplength=850)
-        self.note.pack(fill='x', pady=(8, 6))
-        ttk.Style(self).configure('Pulse.Horizontal.TProgressbar', background=t.CYAN,
-                                 troughcolor=t.CONTROL, bordercolor=t.CONTROL,
-                                 lightcolor=t.CYAN, darkcolor=t.CYAN, thickness=5)
-        self.progress = ttk.Progressbar(bottom, mode='determinate', maximum=1,
-                                        style='Pulse.Horizontal.TProgressbar')
-        self.progress.pack(fill='x', pady=(0, 10))
-        actions = tk.Frame(bottom, bg=t.BG)
-        actions.pack(fill='x')
-        self.export_button = t.button(actions, 'EXPORT VIDEO  ↗', self.export, accent=True,
-                                       font=(t.FONT, -16, 'bold'))
-        self.export_button.configure(pady=12, state='disabled')
-        self.export_button.pack(side='left', fill='x', expand=True)
-        self.cancel_button = t.button(actions, 'CANCEL EXPORT', self.cancel_export)
+        bottom.pack(side='bottom', fill='x', padx=18, pady=(2, 7))
+        footer = tk.Frame(bottom, bg=t.BG)
+        footer.pack(fill='x')
+        messages = tk.Frame(footer, bg=t.BG)
+        messages.pack(side='left', fill='x', expand=True)
+        self.note = t.label(
+            messages, 'Opening your video…', 9, t.MUTED, anchor='w',
+            justify='left', wraplength=710)
+        self.note.pack(fill='x')
+        self.destination = t.label(
+            messages, 'Export creates a new copy · original is untouched',
+            8, t.MUTED, anchor='w')
+        self.destination.pack(fill='x')
+        actions = tk.Frame(footer, bg=t.BG)
+        actions.pack(side='right', padx=(10, 0))
+        self.export_button = t.button(
+            actions, 'EXPORT  ↗', self.export, accent=True,
+            font=(t.FONT, -12, 'bold'))
+        self.export_button.configure(padx=18, pady=9, state='disabled')
+        self.export_button.pack(side='right')
+        self.cancel_button = t.button(actions, 'CANCEL', self.cancel_export)
         self.open_button = t.button(actions, 'OPEN FOLDER', self.open_folder)
-        self.open_button.pack(side='right', padx=(10, 0))
-        destination = tk.Frame(bottom, bg=t.BG)
-        destination.pack(fill='x', pady=(7, 0))
-        self.destination = t.label(destination, 'New copy beside your original · Original stays untouched', 9, t.MUTED)
-        self.destination.pack(side='left')
-        self.change_folder_button = t.button(destination, 'CHANGE FOLDER', self.change_folder)
-        self.change_folder_button.configure(pady=2, font=(t.FONT, -10, 'bold'))
-        self.change_folder_button.pack(side='right')
+        self.open_button.configure(padx=8, pady=8, font=(t.FONT, -9))
+        self.open_button.pack(side='right', padx=(7, 0))
+        self.change_folder_button = t.button(
+            actions, 'SAVE TO…', self.change_folder)
+        self.change_folder_button.configure(
+            padx=8, pady=8, font=(t.FONT, -9))
+        self.change_folder_button.pack(side='right', padx=(0, 5))
         self.controls.append(self.change_folder_button)
+        ttk.Style(self).configure(
+            'Pulse.Horizontal.TProgressbar', background=t.CYAN,
+            troughcolor=t.CONTROL, bordercolor=t.CONTROL,
+            lightcolor=t.CYAN, darkcolor=t.CYAN, thickness=4)
+        self.progress = ttk.Progressbar(
+            bottom, mode='determinate', maximum=1,
+            style='Pulse.Horizontal.TProgressbar')
+        self.progress.pack(fill='x', pady=(4, 0))
 
-        tool_area = tk.Frame(bottom, bg=t.BG)
-        tool_area.pack(side='top', fill='x', before=self.note, pady=(8, 0))
-        tabs = t.Segments(tool_area, self.tool, [(v, v) for v in ('TRIM', 'CUT', 'FORMAT', 'CROP', 'BRAND', 'TEXT', 'PRIVACY', 'MOTION', 'MUSIC', 'FINISH')], self.show_tool)
-        tabs.pack(fill='x', pady=(0, 8))
-        for _, button in tabs.buttons:
-            button.configure(padx=4, pady=5, font=(t.FONT, -8, 'bold'))
-        self.controls.extend(b for _, b in tabs.buttons)
-        # A fixed, compact tool area keeps the preview stable when switching tools.
-        panel_area = tk.Frame(tool_area, bg=t.PANEL, height=126)
+        # All legacy editor panels retain their full horizontal width, but are
+        # only mapped while the user deliberately opens a tool.
+        self.inspector = tk.Frame(
+            self, bg=t.PANEL, highlightbackground=t.LINE,
+            highlightthickness=1)
+        self.inspector_visible = False
+        inspector_head = tk.Frame(self.inspector, bg=t.PANEL)
+        inspector_head.pack(fill='x', padx=10, pady=(6, 0))
+        self.inspector_title = t.label(
+            inspector_head, 'TRIM', 10, t.CYAN, True)
+        self.inspector_title.pack(side='left')
+        self.inspector_close = t.button(
+            inspector_head, '✕  CLOSE TOOLS', self.hide_inspector)
+        self.inspector_close.configure(
+            font=(t.FONT, -9, 'bold'), padx=9, pady=3)
+        self.inspector_close.pack(side='right')
+        tool_area = tk.Frame(self.inspector, bg=t.PANEL)
+        tool_area.pack(fill='x')
+        panel_area = tk.Frame(tool_area, bg=t.PANEL, height=150)
         panel_area.pack(fill='x')
         panel_area.pack_propagate(False)
         for name in ('TRIM', 'CUT', 'FORMAT', 'CROP', 'BRAND', 'TEXT', 'PRIVACY', 'MOTION', 'MUSIC', 'FINISH'):
