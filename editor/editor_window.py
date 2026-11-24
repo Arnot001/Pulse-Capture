@@ -380,8 +380,12 @@ class EditorWindow(tk.Toplevel):
         if not self.media or not self.trim or self.exporter.busy or self.closing:
             return
         if self.commentary_studio is not None and self.commentary_studio.winfo_exists():
-            self.commentary_studio.deiconify()
-            self.commentary_studio.lift()
+            hud = self.commentary_studio._hud
+            if hud is not None and hud.winfo_exists():
+                hud.lift()  # Keep the full preview visible while recording.
+            else:
+                self.commentary_studio.deiconify()
+                self.commentary_studio.lift()
             return
         from .commentary_ui import CommentaryStudio
         self.commentary_studio = CommentaryStudio(self)
