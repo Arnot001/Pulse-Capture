@@ -57,6 +57,27 @@ class CommentaryUITests(unittest.TestCase):
         self.assertEqual(len(w.edits.commentary_clips),0)
         self.assertGreater(studio.wave.winfo_width(),100)
 
+    def test_no_microphone_disables_record_with_windows_setup_help(self):
+        studio=self.make_studio()
+        self.pump_until(lambda: not studio._busy)
+        studio.events.put(('task', ('devices', []), None))
+        studio.poll()
+        self.root.update()
+        self.assertEqual(str(studio.record_button.cget('state')), 'disabled')
+        self.assertIn('Windows Settings', studio.status.cget('text'))
+        self.assertIn('REFRESH', studio.status.cget('text'))
+
+    def test_microphone_detection_enables_recording_and_selects_input(self):
+        studio=self.make_studio()
+        self.pump_until(lambda: not studio._busy)
+        studio.events.put(('task', ('devices', [{
+            'index':4, 'name':'Primary Sound Capture Driver', 'maxInputChannels':2}]), None))
+        studio.poll()
+        self.root.update()
+        self.assertEqual(str(studio.record_button.cget('state')), 'normal')
+        self.assertEqual(studio.device_picker.current(), 0)
+        self.assertIn('default recording input', studio.status.cget('text'))
+
     def test_recording_floats_stop_controls_and_leaves_video_visible(self):
         studio=self.make_studio()
         self.pump_until(lambda:not studio._busy)
