@@ -213,6 +213,51 @@ class CommentaryUITests(unittest.TestCase):
         self.window.undo_timeline()
         self.assertAlmostEqual(self.window.edits.music.original_volume, 1.)
 
+    def test_voice_effect_controls_save_independently_and_undo(self):
+        studio=self.make_studio()
+        with patch.dict(os.environ, {'LOCALAPPDATA':self.temp.name}):
+            original=self.make_take(studio)
+            self.assertEqual(studio.effect_var.get(), 'None')
+            self.assertEqual(studio.effect_slider.cget('state'), 'disabled')
+            studio.effect_var.set('Reverb')
+            studio._effect_changed()
+            studio.effect_strength_var.set(.65)
+            self.assertEqual(studio.effect_slider.cget('state'), 'normal')
+            studio.apply()
+            cue=self.window.edits.commentary_clips[0]
+            self.assertEqual(cue.effect, 'Reverb')
+            self.assertAlmostEqual(cue.effect_strength, .65)
+            self.assertTrue(original.exists())
+            studio.effect_var.set('Chorus')
+            studio._effect_changed()
+            studio.effect_strength_var.set(.9)
+            studio.apply()
+            self.assertEqual(self.window.edits.commentary_clips[0].effect, 'Chorus')
+            self.window.undo_timeline()
+            self.assertEqual(self.window.edits.commentary_clips[0].effect, 'Reverb')
+            self.assertTrue(original.exists())
+
+    def test_play_take_with_effect_renders_temporary_audio_not_original(self):
+        studio=self.make_studio()
+        self.pump_until(lambda: not studio._busy)
+        with patch.dict(os.environ, {'LOCALAPPDATA':self.temp.name}):
+            original=self.make_take(studio)
+            before=original.read_bytes()
+            studio.effect_var.set('Echo')
+            studio._effect_changed()
+            studio.effect_strength_var.set(.8)
+            with patch('editor.commentary_ui.render_effect_audition',
+                       return_value=(original,0.,.75,False)) as render:
+                with patch.object(studio.player,'play',return_value='started') as play:
+                    studio.play_take()
+                    self.pump_until(lambda: not studio._busy and play.called)
+                    render.assert_called_once()
+                    self.assertEqual(render.call_args.args[4], 'Echo')
+                    self.assertAlmostEqual(render.call_args.args[5], .8)
+                    self.assertEqual(Path(play.call_args.args[0]),original)
+            self.assertEqual(original.read_bytes(), before)
+            self.assertEqual(self.window.edits.commentary_clips[0].effect,'None')
+
     def test_converted_voice_is_switchable_back_to_original(self):
         studio=self.make_studio()
         with patch.dict(os.environ,{'LOCALAPPDATA':self.temp.name}):
