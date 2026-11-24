@@ -554,7 +554,11 @@ class CommentaryStudio(tk.Toplevel):
                 self._busy=False
                 self._set_processing_buttons(False)
                 if error:
-                    self.message(error,True)
+                    hint = ('Microphone support is not installed. Run '
+                            'py -3.13 -m pip install -r requirements-audio.txt '
+                            'from the Pulse-Capture folder, then reopen Commentary Studio.'
+                            if 'pyaudiowpatch' in error.lower() else error)
+                    self.message(hint,True)
                 elif value[0]=='devices':
                     self.devices=value[1]
                     self.device_picker.configure(values=[
