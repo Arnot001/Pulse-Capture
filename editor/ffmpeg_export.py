@@ -188,6 +188,8 @@ def build_export_command(ffmpeg, media, trim, output, edits=None, asset=None,
              '-map_metadata', '-1', '-movflags', '+faststart', '-f', 'mp4', str(output)]
     from .reactions import augment_export, validate_cues
     validate_cues(edits.sounds, edits.overlays, out_duration)
+    from .imported_media import validate_clips
+    validate_clips(edits.media_clips, out_duration)
     width, height = edits.encoded_size(media)
     return augment_export(args, edits, out_duration, width, height, edits.bands(media))
 
