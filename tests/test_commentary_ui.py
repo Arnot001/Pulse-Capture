@@ -111,6 +111,7 @@ class CommentaryUITests(unittest.TestCase):
 
     def test_selected_take_transport_uses_only_edited_source_range(self):
         studio=self.make_studio()
+        self.pump_until(lambda: not studio._busy)
         with patch.dict(os.environ, {'LOCALAPPDATA':self.temp.name}):
             original=self.make_take(studio)
             cue=self.window.edits.commentary_clips[0]
