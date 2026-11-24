@@ -250,6 +250,77 @@ class CommentaryStudio(tk.Toplevel):
                  fg=t.TEXT, insertbackground=t.CYAN, relief='flat',
                  font=(t.FONT, -11)).pack(fill='x', ipady=7)
 
+    def _sync_preview_buttons(self):
+        take = self.chosen() is not None
+        usable = take and not self.recorder.active and not self._busy
+        playing = self.player.active
+        paused = self.player.paused
+        self.play_take_button.configure(
+            state='normal' if usable and (not playing or paused) else 'disabled')
+        self.pause_take_button.configure(
+            state='normal' if usable and playing else 'disabled',
+            text='▶  RESUME' if paused else '⏸  PAUSE')
+        self.stop_take_button.configure(
+            state='normal' if playing else 'disabled')
+
+    def on_audition_change(self):
+        # Changing playback version never alters which file is used on export.
+        self.stop_take()
+        self.draw_wave()
+        self._sync_preview_buttons()
+
+    def play_take(self):
+        idx = self.chosen()
+        cues = self.editor.edits.commentary_clips
+        if idx is None or idx >= len(cues) or self.recorder.active or self._busy:
+            self.message('Select a saved take first.', True)
+            return
+        cue = cues[idx]
+        which = self.audition_var.get()
+        path = cue.original_file or cue.file if which == 'original' else cue.file
+        try:
+            info = wav_info(path)
+            length = min(cue.duration, info['duration'] - cue.source_in)
+            if length <= 0:
+                raise ValueError('No voice remains in this edited interval.')
+            if self.player.active and self.player.paused:
+                # Pause is reversible. Changing take/version stops the previous
+                # preview in on_select()/on_audition_change().
+                result = self.player.play(path, cue.source_in, length)
+            elif self.player.active:
+                self.player.stop()
+                self._pending_play = (path, cue.source_in, length)
+                result = 'switching'
+            else:
+                result = self.player.play(path, cue.source_in, length)
+            self.message(
+                ('Finishing previous preview…' if result == 'switching' else
+                 ('Resumed' if result == 'resumed' else 'Playing') +
+                 f' {which.upper()} voice · audio-only preview.'))
+        except (ValueError, OSError) as exc:
+            self.message(f'Cannot preview take: {exc}', True)
+        self._sync_preview_buttons()
+
+    def pause_take(self):
+        if not self.player.active:
+            return
+        paused = self.player.pause()
+        self.message('Take paused.' if paused else 'Take resumed.')
+        self._sync_preview_buttons()
+
+    def stop_take(self):
+        self._pending_play = None
+        self.player.stop()
+        self._sync_preview_buttons()
+        if not self._closing:
+            self.playback_clock.configure(
+                text=f'0:00 / {self._clock(self.player.duration)}')
+
+    @staticmethod
+    def _clock(seconds):
+        value = max(0, round(seconds))
+        return f'{int(value // 60)}:{int(value % 60):02d}'
+
     def message(self, value, error=False):
         if not self._closing:
             self.status.configure(text=value, fg=t.RED if error else t.CYAN)
@@ -302,7 +373,9 @@ class CommentaryStudio(tk.Toplevel):
             self.clips.see(index)
             self.on_select()
         else:
+            self.stop_take()
             self.draw_wave()
+            self._sync_preview_buttons()
 
     def on_select(self, _event=None):
         index = self.clips.curselection()
@@ -312,6 +385,8 @@ class CommentaryStudio(tk.Toplevel):
         cues = self.editor.edits.commentary_clips
         if not 0 <= idx < len(cues):
             return
+        if self._selected != idx:
+            self.stop_take()
         self._selected = idx
         cue = cues[idx]
         for var,value in ((self.start_var,cue.start),(self.end_var,cue.end),
@@ -320,6 +395,7 @@ class CommentaryStudio(tk.Toplevel):
                           (self.fadein_var,cue.fade_in),(self.fadeout_var,cue.fade_out)):
             var.set(f'{value:.3f}')
         self.draw_wave()
+        self._sync_preview_buttons()
 
     def draw_wave(self):
         if not self.winfo_exists():
@@ -332,15 +408,17 @@ class CommentaryStudio(tk.Toplevel):
                                   fill=t.MUTED,anchor='w')
             return
         cue = cues[index]
+        audition = self.audition_var.get()
+        source = cue.original_file or cue.file if audition == 'original' else cue.file
         width = max(10, self.wave.winfo_width()-16)
         height = self.wave.winfo_height()
         try:
-            info = wav_info(cue.file)
+            info = wav_info(source)
             if info['duration'] > 240:
                 self.wave.create_text(12,31,text='Long recording · trim using the time controls.',
                                       fill=t.MUTED,anchor='w')
                 return
-            points = waveform(cue.file, min(300, width//3))
+            points = waveform(source, min(300, width//3))
         except (OSError, ValueError) as exc:
             self.wave.create_text(12,31,text=str(exc)[:60],fill=t.RED,anchor='w')
             return
@@ -351,10 +429,11 @@ class CommentaryStudio(tk.Toplevel):
             h = peak*(height*.45)
             self.wave.create_line(x,height/2-h,x,height/2+h,
                                   fill=t.CYAN,width=max(1,width/len(points)))
-        self.wave.create_text(8,7,text='Current voice waveform · original remains saved',
+        self.wave.create_text(8,7,text=f'{audition.upper()} voice waveform · original retained',
                               anchor='w',fill=t.MUTED,font=(t.FONT,-8))
 
     def _commit(self, cues, select=None):
+        self.stop_take()
         editor = self.editor
         if not editor.media or editor.exporter.busy or editor.closing:
             raise ValueError('Open an editable video first.')
@@ -413,6 +492,7 @@ class CommentaryStudio(tk.Toplevel):
             self.lift()
 
     def record(self):
+        self.stop_take()
         editor = self.editor
         if self._busy or self.recorder.active:
             return
@@ -560,6 +640,7 @@ class CommentaryStudio(tk.Toplevel):
                              volume=1.,mix=self.mix_var.get())
 
     def _transform(self, method):
+        self.stop_take()
         idx=self.chosen()
         if idx is None or self.recorder.active or self._busy:
             return
@@ -592,22 +673,21 @@ class CommentaryStudio(tk.Toplevel):
         self._transform('process')
 
     def _set_processing_buttons(self,busy):
-        for button in (self.convert_button,self.process_button,self.record_button,
-                       self.apply_button,self.split_button,self.delete_button,
+        for button in (self.convert_button, self.process_button,
+                       self.apply_button, self.split_button, self.delete_button,
                        self.original_button):
             button.configure(state='disabled' if busy else 'normal')
+        self.record_button.configure(
+            state='disabled' if busy or not self.devices or self.recorder.active
+            else 'normal')
+        self._sync_preview_buttons()
 
     def listen(self, which):
-        idx=self.chosen()
-        if idx is None:
-            return
-        cue=self.editor.edits.commentary_clips[idx]
-        path=cue.original_file or cue.file if which=='original' else cue.file
-        try:
-            import winsound
-            winsound.PlaySound(str(path),winsound.SND_FILENAME|winsound.SND_ASYNC)
-        except (ImportError,OSError,RuntimeError) as exc:
-            self.message(f'Could not play WAV: {exc}',True)
+        # Legacy callbacks now use the same genuine transport.
+        if which not in ('current', 'original'):
+            raise ValueError('Unknown audition version.')
+        self.audition_var.set(which)
+        self.play_take()
 
     def poll(self):
         if self._closing:
@@ -694,11 +774,33 @@ class CommentaryStudio(tk.Toplevel):
         self.level_meter['value']=self.recorder.level if self.recorder.active else 0.
         if self._hud_level is not None:
             self._hud_level['value']=self.recorder.level if self.recorder.active else 0.
+        while True:
+            try:
+                event, session, detail = self.player.events.get_nowait()
+            except Empty:
+                break
+            if session != self.player.session:
+                continue
+            if event == 'finished':
+                self.message('Take playback finished.')
+            elif event == 'error':
+                self.message(f'Take playback failed: {detail}', True)
+        if self._pending_play and not self.player.active and not self.recorder.active:
+            args, self._pending_play = self._pending_play, None
+            try:
+                self.player.play(*args)
+                self.message('Playing selected take.')
+            except (ValueError, OSError) as exc:
+                self.message(f'Cannot play take: {exc}', True)
+        self.playback_clock.configure(
+            text=f'{self._clock(self.player.position)} / {self._clock(self.player.duration)}')
+        self._sync_preview_buttons()
         self._poll_id=self.after(80,self.poll)
 
     def close(self):
         self._closing=True
         self._cancel.set()
+        self.player.close()
         self.recorder.stop()
         if self.recorder.worker and self.recorder.worker.is_alive():
             self.recorder.worker.join(timeout=2)
@@ -709,11 +811,6 @@ class CommentaryStudio(tk.Toplevel):
         if self._poll_id:
             try:self.after_cancel(self._poll_id)
             except tk.TclError:pass
-        try:
-            import winsound
-            winsound.PlaySound(None,0)
-        except (ImportError,OSError,RuntimeError):
-            pass
         self.destroy()
         if getattr(self.editor,'commentary_studio',None) is self:
             self.editor.commentary_studio=None
