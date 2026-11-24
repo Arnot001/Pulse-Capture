@@ -135,6 +135,20 @@ class QuickEditWorkspaceUITests(unittest.TestCase):
         self.assertGreater(w.video.winfo_height(), 120)
         self.assertGreaterEqual(w.timeline.winfo_height(), 65)
 
+    def test_all_sidebar_actions_remain_visible_at_minimum_height(self):
+        w = self.window
+        w.geometry('840x650')
+        self.root.update()
+        w.select_tool('TRIM')
+        self.root.update()
+        rail = w.add_menu.master
+        self.assertLessEqual(
+            w.tool_buttons['FINISH'].winfo_y()
+            + w.tool_buttons['FINISH'].winfo_height(),
+            rail.winfo_height() + 1)
+        self.assertGreater(w.video.winfo_height(), 120)
+        self.assertGreaterEqual(w.timeline.winfo_height(), 65)
+
     def test_dropdowns_keep_media_voice_and_edit_modes(self):
         w = self.window
         titles = [w.workspace_actions.entrycget(i, 'label')
