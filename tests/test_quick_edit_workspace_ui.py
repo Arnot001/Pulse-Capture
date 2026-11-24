@@ -156,7 +156,7 @@ class QuickEditWorkspaceUITests(unittest.TestCase):
         original_height = w.video.winfo_height()
         w.select_tool('TRIM')
         self.root.update()
-        self.assertEqual(w.work_panes.panes()[-1], str(w.inspector))
+        self.assertEqual(str(w.work_panes.panes()[-1]), str(w.inspector))
         self.assertEqual(w.inspector.winfo_manager(), 'panedwindow')
         self.assertLess(w.video.winfo_width(), original_width - 180)
         self.assertAlmostEqual(w.video.winfo_height(), original_height, delta=30)
