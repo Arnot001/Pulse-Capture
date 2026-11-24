@@ -382,6 +382,9 @@ class CommentaryStudio(tk.Toplevel):
             self.message('Select a saved take first.', True)
             return
         cue = cues[idx]
+        if self.player.active and self.player.paused:
+            self.pause_take()  # Resume the *actual* processed preview source.
+            return
         which = self.audition_var.get()
         path = cue.original_file or cue.file if which == 'original' else cue.file
         try:
@@ -389,11 +392,28 @@ class CommentaryStudio(tk.Toplevel):
             length = min(cue.duration, info['duration'] - cue.source_in)
             if length <= 0:
                 raise ValueError('No voice remains in this edited interval.')
-            if self.player.active and self.player.paused:
-                # Pause is reversible. Changing take/version stops the previous
-                # preview in on_select()/on_audition_change().
-                result = self.player.play(path, cue.source_in, length)
-            elif self.player.active:
+            effect = self.effect_var.get()
+            strength = self.effect_strength_var.get()
+            validate_effect(effect, strength)
+            if effect != 'None' and strength > 0 and not self.player.active:
+                source = str(path)
+                expected = (idx, cue, which, effect, strength)
+                cancel = self._cancel
+                ffmpeg = self.editor.backend.ffmpeg
+                def work():
+                    rendered = render_effect_audition(
+                        ffmpeg, source, cue.source_in, length,
+                        effect, strength, cancel)
+                    if cancel.is_set() or self._closing:
+                        if rendered[3]:
+                            rendered[0].unlink(missing_ok=True)
+                        raise ValueError('Effects preview cancelled.')
+                    return ('fx_audio', expected, rendered)
+                if self._task(work, f'Rendering {effect} preview locally…'):
+                    self._fx_rendering = True
+                    self._sync_preview_buttons()
+                return
+            if self.player.active:
                 self.player.stop()
                 self._pending_play = (path, cue.source_in, length)
                 result = 'switching'
@@ -415,6 +435,8 @@ class CommentaryStudio(tk.Toplevel):
         self._sync_preview_buttons()
 
     def stop_take(self):
+        if self._fx_rendering:
+            self._cancel.set()
         self._pending_play = None
         self.player.stop()
         self._sync_preview_buttons()
@@ -824,6 +846,7 @@ class CommentaryStudio(tk.Toplevel):
                 break
             if kind=='task':
                 self._busy=False
+                self._fx_rendering=False
                 self._set_processing_buttons(False)
                 self.record_button.configure(
                     state='normal' if self.devices else 'disabled')
@@ -855,6 +878,26 @@ class CommentaryStudio(tk.Toplevel):
                         self.message(
                             'No microphone input detected. Check Windows Settings → System → Sound → Input, '
                             'microphone privacy permissions and physical connection, then press REFRESH.', True)
+                elif value[0]=='fx_audio':
+                    _, expected, rendered = value
+                    idx, cue, which, effect, strength = expected
+                    path, offset, length, temporary = rendered
+                    if temporary:
+                        self._fx_files.add(path)
+                    cues = self.editor.edits.commentary_clips
+                    if (not 0 <= idx < len(cues) or
+                            cues[idx] != cue or
+                            self.chosen() != idx or
+                            self.audition_var.get() != which or
+                            self.effect_var.get() != effect or
+                            self.effect_strength_var.get() != strength):
+                        self.message('Selected take changed; stale preview discarded.')
+                    else:
+                        try:
+                            self.player.play(path, offset, length)
+                            self.message(f'Playing {effect} · temporary preview, original WAV unchanged.')
+                        except (OSError, ValueError) as exc:
+                            self.message(f'Cannot play effect: {exc}', True)
                 elif value[0]=='altered':
                     _,idx,old,path,voice_id=value
                     try:
@@ -926,6 +969,10 @@ class CommentaryStudio(tk.Toplevel):
         self._closing=True
         self._cancel.set()
         self.player.close()
+        for audio_path in self._fx_files:
+            try: audio_path.unlink(missing_ok=True)
+            except OSError: pass
+        self._fx_files.clear()
         self.recorder.stop()
         if self.recorder.worker and self.recorder.worker.is_alive():
             self.recorder.worker.join(timeout=2)
