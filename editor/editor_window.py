@@ -158,60 +158,6 @@ class EditorWindow(tk.Toplevel):
             style='Pulse.Horizontal.TProgressbar')
         self.progress.pack(fill='x', pady=(4, 0))
 
-        # All legacy editor panels retain their full horizontal width, but are
-        # only mapped while the user deliberately opens a tool.
-        self.inspector = tk.Frame(
-            self, bg=t.PANEL, highlightbackground=t.LINE,
-            highlightthickness=1)
-        self.inspector_visible = False
-        inspector_head = tk.Frame(self.inspector, bg=t.PANEL)
-        inspector_head.pack(fill='x', padx=10, pady=(6, 0))
-        self.inspector_title = t.label(
-            inspector_head, 'TRIM', 10, t.CYAN, True)
-        self.inspector_title.pack(side='left')
-        self.inspector_close = t.button(
-            inspector_head, '✕  CLOSE TOOLS', self.hide_inspector)
-        self.inspector_close.configure(
-            font=(t.FONT, -9, 'bold'), padx=9, pady=3)
-        self.inspector_close.pack(side='right')
-        tool_area = tk.Frame(self.inspector, bg=t.PANEL)
-        tool_area.pack(fill='x')
-        panel_area = tk.Frame(tool_area, bg=t.PANEL, height=150)
-        panel_area.pack(fill='x')
-        panel_area.pack_propagate(False)
-        for name in ('TRIM', 'CUT', 'FORMAT', 'CROP', 'BRAND', 'TEXT', 'PRIVACY', 'MOTION', 'MUSIC', 'FINISH'):
-            self.panels[name] = tk.Frame(panel_area, bg=t.PANEL)
-        row = self.panels['TRIM']
-        row.pack(fill='both', expand=True, padx=12, pady=10)
-        for column, (title, variable, bound) in enumerate((('Start', self.start_text, 'start'), ('End', self.end_text, 'end'))):
-            group = tk.Frame(row, bg=t.PANEL)
-            group.grid(row=0, column=column, sticky='ew', padx=(0, 18))
-            row.columnconfigure(column, weight=1)
-            t.label(group, title, 10, bold=True).pack(anchor='w')
-            inner = tk.Frame(group, bg=t.PANEL)
-            inner.pack(fill='x', pady=(5, 0))
-            entry = tk.Entry(inner, textvariable=variable, bg=t.CONTROL, fg=t.TEXT, insertbackground=t.CYAN,
-                             relief='flat', width=13, font=(t.MONO, -17), disabledbackground=t.CONTROL)
-            entry.pack(side='left', ipady=7)
-            entry.bind('<Return>', lambda _: self.commit_entries())
-            entry.bind('<FocusOut>', lambda _: self.commit_entries())
-            button = t.button(inner, 'USE PLAYHEAD', lambda b=bound: self.use_playhead(b))
-            button.configure(font=(t.FONT, -10, 'bold'), padx=8)
-            button.pack(side='left', padx=(8, 0))
-            self.controls.extend((entry, button))
-        self.reset_button = t.button(row, 'RESET', self.reset_trim)
-        self.reset_button.grid(row=0, column=2, sticky='se')
-        self.controls.append(self.reset_button)
-        self.selection_label = t.label(row, 'Drag the cyan handles or enter Start and End.', 9, t.MUTED)
-        self.selection_label.grid(row=1, column=0, columnspan=3, sticky='w', pady=(8, 0))
-        self.build_tools()
-        self.cut_tools = CutTools(self)
-        self.overlay_tools = OverlayTools(self)
-        self.music_tools = MusicTools(self)
-        self.polish_tools = PolishTools(self)
-        for widget in self.controls:
-            widget.configure(state='disabled')
-
         workspace = tk.Frame(self, bg=t.BG)
         workspace.pack(fill='both', expand=True, padx=16, pady=(5, 4))
 
@@ -253,8 +199,93 @@ class EditorWindow(tk.Toplevel):
             self.tool_buttons[name] = button
             self.controls.append(button)
 
-        preview_area = tk.Frame(workspace, bg=t.BG)
-        preview_area.pack(side='left', fill='both', expand=True)
+        self.work_panes = tk.PanedWindow(
+            workspace, orient='horizontal', bg=t.BG, sashwidth=9,
+            sashrelief='flat', showhandle=True, handlesize=13,
+            relief='flat', bd=0)
+        self.work_panes.pack(side='left', fill='both', expand=True)
+        self.work_panes.bind('<ButtonRelease-1>', self._remember_inspector_width)
+
+        # Existing tool panels use the same models/handlers but now dock to
+        # the right of the preview, not beneath it.
+        self.inspector = tk.Frame(
+            self.work_panes, bg=t.PANEL, width=440,
+            highlightbackground=t.LINE, highlightthickness=1)
+        self.inspector.pack_propagate(False)
+        self.inspector_width = 440
+        self.inspector_visible = False
+        inspector_head = tk.Frame(self.inspector, bg=t.PANEL)
+        inspector_head.pack(fill='x', padx=10, pady=(6, 0))
+        self.inspector_title = t.label(
+            inspector_head, 'TRIM', 10, t.CYAN, True)
+        self.inspector_title.pack(side='left')
+        self.inspector_close = t.button(
+            inspector_head, '✕  CLOSE TOOLS', self.hide_inspector)
+        self.inspector_close.configure(
+            font=(t.FONT, -9, 'bold'), padx=9, pady=3)
+        self.inspector_close.pack(side='right')
+        # Embed the existing wide/long legacy tool controls in an inspector
+        # viewport. This prevents their natural requested size from squeezing
+        # the video; both scroll axes remain available when a tool is wider.
+        tool_area = tk.Frame(self.inspector, bg=t.PANEL)
+        tool_area.pack(fill='both', expand=True, padx=(7, 3), pady=(4, 6))
+        self.tool_scroll_x = ttk.Scrollbar(
+            tool_area, orient='horizontal', command=self.tool_canvas_xview)
+        self.tool_scroll_x.pack(side='bottom', fill='x')
+        content = tk.Frame(tool_area, bg=t.PANEL)
+        content.pack(fill='both', expand=True)
+        self.tool_scroll_y = ttk.Scrollbar(
+            content, orient='vertical')
+        self.tool_scroll_y.pack(side='right', fill='y')
+        self.tool_canvas = tk.Canvas(
+            content, bg=t.PANEL, bd=0, highlightthickness=0,
+            xscrollcommand=self.tool_scroll_x.set,
+            yscrollcommand=self.tool_scroll_y.set)
+        self.tool_canvas.pack(side='left', fill='both', expand=True)
+        self.tool_scroll_y.configure(command=self.tool_canvas.yview)
+        self.panel_area = tk.Frame(self.tool_canvas, bg=t.PANEL)
+        self.tool_canvas_item = self.tool_canvas.create_window(
+            0, 0, window=self.panel_area, anchor='nw')
+        self.tool_canvas.bind('<Configure>', self._inspector_canvas_resized)
+        self.panel_area.bind('<Configure>', self._inspector_content_resized)
+        self.tool_canvas.bind('<MouseWheel>', self._inspector_wheel)
+        panel_area = self.panel_area
+        for name in ('TRIM', 'CUT', 'FORMAT', 'CROP', 'BRAND', 'TEXT', 'PRIVACY', 'MOTION', 'MUSIC', 'FINISH'):
+            self.panels[name] = tk.Frame(panel_area, bg=t.PANEL)
+        row = self.panels['TRIM']
+        row.pack(fill='both', expand=True, padx=12, pady=10)
+        row.columnconfigure(0, weight=1)
+        for column, (title, variable, bound) in enumerate(
+                (('Start', self.start_text, 'start'), ('End', self.end_text, 'end'))):
+            group = tk.Frame(row, bg=t.PANEL)
+            group.grid(row=column, column=0, sticky='ew', pady=(0, 9))
+            t.label(group, title, 10, bold=True).pack(anchor='w')
+            inner = tk.Frame(group, bg=t.PANEL)
+            inner.pack(fill='x', pady=(5, 0))
+            entry = tk.Entry(inner, textvariable=variable, bg=t.CONTROL, fg=t.TEXT, insertbackground=t.CYAN,
+                             relief='flat', width=13, font=(t.MONO, -17), disabledbackground=t.CONTROL)
+            entry.pack(side='left', ipady=7)
+            entry.bind('<Return>', lambda _: self.commit_entries())
+            entry.bind('<FocusOut>', lambda _: self.commit_entries())
+            button = t.button(inner, 'USE PLAYHEAD', lambda b=bound: self.use_playhead(b))
+            button.configure(font=(t.FONT, -10, 'bold'), padx=8)
+            button.pack(side='left', padx=(8, 0))
+            self.controls.extend((entry, button))
+        self.reset_button = t.button(row, 'RESET', self.reset_trim)
+        self.reset_button.grid(row=2, column=0, sticky='w')
+        self.controls.append(self.reset_button)
+        self.selection_label = t.label(row, 'Drag the cyan handles or enter Start and End.', 9, t.MUTED)
+        self.selection_label.grid(row=3, column=0, sticky='w', pady=(8, 0))
+        self.build_tools()
+        self.cut_tools = CutTools(self)
+        self.overlay_tools = OverlayTools(self)
+        self.music_tools = MusicTools(self)
+        self.polish_tools = PolishTools(self)
+        for widget in self.controls:
+            widget.configure(state='disabled')
+
+        preview_area = tk.Frame(self.work_panes, bg=t.BG)
+        self.work_panes.add(preview_area, minsize=300, stretch='always')
         self.preview_split = tk.PanedWindow(
             preview_area, orient='vertical', bg=t.BG,
             sashwidth=8, sashrelief='flat',
@@ -318,6 +349,16 @@ class EditorWindow(tk.Toplevel):
     def add_segments(self, parent, variable, choices, command):
         segments = t.Segments(parent, variable, choices, command)
         segments.pack(fill='x', pady=(0, 6))
+        if len(choices) >= 4:
+            # Five landscape format choices become a tidy two-column list
+            # when presented in the compact right-side inspector.
+            for index, (_, button) in enumerate(segments.buttons):
+                button.grid_configure(
+                    row=index // 2, column=index % 2,
+                    padx=(0 if index % 2 == 0 else 5, 0),
+                    pady=(0, 4))
+            for col in range(len(choices)):
+                segments.columnconfigure(col, weight=1 if col < 2 else 0)
         self.controls.extend(b for _, b in segments.buttons)
         return segments
 
@@ -466,6 +507,44 @@ class EditorWindow(tk.Toplevel):
         t.label(panel, 'Adds a new logo. A logo already in the recording cannot be removed.',
                 9, t.MUTED).pack(anchor='w')
 
+    def tool_canvas_xview(self, *args):
+        self.tool_canvas.xview(*args)
+
+    def _inspector_canvas_resized(self, event=None):
+        """Let narrow panels fill the right dock while wider tools can scroll."""
+        if not hasattr(self, 'tool_canvas_item'):
+            return
+        viewport = event.width if event is not None else self.tool_canvas.winfo_width()
+        requested = self.panel_area.winfo_reqwidth()
+        self.tool_canvas.itemconfigure(
+            self.tool_canvas_item, width=max(1, viewport, requested))
+        self._inspector_content_resized()
+
+    def _inspector_content_resized(self, _event=None):
+        self.tool_canvas.configure(scrollregion=self.tool_canvas.bbox('all'))
+
+    def _inspector_wheel(self, event):
+        if not self.inspector_visible:
+            return
+        if event.state & 0x1:
+            self.tool_canvas.xview_scroll(-1 if event.delta > 0 else 1, 'units')
+        else:
+            self.tool_canvas.yview_scroll(-1 if event.delta > 0 else 1, 'units')
+        return 'break'
+
+    def _remember_inspector_width(self, _event=None):
+        if self.inspector_visible:
+            width = self.inspector.winfo_width()
+            if width > 250:
+                self.inspector_width = width
+
+    def _refresh_inspector_view(self):
+        """Recompute scroll bounds for every newly selected tool."""
+        if not self.inspector_visible or self.closed or self.closing:
+            return
+        self._inspector_canvas_resized()
+        self.tool_canvas.configure(scrollregion=self.tool_canvas.bbox('all'))
+
     def paint_tool_buttons(self):
         """Keep the current tool discoverable without filling the header."""
         for name, button in self.tool_buttons.items():
@@ -490,7 +569,8 @@ class EditorWindow(tk.Toplevel):
         if not self.inspector_visible:
             return
         self.stop_play()
-        self.inspector.pack_forget()
+        self._remember_inspector_width()
+        self.work_panes.forget(self.inspector)
         self.inspector_visible = False
         # When no tool is open, show the actual edited picture rather than
         # lingering source crop/privacy guides from the previous panel.
@@ -517,10 +597,15 @@ class EditorWindow(tk.Toplevel):
         self.inspector_title.configure(
             text=self.tool_titles[self.tool.get()].upper() + '  //  SETTINGS')
         if not self.inspector_visible:
-            self.inspector.pack(
-                side='bottom', fill='x', padx=16, pady=(0, 3),
-                before=self.footer)
+            self.work_panes.add(
+                self.inspector, minsize=280, width=self.inspector_width,
+                stretch='never')
             self.inspector_visible = True
+        # Existing inspector entries may be much wider than the dock; their
+        # scrollbars make them usable without forcing video out of sight.
+        self.tool_canvas.xview_moveto(0)
+        self.tool_canvas.yview_moveto(0)
+        self.after_idle(self._refresh_inspector_view)
         self.paint_tool_buttons()
         self.video.active = self.tool.get() == 'CROP'
         self.video.drag = None
