@@ -92,6 +92,9 @@ class Preview:
         with self._condition:
             if not self._closed:
                 self._pending = (token, position, width, height, edits, source_view, trim, cuts)
+                if self._process is not None and self._process.poll() is None:
+                    try:self._process.terminate()
+                    except OSError:pass
                 self._condition.notify()
 
     def close(self):

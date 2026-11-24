@@ -113,9 +113,17 @@ class PrivacyTrackUITests(unittest.TestCase):
         w.cuts_changed('Test cuts')
         self.next_picture(lambda:w.seek(.75))
         w.play_preview()
-        with patch('editor.editor_window.time.monotonic',return_value=w.play_started+.5):
-            self.next_picture(w.next_frame)
-        self.assertAlmostEqual(w.position,2.25)
+        # Continuous preview starts its clock only after the first
+        # decoded frame is displayed. Wait before simulating elapsed time.
+        self.pump_until(lambda: not w._waiting_for_play_frame, timeout=12)
+        # Advance the real playback clock without mocking the shared
+        # time module. Wait for the corresponding decoded video frame.
+        w.play_started -= .5
+        w.next_frame()
+        self.assertAlmostEqual(w.position, 2.25, delta=.08)
+        self.pump_until(
+            lambda: [m.mode for _, m in w.video.active_masks] == ['Pixelate'],
+            timeout=12)
         self.assertEqual([m.mode for _,m in w.video.active_masks],['Pixelate'])
         w.pause_preview();w.stop_preview()
         self.assertEqual(w.position,0)

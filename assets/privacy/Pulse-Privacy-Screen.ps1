@@ -1,11 +1,12 @@
-﻿# Pulse Capture Privacy Screen v1.4.2 - pinned shortcuts no longer dismiss Full Cover.
-# Windows PowerShell 5.1: powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File .\Pulse-Privacy-Screen-v1.4.2.ps1
+﻿# Pulse Capture Privacy Screen v1.4.4 - desktop-layer close button is part of the background window.
+# Windows PowerShell 5.1: powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File .\Pulse-Privacy-Screen-v1.4.4.ps1
 # Fullscreen always has a native CLOSE button (plus Escape / Alt+F4); no hotkeys are required for exit.
 # A safe FULL COVER test never changes the desktop icons or taskbar.
 [CmdletBinding()]
 param(
     [switch]$Watchdog,
     [switch]$Restore,
+    [switch]$ValidateOnly,
     [int]$ParentPid = 0
 )
 
@@ -141,7 +142,56 @@ namespace PulsePrivacy {
         public string FitMode { get; set; }
         public string ThemeMode { get; set; }
         public bool Passive { get; set; }
+        private Button backgroundClose;
+        private ToolTip backgroundCloseTip;
+        public event EventHandler BackgroundRestoreRequested;
         protected override bool ShowWithoutActivation { get { return Passive; } }
+        // Passive wallpaper windows must not steal focus or come to the front
+        // when the desktop is clicked. This applies only to background mode.
+        protected override CreateParams CreateParams {
+            get {
+                CreateParams cp = base.CreateParams;
+                if (Passive) cp.ExStyle |= 0x08000000; // WS_EX_NOACTIVATE
+                return cp;
+            }
+        }
+        public void EnableBackgroundRestore() {
+            if (backgroundClose != null) return;
+            backgroundClose = new Button();
+            backgroundClose.Name = "RestorePrivacyBackground";
+            backgroundClose.Text = "\u00D7";
+            backgroundClose.Size = new Size(46, 44);
+            backgroundClose.Font = new Font("Segoe UI", 18, FontStyle.Regular);
+            backgroundClose.ForeColor = Color.FromArgb(210, 222, 235);
+            backgroundClose.BackColor = Color.FromArgb(24, 36, 53);
+            backgroundClose.FlatStyle = FlatStyle.Flat;
+            backgroundClose.FlatAppearance.BorderColor = Color.FromArgb(78, 99, 124);
+            backgroundClose.FlatAppearance.MouseOverBackColor = Color.FromArgb(91, 48, 58);
+            backgroundClose.FlatAppearance.MouseDownBackColor = Color.FromArgb(117, 52, 66);
+            backgroundClose.AccessibleName = "Restore desktop and close privacy background";
+            backgroundClose.Click += delegate(object sender, EventArgs e) {
+                if (BackgroundRestoreRequested != null) BackgroundRestoreRequested(this, EventArgs.Empty);
+            };
+            Controls.Add(backgroundClose);
+            backgroundClose.BringToFront();
+            backgroundCloseTip = new ToolTip();
+            backgroundCloseTip.SetToolTip(backgroundClose, "Restore original desktop");
+            PositionBackgroundClose();
+        }
+        public void ShowBackgroundRestore(bool visible) {
+            if (backgroundClose != null) {
+                backgroundClose.Visible = visible;
+                if (visible) backgroundClose.BringToFront();
+            }
+        }
+        private void PositionBackgroundClose() {
+            if (backgroundClose != null) backgroundClose.Location =
+                new Point(Math.Max(4, ClientSize.Width - backgroundClose.Width - 16), 14);
+        }
+        protected override void OnResize(EventArgs e) {
+            base.OnResize(e);
+            PositionBackgroundClose();
+        }
         public Canvas() {
             FormBorderStyle = FormBorderStyle.None;
             ShowInTaskbar = false;
@@ -173,6 +223,10 @@ namespace PulsePrivacy {
                     g.DrawString(text,font,textBrush,(ClientSize.Width-size.Width)/2,(ClientSize.Height-size.Height)/2);
                 }
             }
+        }
+        protected override void Dispose(bool disposing) {
+            if (disposing && backgroundCloseTip != null) backgroundCloseTip.Dispose();
+            base.Dispose(disposing);
         }
     }
     // Native clickable tile: click to launch; drag to reposition. No real desktop
@@ -401,6 +455,11 @@ namespace PulsePrivacy {
 '@
 }
 
+if ($ValidateOnly) {
+    Write-Host 'Privacy v1.4.4 PowerShell and Windows Forms type compilation passed.' -ForegroundColor Green
+    exit 0
+}
+
 function Get-CurrentState {
     $icon = [PulsePrivacy.Native]::FindIcons()
     $bars = @()
@@ -587,10 +646,15 @@ $script:showHotkeyLabel = Add-Label 'Show controls: registering shortcut...' 20 
 
 $script:backgroundForm = [PulsePrivacy.Canvas]::new()
 $script:backgroundForm.Passive = $true
+$script:backgroundForm.EnableBackgroundRestore()
+$script:backgroundForm.ShowBackgroundRestore($false)
 $script:backgroundForm.Bounds = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
 $script:coverForm = [PulsePrivacy.FullCover]::new()
 $script:coverForm.Bounds = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
 $script:coverForm.TopMost = $false
+
+# The desktop close control belongs to the background Canvas itself.
+# There is no independent popup to fall behind the picture when clicked.
 
 $script:settings = [pscustomobject]@{
     ImagePath = ''; Background = 'Pulse dark'; Fit = 'Fill'; HideIcons = $false; HideTaskbar = $false
@@ -702,6 +766,7 @@ function End-FullCover {
 }
 function Restore-Privacy {
     End-FullCover
+    $script:backgroundForm.ShowBackgroundRestore($false)
     try {
         if ($script:backgroundForm.Visible) { $script:backgroundForm.Hide() }
         if ($script:savedState) { Restore-DesktopState $script:savedState }
@@ -749,6 +814,9 @@ function Activate-Privacy {
         $script:coverButton.Text = 'FULL COVER'
         $script:statusLabel.Text = 'ON - privacy background active'
         $script:statusLabel.ForeColor = [System.Drawing.Color]::FromArgb(130,226,166)
+        # The x is a child of the desktop background, not an independent
+        # window: clicking empty desktop cannot send just the x behind it.
+        $script:backgroundForm.ShowBackgroundRestore($true)
         $script:panel.Activate()
     } catch {
         Restore-Privacy
@@ -800,6 +868,13 @@ $script:activateButton.Add_Click({
     catch { [System.Windows.Forms.MessageBox]::Show($_.Exception.Message,'Cannot activate privacy') | Out-Null }
 })
 $script:restoreButton.Add_Click({ Restore-Privacy })
+# Background-mode close must restore Windows' previous icon/taskbar state,
+# not merely hide the picture. Retain the global emergency hotkey as fallback.
+$script:backgroundForm.Add_BackgroundRestoreRequested({
+    Restore-Privacy
+    $script:panel.Show()
+    $script:panel.Activate()
+})
 $script:coverButton.Add_Click({
     # Critical safety rule: testing FULL COVER never activates background mode,
     # hides icons, or touches the taskbar. Test the native CLOSE button first.
@@ -809,18 +884,22 @@ $script:coverButton.Add_Click({
         Save-Settings
         $script:coverForm.Bounds = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
         Set-PinnedShortcuts
+        # Full Cover has its own native close button; avoid duplicate exits.
+        $script:backgroundForm.ShowBackgroundRestore($false)
         $script:coverForm.Show()
         $script:coverForm.BringToFront()
         $script:coverForm.Activate()
         $script:coverActive = $true
         $script:coverButton.Text = 'EXIT COVER'
     } catch {
+        if ($script:isActive) { $script:backgroundForm.ShowBackgroundRestore($true) }
         [System.Windows.Forms.MessageBox]::Show($_.Exception.Message, 'Cannot show full cover') | Out-Null
     }
 })
 # The form's CLOSE button and Escape/Alt+F4 work in C# even if this callback fails.
 $script:coverForm.Add_Dismissed({
     $script:coverActive = $false
+    if ($script:isActive) { $script:backgroundForm.ShowBackgroundRestore($true) }
     $script:coverButton.Text = if ($script:isActive) { 'FULL COVER' } else { 'TEST FULL COVER' }
 })
 $script:hideButton.Add_Click({ $script:panel.Hide() })

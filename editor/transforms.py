@@ -248,7 +248,7 @@ class EditOptions:
         return output_duration(source_duration, self.speed)
 
 
-def video_filters(media, edits, asset=None, text_resources=None, duration=None, preview_time=None, input_label='0:v:0', trim=None, cuts=None, source_position=None, skip_crop=False):
+def video_filters(media, edits, asset=None, text_resources=None, duration=None, preview_time=None, input_label='0:v:0', trim=None, cuts=None, source_position=None, skip_crop=False, clock_offset=0, source_offset=None):
     """Shared visual order; preview_time samples output time without retiming a still."""
     edits.validate(media)
     trim = trim or TrimRange(0, media.duration)
@@ -257,7 +257,7 @@ def video_filters(media, edits, asset=None, text_resources=None, duration=None, 
         c = edits.crop
         if edits.crop_motion.keyframes:
             if source_position is None:
-                filters.append(motion_crop_filter(c, edits.crop_motion, time_offset=trim.start))
+                filters.append(motion_crop_filter(c, edits.crop_motion, time_offset=trim.start if source_offset is None else source_offset))
             else:
                 # A still preview is sought at absolute source time; rendering
                 # the sampled crop is identical to the export on this frame.
@@ -266,6 +266,8 @@ def video_filters(media, edits, asset=None, text_resources=None, duration=None, 
         else:
             filters.append(f'crop={c.width}:{c.height}:{c.x}:{c.y}')
     filters.append('pad=ceil(iw/2)*2:ceil(ih/2)*2')
+    if clock_offset:
+        filters.append(f'setpts=PTS+{clock_offset:.9f}/TB')
     base = ','.join(filters)
     privacy = []
     for mask in edits.privacy.masks:
@@ -298,7 +300,7 @@ def video_filters(media, edits, asset=None, text_resources=None, duration=None, 
         graph.extend(privacy_filters(rect, mask.mode, current, label, enable))
         current = label
 
-    zoom = zoom_filter(media, edits.crop, edits.zoom, edits.speed, duration, preview_time)
+    zoom = zoom_filter(media, edits.crop, edits.zoom, edits.speed, duration, preview_time, clock_offset)
     if zoom:
         graph.append(f'[{current}]{zoom}[zoomed]')
         current = 'zoomed'

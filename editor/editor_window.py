@@ -14,9 +14,12 @@ from .cut_tools import CutTools
 from .export_job import ExportJob
 from .media import probe_media
 from .models import TrimRange, format_time, parse_time
-from .preview import Preview, anticipated_source_position
+from .preview import Preview
+from .playback_preview import PlaybackPreview
 from .audio_preview import AudioPlayback
 from .timeline import Timeline
+from .edit_history import EditHistory, EditSnapshot
+from .timeline_edits import blocks as timeline_blocks, duration as timeline_duration, change_timing
 from .reaction_preview import ReactionPreview
 from .overlay_tools import OverlayTools
 from .music_tools import MusicTools
@@ -33,6 +36,7 @@ class EditorWindow(tk.Toplevel):
         self.minsize(760, 700)
         self.path, self.backend, self.on_close = Path(path), backend, on_close
         self.media = self.trim = self.preview = self.audio_player = None
+        self.playback = None
         self.cuts = CutPlan()
         self.auto_candidate = auto_candidate
         self.pulse_candidate = pulse_candidate
@@ -45,16 +49,14 @@ class EditorWindow(tk.Toplevel):
         self.play_anchor = 0.0
         self.play_anchor_elapsed = 0.0
         self._waiting_for_play_frame = False
-        # Measured FFmpeg snapshot latency. Each preview decode takes time,
-        # and requesting the *current* playhead frame made video lag audio.
-        self._preview_render_latency = 0.0
-        self._preview_latency_samples = 0
         self.last_export = None
         self.output_folder = self.path.parent
         self._seek_id = self._poll_id = self._play_id = None
         self._photo = None
         self.controls = []
         self.edits = EditOptions()
+        self.timeline_history = None
+        self._timing_drag_key = None
         self.tool = tk.StringVar(value='TRIM')
         self.format_choice = tk.StringVar(value='Original')
         self.comedy_on = tk.BooleanVar(value=False)
@@ -65,9 +67,12 @@ class EditorWindow(tk.Toplevel):
         self.brand_segments = []
         self.crop_key_buttons = []
         self.audio_on = tk.BooleanVar(value=True)
+        self.preview_quality = tk.StringVar(value='480p')
         self.start_text, self.end_text = tk.StringVar(value='0:00.000'), tk.StringVar(value='0:00.000')
         self._build()
         self.protocol('WM_DELETE_WINDOW', self.close)
+        self.bind('<Control-z>',self.undo_timeline)
+        self.bind('<Control-y>',self.redo_timeline)
         self._poll_id = self.after(60, self.poll)
         def load():
             try:
@@ -208,13 +213,19 @@ class EditorWindow(tk.Toplevel):
         self.clock.pack(side='left', padx=16)
         self.preview_note = t.label(transport, 'Preparing audio preview…', 9, t.MUTED)
         self.preview_note.pack(side='right')
+        self.quality_picker = ttk.Combobox(transport,textvariable=self.preview_quality,
+            values=('360p','480p','720p'),state='readonly',width=5)
+        self.quality_picker.pack(side='right',padx=6)
+        self.quality_picker.bind('<<ComboboxSelected>>',self.quality_changed)
         self.audio_toggle = tk.Checkbutton(
             transport, text='SOUND ON', variable=self.audio_on,
             command=self.toggle_audio, bg=t.BG, fg=t.CYAN,
             selectcolor=t.CONTROL, activebackground=t.BG,
             activeforeground=t.TEXT, disabledforeground=t.MUTED, bd=0)
         self.audio_toggle.pack(side='right', padx=(0, 10))
-        self.timeline = Timeline(preview_area, self.seek, self.drag_trim)
+        self.timeline = Timeline(preview_area, self.seek, self.drag_trim,
+                                 self.begin_clip_drag,self.change_clip_drag,self.end_clip_drag)
+        self.timeline.on_output_seek = self.seek_output_time
         self.timeline.grid(row=2, column=0, sticky='ew')
 
     def add_segments(self, parent, variable, choices, command):
@@ -571,6 +582,7 @@ class EditorWindow(tk.Toplevel):
     def request_frame(self):
         if not self.preview or self.closed or self.closing:
             return
+        if self.playing:self.stop_play()
         self.refresh_crop_guide()
         self.token += 1
         token = self.token
@@ -589,15 +601,16 @@ class EditorWindow(tk.Toplevel):
                 # Focus placement must remain visible even at a fade boundary.
                 edits = replace(edits, zoom=replace(edits.zoom, enabled=False),
                                 fade=replace(edits.fade, fade_in=False, fade_out=False))
-            requested_position = self.position
-            if self.playing and not self._waiting_for_play_frame and self._preview_render_latency:
-                requested_position = anticipated_source_position(
-                    self.cuts, self.trim, self._elapsed_kept(),
-                    self.edits.speed, self._preview_render_latency)
-            self.preview.request(token, requested_position,
+            self.preview.request(token, self.position,
                                  self.video.winfo_width()-4, self.video.winfo_height()-4,
                                  edits, self.tool.get() == 'CROP', self.trim, self.cuts)
         self._seek_id = self.after(90 if not self.playing else 1, send)
+
+    def quality_changed(self, _=None):
+        resume=self.playing
+        self.stop_play()
+        if resume:self.play_preview()
+        else:self.request_frame()
 
     def seek(self, position):
         self.stop_play()
@@ -605,7 +618,16 @@ class EditorWindow(tk.Toplevel):
         self.update_timeline()
         self.request_frame()
 
-    def update_timeline(self):
+    def update_timeline(self, position_only=False):
+        if position_only or (
+            self.playing
+            and self.timeline.media is self.media
+            and self.timeline.trim == self.trim
+            and self.timeline.cuts == self.cuts
+        ):
+            self.timeline.move_playhead(self.position)
+            self.clock.configure(text=f'{format_time(self.position)} / {format_time(self.media.duration)}')
+            return
         self.timeline.media, self.timeline.trim, self.timeline.position = self.media, self.trim, self.position
         self.timeline.cuts = self.cuts
         self.timeline.crop_keyframes = (self.edits.crop_motion.keyframes
@@ -619,9 +641,69 @@ class EditorWindow(tk.Toplevel):
             (self.cuts.source_from_elapsed((c.at if hasattr(c, 'at') else c.start)*self.edits.speed, self.trim),
              'SFX' if hasattr(c, 'at') else c.kind.upper())
             for c in (*self.edits.sounds, *self.edits.overlays))
+        self.timeline.output_duration = timeline_duration(self) if self.media and self.trim else 0
+        self.timeline.clip_blocks = tuple(timeline_blocks(self)) if self.media and self.trim else ()
         self.timeline.draw()
         self.clock.configure(text=f'{format_time(self.position)} / {format_time(self.media.duration)}')
         self.refresh_crop_guide()
+
+    def seek_output_time(self, at):
+        if not self.media or not self.trim:return
+        self.seek(self.cuts.source_from_elapsed(at*self.edits.speed,self.trim))
+
+    def begin_clip_drag(self, key):
+        if not self.media or self.exporter.busy or self.closing:return
+        self.stop_play()
+        state=EditSnapshot(self.trim,self.cuts,self.edits)
+        if self.timeline_history is None or self.timeline_history.current!=state:
+            # Existing tools may have edited the project since the last drag.
+            # Never undo across edits we did not record.
+            self.timeline_history=EditHistory(state)
+        self.timeline_history.begin()
+        self._timing_drag_key=key
+
+    def change_clip_drag(self, key, start, end):
+        if self._timing_drag_key!=key or not self.media or self.exporter.busy:return
+        try:
+            state=EditSnapshot(self.trim,self.cuts,self.edits)
+            updated=change_timing(state,key,start,end,self.media)
+            if updated==state:return
+            self.edits=updated.edits
+            self.timeline_history.record(updated)
+            self.update_timeline()
+            # Preview the altered timing once on release, not a costly FFmpeg
+            # seek on every mouse pixel: preserve smooth continuous decoding.
+        except (ValueError,IndexError) as exc:
+            self.note.configure(text=str(exc),fg=t.RED)
+
+    def end_clip_drag(self):
+        if self.timeline_history:self.timeline_history.end()
+        if self._timing_drag_key is None:return
+        self._timing_drag_key=None
+        self.overlay_tools.refresh()
+        self.request_frame()
+
+    def undo_timeline(self, _event=None):
+        if not self.timeline_history or not self.media or self.exporter.busy:return
+        state=EditSnapshot(self.trim,self.cuts,self.edits)
+        if self.timeline_history.current!=state:return
+        if not self.timeline_history.past:return
+        self.stop_play()
+        restored=self.timeline_history.undo()
+        self.edits=restored.edits
+        self.update_timeline();self.overlay_tools.refresh();self.request_frame()
+        return 'break'
+
+    def redo_timeline(self, _event=None):
+        if not self.timeline_history or not self.media or self.exporter.busy:return
+        state=EditSnapshot(self.trim,self.cuts,self.edits)
+        if self.timeline_history.current!=state:return
+        if not self.timeline_history.future:return
+        self.stop_play()
+        restored=self.timeline_history.redo()
+        self.edits=restored.edits
+        self.update_timeline();self.overlay_tools.refresh();self.request_frame()
+        return 'break'
 
     def update_selection_label(self):
         if not self.trim:
@@ -701,16 +783,10 @@ class EditorWindow(tk.Toplevel):
         self.stop_button.configure(state='normal' if ready else 'disabled')
 
     def toggle_audio(self):
-        self._waiting_for_play_frame = False
         self.audio_toggle.configure(text='SOUND ON' if self.audio_on.get() else 'MUTED')
-        if self.playing and self.trim:
-            self.position = self.cuts.source_from_elapsed(self._elapsed_kept(), self.trim)
-            self.play_anchor_elapsed = self.cuts.source_elapsed(self.position, self.trim)
-            self.play_started = time.monotonic()
-        if self.audio_player:
-            self.audio_player.stop()
-            if self.playing and self.audio_on.get():
-                self.audio_player.play(self.position, self.trim, self.cuts, self.edits)
+        resume=self.playing
+        self.stop_play()
+        if resume:self.play_preview()
 
     def play_preview(self):
         if self.playing or not self.commit_entries():
@@ -728,16 +804,18 @@ class EditorWindow(tk.Toplevel):
         # Don't start audio while FFmpeg is still decoding the first displayed
         # frame. Otherwise the soundtrack races ahead of the *picture* during
         # preview startup, even if both streams share the same clock.
-        self._waiting_for_play_frame = bool(
-            self.audio_on.get() and self.audio_player and
-            (self.media.has_audio or self.edits.music.enabled or self.edits.sounds)
-        )
+        self._waiting_for_play_frame = True
         self.play_anchor = self.position
         self.play_anchor_elapsed = self.cuts.source_elapsed(self.position, self.trim)
         self.play_started = time.monotonic()
         self._update_transport_controls()
         self.update_timeline()
-        self.request_frame()
+        if self._seek_id:
+            self.after_cancel(self._seek_id);self._seek_id=None
+        self.token+=1
+        self.playback.play(self.token,self.position,self.video.winfo_width()-4,
+                           self.video.winfo_height()-4,self.edits,self.trim,self.cuts,
+                           int(self.preview_quality.get()[:-1]))
 
     def pause_preview(self):
         if not self.playing:
@@ -760,6 +838,7 @@ class EditorWindow(tk.Toplevel):
 
     def _elapsed_kept(self):
         """Map the master audio clock onto the cut-aware source timeline."""
+        if self._waiting_for_play_frame:return self.play_anchor_elapsed
         delta = time.monotonic() - self.play_started
         if (self.audio_on.get() and self.audio_player and
                 (self.media.has_audio or self.edits.music.enabled or self.edits.sounds)):
@@ -777,6 +856,7 @@ class EditorWindow(tk.Toplevel):
             self.position = self.cuts.source_from_elapsed(elapsed, self.trim)
         if self.audio_player:
             self.audio_player.stop()
+        if self.playback:self.playback.stop()
         self._waiting_for_play_frame = False
         self.playing = False
         if self._play_id:
@@ -801,6 +881,29 @@ class EditorWindow(tk.Toplevel):
                 if self.audio_player:
                     self.audio_player.stop()
                 self._update_transport_controls()
+            if not self.playing:self.request_frame()
+
+    def poll_playback(self):
+        if not self.playing or not self.playback:return
+        if self.playback.error:
+            message=self.playback.error
+            self.stop_play();self.note.configure(text=message,fg=t.RED)
+            return
+        elapsed=min(self.cuts.kept_duration(self.trim),self._elapsed_kept())
+        frame=self.playback.take_due(elapsed/self.edits.speed)
+        if frame is not None and frame.token==self.token:
+            self._photo=tk.PhotoImage(master=self,data=frame.ppm,format='PPM')
+            self.video.itemconfigure('placeholder',text='')
+            self.video.show_frame(self._photo,False,frame.edits,frame.position)
+            if self._waiting_for_play_frame:
+                self._waiting_for_play_frame=False
+                self.play_started=time.monotonic()
+                if self.audio_on.get() and self.audio_player:
+                    self.audio_player.play(self.play_anchor,self.trim,self.cuts,self.edits)
+            self.position=self.cuts.source_from_elapsed(elapsed,self.trim)
+            self.update_timeline()
+        if not self._waiting_for_play_frame and elapsed>=self.cuts.kept_duration(self.trim)-1e-9:
+            self.stop_play()
             self.request_frame()
 
     def export(self):
@@ -876,6 +979,7 @@ class EditorWindow(tk.Toplevel):
                     text='Original + music audio preview' if media.has_audio
                     else 'No source audio · Add music to hear a soundtrack')
                 self.preview = Preview(self.backend.ffmpeg, media)
+                self.playback = PlaybackPreview(self.backend.ffmpeg, media)
                 self.audio_player = AudioPlayback(self.backend.ffmpeg, media)
                 self.update_trim(TrimRange(0, media.duration))
                 self.set_busy(False)
@@ -902,20 +1006,11 @@ class EditorWindow(tk.Toplevel):
                     self.note.configure(text=problem, fg=t.RED)
             except Empty:
                 pass
+        self.poll_playback()
         if self.preview:
             try:
                 frame = self.preview.frames.get_nowait()
-                if frame.token == self.token:
-                    if not frame.error and frame.render_seconds > 0:
-                        # First measurement establishes the delay; subsequent
-                        # measurements adapt smoothly to CPU/export effects.
-                        measured = min(3.0, frame.render_seconds + .06)
-                        if self._preview_latency_samples == 0:
-                            self._preview_render_latency = measured
-                        else:
-                            self._preview_render_latency = (
-                                .65 * self._preview_render_latency + .35 * measured)
-                        self._preview_latency_samples += 1
+                if frame.token == self.token and not self.playing:
                     if frame.error:
                         self.stop_play()
                         self.video.delete('frame', 'crop', 'privacy', 'privacy-active', 'zoom', 'visual-guide')
@@ -927,13 +1022,6 @@ class EditorWindow(tk.Toplevel):
                         self._photo = tk.PhotoImage(master=self, data=frame.ppm, format='PPM')
                         self.video.itemconfigure('placeholder', text='')
                         self.video.show_frame(self._photo, frame.source_view, frame.edits, frame.position)
-                        if self.playing:
-                            if self._waiting_for_play_frame:
-                                self._waiting_for_play_frame = False
-                                self.play_started = time.monotonic()
-                                self.audio_player.play(self.position, self.trim,
-                                                       self.cuts, self.edits)
-                            self._play_id = self.after(60, self.next_frame)
             except Empty:
                 pass
         try:
@@ -959,7 +1047,7 @@ class EditorWindow(tk.Toplevel):
                 self.auto_dialog and not self.auto_dialog.closed):
             self.finish_close()
             return
-        self._poll_id = self.after(60, self.poll)
+        self._poll_id = self.after(15 if self.playing else 60, self.poll)
 
     def close(self):
         if self.closed:
@@ -968,6 +1056,7 @@ class EditorWindow(tk.Toplevel):
         self.stop_play()
         if self.preview:
             self.preview.close()
+        if self.playback:self.playback.close()
         if self.audio_player:
             self.audio_player.close()
         for child in list(self.auto_children):
@@ -985,6 +1074,7 @@ class EditorWindow(tk.Toplevel):
         self.closed = True
         if self.preview:
             self.preview.close()
+        if self.playback:self.playback.close()
         if self.audio_player:
             self.audio_player.close()
         for timer in (self._seek_id, self._poll_id, self._play_id):

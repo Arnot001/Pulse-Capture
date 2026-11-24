@@ -22,7 +22,7 @@ BLOCK_BYTES = 8192
 
 
 def audio_preview_command(ffmpeg, media, source_position, trim, cuts=None,
-                          edits=None, music_path=None):
+                          edits=None, music_path=None, *, seek_input=False):
     """Build an FFmpeg audio-only command aligned with the visible output time."""
     edits = edits or EditOptions()
     cuts = cuts or CutPlan()
@@ -41,8 +41,10 @@ def audio_preview_command(ffmpeg, media, source_position, trim, cuts=None,
     if duration <= 0:
         return None
     output_offset = cuts.source_elapsed(start, trim) / edits.speed
-    args = [str(ffmpeg), '-hide_banner', '-loglevel', 'error', '-nostdin',
-            '-i', str(media.path)]
+    input_offset = start if seek_input else 0
+    args = [str(ffmpeg), '-hide_banner', '-loglevel', 'error', '-nostdin']
+    if seek_input:args += ['-ss',f'{input_offset:.9f}']
+    args += ['-i', str(media.path)]
     if edits.music.enabled:
         music_path = music_path or resolve_music_path(edits.music)
         if input_loops(edits.music):
@@ -53,7 +55,7 @@ def audio_preview_command(ffmpeg, media, source_position, trim, cuts=None,
         labels = []
         for i, (start_at, end_at) in enumerate(remaining):
             label = f'piece{i}'
-            graph.append(f'[0:a:0]atrim=start={start_at:.9f}:end={end_at:.9f},'
+            graph.append(f'[0:a:0]atrim=start={start_at-input_offset:.9f}:end={end_at-input_offset:.9f},'
                          f'asetpts=PTS-STARTPTS[{label}]')
             labels.append(label)
         if len(labels) == 1:
@@ -206,7 +208,7 @@ class AudioPlayback:
                 raise RuntimeError('Install editor audio playback: '
                                    'python -m pip install -r requirements-audio.txt') from exc
             command = audio_preview_command(self.ffmpeg, self.media, position, trim,
-                                            cuts, edits)
+                                            cuts, edits, seek_input=True)
             if command is None or cancel.is_set():
                 return
             manager = pyaudio.PyAudio()

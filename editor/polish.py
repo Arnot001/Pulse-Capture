@@ -84,13 +84,15 @@ def zoom_geometry(media, crop, zoom):
     return int(x), int(y), int(width), int(height), int(base_w), int(base_h)
 
 
-def zoom_filter(media, crop, zoom, speed=1.0, duration=None, preview_time=None):
+def zoom_filter(media, crop, zoom, speed=1.0, duration=None, preview_time=None, clock_offset=0):
     geometry = zoom_geometry(media, crop, zoom)
     if geometry is None:
         return None
     if zoom.mode == 'Zoom in':
         seconds = animation_duration(zoom, media.duration if duration is None else duration, speed, media.fps)
         clock = f'in_time/{speed:g}' if preview_time is None else f'{max(0, preview_time):.9f}'
+        if preview_time is None and clock_offset:
+            clock = f'(in_time+{clock_offset:.9f})/{speed:g}'
         p = f'min(1,max(0,({clock})/{seconds:.9f}))'
         factor = f'1+{zoom.factor-1:g}*({p})*({p})*(3-2*({p}))'
         out_w, out_h = geometry[-2:]
@@ -101,8 +103,9 @@ def zoom_filter(media, crop, zoom, speed=1.0, duration=None, preview_time=None):
         # One zoompan frame per input frame. Normalize VFR before assigning CFR
         # timestamps; speed conversion still follows text and branding.
         normalize = f'setpts=PTS-STARTPTS,fps={media.fps:.9f},' if preview_time is None else ''
+        restore = f',setpts=PTS+{clock_offset:.9f}/TB' if preview_time is None and clock_offset else ''
         return (normalize + f"format=yuv444p,zoompan=z='{factor}':x='{x}':y='{y}':"
-                f'd=1:s={out_w}x{out_h}:fps={media.fps:.9f},setsar=1')
+                f'd=1:s={out_w}x{out_h}:fps={media.fps:.9f},setsar=1'+restore)
     x, y, width, height, out_w, out_h = geometry
     return f'crop={width}:{height}:{x}:{y},scale={out_w}:{out_h}:flags=lanczos'
 

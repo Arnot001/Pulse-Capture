@@ -26,7 +26,9 @@ class PrivacyPreview(CropPreview):
 
     def show_frame(self, photo, source_view, edits=None, position=0):
         self.active_masks = tuple((i,m) for i,m in enumerate(edits.privacy.masks) if m.active(position)) if edits else ()
-        self.display_crop = edits.crop_at(self.media, position) if edits else None
+        # The worker already validated this immutable render snapshot. Avoid
+        # re-reading every reaction asset on the Tk thread for every frame.
+        self.display_crop = edits.crop_motion.sample(self.media,edits.crop,position) if edits else None
         self.display_zoomed = bool(edits and edits.zoom.enabled)
         self.display_full_frame = bool(edits and edits.preset == FULL_FRAME_FORMAT and not source_view)
         super().show_frame(photo, source_view)

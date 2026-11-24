@@ -90,6 +90,7 @@ class MotionUITests(unittest.TestCase):
                 c.zoom_view_button.invoke()
             else:
                 w.position=w.trim.start;w.play_preview()
+            self.pump_until(lambda:not w._waiting_for_play_frame)
             start=w.play_started
             with patch('editor.editor_window.time.monotonic',return_value=start+.125):
                 w.next_frame()
@@ -97,6 +98,7 @@ class MotionUITests(unittest.TestCase):
                 w.pause_preview()
             position=w.position
             w.play_preview();self.assertEqual(w.play_anchor,position)
+            self.pump_until(lambda:not w._waiting_for_play_frame)
             with patch('editor.editor_window.time.monotonic',return_value=w.play_started+10):
                 w.next_frame()
             self.assertFalse(w.playing)
@@ -144,8 +146,9 @@ class MotionUITests(unittest.TestCase):
             self.assertEqual(sent.fade,Fade())
             self.assertEqual(w.edits,edits)
             self.assertTrue(w.video.find_withtag('zoom'))
-            self.next_picture(c.zoom_view_button.invoke)
-            self.assertEqual(requests.call_args.args[4],edits)
+            with patch.object(w.playback,'play',wraps=w.playback.play) as playback:
+                self.next_picture(c.zoom_view_button.invoke)
+                self.assertEqual(playback.call_args.args[4],edits)
             self.assertFalse(w.video.find_withtag('zoom'))
             self.next_picture(c.zoom_view_button.invoke)
             self.assertEqual(w.edits,edits)
