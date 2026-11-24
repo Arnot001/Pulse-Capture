@@ -19,6 +19,7 @@ from .voice_catalogue import Catalogue
 from .voice_conversion import available, convert_voice, MODEL_URL
 from .voice_recording import MicrophoneRecorder, microphones
 from .commentary_playback import TakePlayback
+from .commentary_effects import EFFECTS, validate_effect, render_effect_audition
 
 
 class CommentaryStudio(tk.Toplevel):
@@ -56,6 +57,10 @@ class CommentaryStudio(tk.Toplevel):
         self.background_var = tk.DoubleVar(value=.5)
         self.video_var = tk.DoubleVar(value=editor.edits.music.original_volume)
         self.duck_var = tk.BooleanVar(value=True)
+        self.effect_var = tk.StringVar(value='None')
+        self.effect_strength_var = tk.DoubleVar(value=.5)
+        self._fx_rendering = False
+        self._fx_files = set()
         self.fadein_var = tk.StringVar(value='.025')
         self.fadeout_var = tk.StringVar(value='.045')
         self.voice_var = tk.StringVar(value='')
@@ -172,7 +177,7 @@ class CommentaryStudio(tk.Toplevel):
             transport, '0:00 / 0:00', 12, t.TEXT, True)
         self.playback_clock.pack(side='right', padx=(8, 2))
         t.label(self.content,
-                'These buttons play the selected voice only. Use PLAY in the video editor to hear the full mix.',
+                'Play Take auditions your voice/effects. Quick Edit PLAY previews the full audio mix.',
                 9, t.MUTED).pack(anchor='w', padx=20, pady=(0, 7))
 
         t.label(self.content, 'EDIT POSITION · SECONDS', 10, t.CYAN, True).pack(
@@ -206,6 +211,27 @@ class CommentaryStudio(tk.Toplevel):
         self.duck_slider = self._volume_slider(
             mixer, 'BACKGROUND DURING COMMENTARY', self.background_var,
             0, 1, .01, 'Only while speaking; 25% makes game/music much quieter')
+        t.label(self.content, 'VOICE EFFECTS', 11, t.CYAN, True).pack(
+            anchor='w', padx=19, pady=(11, 4))
+        fx_panel = tk.Frame(self.content, bg=t.PANEL)
+        fx_panel.pack(fill='x', padx=18)
+        fx_head = tk.Frame(fx_panel, bg=t.PANEL)
+        fx_head.pack(fill='x', padx=12, pady=(9, 3))
+        t.label(fx_head, 'EFFECT', 10, t.TEXT, True).pack(side='left', padx=(0, 8))
+        self.effect_picker = ttk.Combobox(
+            fx_head, values=EFFECTS, textvariable=self.effect_var,
+            state='readonly', width=22)
+        self.effect_picker.pack(side='left', padx=(0, 10))
+        self.effect_picker.bind('<<ComboboxSelected>>', self._effect_changed)
+        self.effect_hint = t.label(
+            fx_head, 'No effect · original audio stays safe', 9, t.MUTED)
+        self.effect_hint.pack(side='left', fill='x', expand=True)
+        self.effect_slider = self._volume_slider(
+            fx_panel, 'EFFECT STRENGTH', self.effect_strength_var,
+            0, 1, .05, 'Selected take only · 0% = clean voice')
+        t.label(self.content,
+                'PLAY TAKE auditions your effect. APPLY CHANGES saves it for video playback and export.',
+                9, t.MUTED).pack(anchor='w', padx=19, pady=(5, 1))
         fades = tk.Frame(self.content, bg=t.BG)
         fades.pack(fill='x', padx=16, pady=(8, 0))
         self._field(fades, 0, 0, 'FADE IN (SEC)', self.fadein_var)
@@ -298,6 +324,22 @@ class CommentaryStudio(tk.Toplevel):
     def _toggle_duck(self):
         self._sync_mix_controls()
 
+    def _effect_changed(self, _event=None):
+        if self.player.active or self._fx_rendering:
+            self.stop_take()
+        has_take = self.chosen() is not None
+        selected = self.effect_var.get()
+        enabled = has_take and selected != 'None'
+        self.effect_picker.configure(state='readonly' if has_take else 'disabled')
+        self.effect_slider.configure(state='normal' if enabled else 'disabled')
+        meanings = {
+            'None': 'Clean, natural microphone sound',
+            'Echo': 'Distinct repeats · dramatic announcements',
+            'Reverb': 'Room reflections · big cinematic spaces',
+            'Chorus': 'Doubled voice · silly character effects'}
+        self.effect_hint.configure(text=meanings.get(selected, 'Choose an effect'))
+        self._sync_preview_buttons()
+
     def _sync_mix_controls(self):
         # Global video volume works even without a take. Per-take voice and
         # ducking controls must not appear usable until a take is selected.
@@ -309,14 +351,18 @@ class CommentaryStudio(tk.Toplevel):
         self.duck_slider.configure(
             state='normal' if has_take and self.duck_var.get()
             else 'disabled')
+        self._effect_changed()
 
     def _sync_preview_buttons(self):
         take = self.chosen() is not None
         usable = take and not self.recorder.active and not self._busy
         playing = self.player.active
         paused = self.player.paused
+        fx_active = (self.effect_var.get() != 'None' and
+                     self.effect_strength_var.get() > 0)
         self.play_take_button.configure(
-            state='normal' if usable and (not playing or paused) else 'disabled')
+            state='normal' if usable and (not playing or paused) else 'disabled',
+            text='▶  PLAY TAKE + FX' if fx_active else '▶  PLAY TAKE')
         self.pause_take_button.configure(
             state='normal' if usable and playing else 'disabled',
             text='▶  RESUME' if paused else '⏸  PAUSE')
@@ -336,6 +382,9 @@ class CommentaryStudio(tk.Toplevel):
             self.message('Select a saved take first.', True)
             return
         cue = cues[idx]
+        if self.player.active and self.player.paused:
+            self.pause_take()  # Resume the *actual* processed preview source.
+            return
         which = self.audition_var.get()
         path = cue.original_file or cue.file if which == 'original' else cue.file
         try:
@@ -343,11 +392,28 @@ class CommentaryStudio(tk.Toplevel):
             length = min(cue.duration, info['duration'] - cue.source_in)
             if length <= 0:
                 raise ValueError('No voice remains in this edited interval.')
-            if self.player.active and self.player.paused:
-                # Pause is reversible. Changing take/version stops the previous
-                # preview in on_select()/on_audition_change().
-                result = self.player.play(path, cue.source_in, length)
-            elif self.player.active:
+            effect = self.effect_var.get()
+            strength = self.effect_strength_var.get()
+            validate_effect(effect, strength)
+            if effect != 'None' and strength > 0 and not self.player.active:
+                source = str(path)
+                expected = (idx, cue, which, effect, strength)
+                cancel = self._cancel
+                ffmpeg = self.editor.backend.ffmpeg
+                def work():
+                    rendered = render_effect_audition(
+                        ffmpeg, source, cue.source_in, length,
+                        effect, strength, cancel)
+                    if cancel.is_set() or self._closing:
+                        if rendered[3]:
+                            rendered[0].unlink(missing_ok=True)
+                        raise ValueError('Effects preview cancelled.')
+                    return ('fx_audio', expected, rendered)
+                if self._task(work, f'Rendering {effect} preview locally…'):
+                    self._fx_rendering = True
+                    self._sync_preview_buttons()
+                return
+            if self.player.active:
                 self.player.stop()
                 self._pending_play = (path, cue.source_in, length)
                 result = 'switching'
@@ -369,6 +435,8 @@ class CommentaryStudio(tk.Toplevel):
         self._sync_preview_buttons()
 
     def stop_take(self):
+        if self._fx_rendering:
+            self._cancel.set()
         self._pending_play = None
         self.player.stop()
         self._sync_preview_buttons()
@@ -458,6 +526,8 @@ class CommentaryStudio(tk.Toplevel):
         self.volume_var.set(cue.volume)
         self.background_var.set(cue.background_gain)
         self.duck_var.set(cue.auto_duck)
+        self.effect_var.set(cue.effect)
+        self.effect_strength_var.set(cue.effect_strength)
         self.video_var.set(self.editor.edits.music.original_volume)
         self._toggle_duck()
         self.draw_wave()
@@ -646,6 +716,8 @@ class CommentaryStudio(tk.Toplevel):
                     volume=float(self.volume_var.get()),
                     background_gain=float(self.background_var.get()),
                     auto_duck=bool(self.duck_var.get()),
+                    effect=str(self.effect_var.get()),
+                    effect_strength=float(self.effect_strength_var.get()),
                     fade_in=float(self.fadein_var.get()),fade_out=float(self.fadeout_var.get()))
             self._commit(cues,idx,video_gain=float(self.video_var.get()))
             self.message(
@@ -774,6 +846,7 @@ class CommentaryStudio(tk.Toplevel):
                 break
             if kind=='task':
                 self._busy=False
+                self._fx_rendering=False
                 self._set_processing_buttons(False)
                 self.record_button.configure(
                     state='normal' if self.devices else 'disabled')
@@ -805,6 +878,26 @@ class CommentaryStudio(tk.Toplevel):
                         self.message(
                             'No microphone input detected. Check Windows Settings → System → Sound → Input, '
                             'microphone privacy permissions and physical connection, then press REFRESH.', True)
+                elif value[0]=='fx_audio':
+                    _, expected, rendered = value
+                    idx, cue, which, effect, strength = expected
+                    path, offset, length, temporary = rendered
+                    if temporary:
+                        self._fx_files.add(path)
+                    cues = self.editor.edits.commentary_clips
+                    if (not 0 <= idx < len(cues) or
+                            cues[idx] != cue or
+                            self.chosen() != idx or
+                            self.audition_var.get() != which or
+                            self.effect_var.get() != effect or
+                            self.effect_strength_var.get() != strength):
+                        self.message('Selected take changed; stale preview discarded.')
+                    else:
+                        try:
+                            self.player.play(path, offset, length)
+                            self.message(f'Playing {effect} · temporary preview, original WAV unchanged.')
+                        except (OSError, ValueError) as exc:
+                            self.message(f'Cannot play effect: {exc}', True)
                 elif value[0]=='altered':
                     _,idx,old,path,voice_id=value
                     try:
@@ -876,6 +969,10 @@ class CommentaryStudio(tk.Toplevel):
         self._closing=True
         self._cancel.set()
         self.player.close()
+        for audio_path in self._fx_files:
+            try: audio_path.unlink(missing_ok=True)
+            except OSError: pass
+        self._fx_files.clear()
         self.recorder.stop()
         if self.recorder.worker and self.recorder.worker.is_alive():
             self.recorder.worker.join(timeout=2)
