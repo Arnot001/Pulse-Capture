@@ -1,0 +1,61 @@
+name: Commentary Studio recording and editing
+
+on:
+  push:
+    branches:
+      - feature/commentary-record-edit-convert-20261124
+  pull_request:
+    paths:
+      - 'editor/commentary*'
+      - 'editor/voice_*'
+      - 'editor/reactions.py'
+      - 'editor/audio_preview.py'
+      - 'editor/timeline*'
+      - '.github/workflows/commentary-studio-tests.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: commentary-studio-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  windows-mic-and-ui:
+    runs-on: windows-latest
+    timeout-minutes: 18
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Syntax checks
+        shell: pwsh
+        run: |
+          python -m compileall -q editor/commentary.py editor/commentary_ui.py editor/voice_assets.py editor/voice_recording.py editor/voice_catalogue.py editor/voice_conversion.py editor/voice_conversion_worker.py
+      - name: Real Windows Tk and mocked microphone tests
+        shell: pwsh
+        env:
+          PULSE_RUN_UI_TESTS: '1'
+        run: python -m unittest tests.test_commentary_ui tests.test_commentary tests.test_commentary_recording -v
+      - name: Full Windows regression suite
+        shell: pwsh
+        run: python -m unittest discover -q
+
+  linux-real-render:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Ensure FFmpeg
+        shell: bash
+        run: |
+          if ! command -v ffmpeg >/dev/null || ! command -v ffprobe >/dev/null; then
+            sudo apt-get update -qq
+            sudo apt-get install -y ffmpeg
+          fi
+          ffmpeg -version | head -n 1
+      - name: Real MP4 and seeked audio commentary render
+        shell: bash
+        run: python -m unittest tests.test_commentary tests.test_commentary_render tests.test_commentary_recording -v
