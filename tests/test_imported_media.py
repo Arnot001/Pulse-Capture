@@ -7,7 +7,7 @@ from unittest.mock import patch
 import unittest
 
 from editor.cuts import CutPlan, CutRange
-from editor.imported_media import MediaClip, add_media, create_clip, validate_clips
+from editor.imported_media import MediaClip, add_media, create_clip, validate_clips, media_bounds, with_media_position, resized_media
 from editor.models import MediaInfo, TrimRange
 from editor.transforms import EditOptions
 from editor.timeline_edits import blocks, change_timing, duration
@@ -44,12 +44,14 @@ class MediaTimelineTests(unittest.TestCase):
             self.assertEqual((clip.kind, clip.start, clip.end), ('photo', 18., 20.))
             run.assert_called_once()
         self.assertEqual(clip.layout, 'Cutaway')
+        self.assertEqual((clip.source_width, clip.source_height), (800, 500))
 
     def test_video_import_checks_duration_and_ignores_imported_audio(self):
         with patch('editor.imported_media.probe_media', return_value=MediaInfo(self.video, 3., 800, 450, 25, True)):
             clip = create_clip('ffprobe', self.video, 5., 20.)
         self.assertEqual((clip.start, clip.end, clip.source_duration), (5., 8., 3.))
         self.assertEqual(clip.kind, 'video')
+        self.assertEqual((clip.source_width, clip.source_height), (800, 450))
 
     def test_rejects_missing_files_invalid_source_ranges_and_output_bounds(self):
         with self.assertRaisesRegex(ValueError, 'outside'):
@@ -111,7 +113,8 @@ class MediaTimelineTests(unittest.TestCase):
         self.assertIn('mediav0', graph)
         self.assertIn('mediav1', graph)
         self.assertIn('force_original_aspect_ratio=decrease', graph)
-        self.assertIn('W-w-16', graph)
+        self.assertIn('scale=240:136', graph)
+        self.assertIn('overlay=x=400:y=0', graph)
         self.assertIn('0:a:0', cmd)
         self.assertNotIn(str(self.source.parent/'output.mp4')+'-source', cmd)
 
@@ -134,6 +137,38 @@ class MediaTimelineTests(unittest.TestCase):
         self.assertEqual(cmd.count('-i'), 2)
         self.assertAlmostEqual(float(cmd[cmd.index('-ss', cmd.index('-i')+1)+1]), 2.)
         self.assertIn('mediav0', cmd[cmd.index('-filter_complex')+1])
+
+    def test_media_placement_bounds_and_normalized_movement(self):
+        photo = self.photo_clip(layout='Picture in picture',
+                                source_width=800, source_height=400,
+                                scale=.5, x=.25, y=.75)
+        box = media_bounds(photo, 640, 360)
+        self.assertEqual((box.width, box.height), (320, 160))
+        self.assertEqual((box.x, box.y), (80, 150))
+        moved = with_media_position(photo, 999, -200, 640, 360)
+        self.assertEqual((moved.x, moved.y), (1, 0))
+        shrunk = resized_media(photo, .5, 200, 60, 640, 360)
+        self.assertEqual(shrunk.scale, .25)
+        self.assertEqual((media_bounds(shrunk,640,360).width, media_bounds(shrunk,640,360).height),(160,80))
+        self.assertEqual(photo.scale,.5)
+
+    def test_media_geometry_is_part_of_preview_and_export_filter_graphs(self):
+        cue = self.photo_clip(layout='Picture in picture', x=0., y=1., scale=.5,
+                              source_width=800, source_height=400)
+        args = ['ffmpeg','-i','capture.mp4']
+        graph = []
+        add_media(args, graph, 'v', (cue,), 640, 360, sample_time=3.)
+        text = ';'.join(graph)
+        self.assertIn('scale=320:160', text)
+        self.assertIn('overlay=x=0:y=200', text)
+        self.assertNotIn('W-w-16', text)
+
+    def test_media_size_position_validation(self):
+        for changes in (dict(x=-.1),dict(y=2),dict(scale=0),dict(scale=2),
+                        dict(x=float('nan')),dict(source_width=-10)):
+            with self.subTest(changes=changes):
+                with self.assertRaises(ValueError):
+                    self.photo_clip(**changes).validate(20)
 
     def test_media_is_non_destructive(self):
         before_photo = self.photo.read_bytes()
