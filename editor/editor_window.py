@@ -254,10 +254,11 @@ class EditorWindow(tk.Toplevel):
             self.panels[name] = tk.Frame(panel_area, bg=t.PANEL)
         row = self.panels['TRIM']
         row.pack(fill='both', expand=True, padx=12, pady=10)
-        for column, (title, variable, bound) in enumerate((('Start', self.start_text, 'start'), ('End', self.end_text, 'end'))):
+        row.columnconfigure(0, weight=1)
+        for column, (title, variable, bound) in enumerate(
+                (('Start', self.start_text, 'start'), ('End', self.end_text, 'end'))):
             group = tk.Frame(row, bg=t.PANEL)
-            group.grid(row=0, column=column, sticky='ew', padx=(0, 18))
-            row.columnconfigure(column, weight=1)
+            group.grid(row=column, column=0, sticky='ew', pady=(0, 9))
             t.label(group, title, 10, bold=True).pack(anchor='w')
             inner = tk.Frame(group, bg=t.PANEL)
             inner.pack(fill='x', pady=(5, 0))
@@ -271,10 +272,10 @@ class EditorWindow(tk.Toplevel):
             button.pack(side='left', padx=(8, 0))
             self.controls.extend((entry, button))
         self.reset_button = t.button(row, 'RESET', self.reset_trim)
-        self.reset_button.grid(row=0, column=2, sticky='se')
+        self.reset_button.grid(row=2, column=0, sticky='w')
         self.controls.append(self.reset_button)
         self.selection_label = t.label(row, 'Drag the cyan handles or enter Start and End.', 9, t.MUTED)
-        self.selection_label.grid(row=1, column=0, columnspan=3, sticky='w', pady=(8, 0))
+        self.selection_label.grid(row=3, column=0, sticky='w', pady=(8, 0))
         self.build_tools()
         self.cut_tools = CutTools(self)
         self.overlay_tools = OverlayTools(self)
@@ -348,6 +349,16 @@ class EditorWindow(tk.Toplevel):
     def add_segments(self, parent, variable, choices, command):
         segments = t.Segments(parent, variable, choices, command)
         segments.pack(fill='x', pady=(0, 6))
+        if len(choices) >= 4:
+            # Five landscape format choices become a tidy two-column list
+            # when presented in the compact right-side inspector.
+            for index, (_, button) in enumerate(segments.buttons):
+                button.grid_configure(
+                    row=index // 2, column=index % 2,
+                    padx=(0 if index % 2 == 0 else 5, 0),
+                    pady=(0, 4))
+            for col in range(len(choices)):
+                segments.columnconfigure(col, weight=1 if col < 2 else 0)
         self.controls.extend(b for _, b in segments.buttons)
         return segments
 
