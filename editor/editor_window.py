@@ -43,6 +43,8 @@ class EditorWindow(tk.Toplevel):
         self.auto_dialog = None
         self.auto_children = set()
         self.media_dialog = None
+        self.commentary_studio = None
+        self._commentary_synced = None
         self.exporter = ExportJob(backend, verify_short=auto_candidate is not None)
         self.metadata = Queue()
         self.closed = self.closing = self.playing = False
@@ -179,6 +181,7 @@ class EditorWindow(tk.Toplevel):
         add_actions.add_command(label='Emoji', command=lambda: self.open_reactions('emoji'))
         add_actions.add_command(label='GIF / Reaction', command=lambda: self.open_reactions('gif'))
         add_actions.add_command(label='Sound Effect', command=lambda: self.open_reactions('sfx'))
+        add_actions.add_command(label='🎙 Record Commentary', command=self.open_commentary_studio)
         add_actions.add_command(label='Effects', command=lambda: self.open_reactions('effects'))
         self.add_menu.configure(menu=add_actions, state='disabled')
         self.add_menu.pack(fill='x', padx=8, pady=(0, 5))
@@ -371,6 +374,17 @@ class EditorWindow(tk.Toplevel):
             return
         from .imported_media_ui import ImportedMediaDialog
         self.media_dialog = ImportedMediaDialog(self)
+
+    def open_commentary_studio(self):
+        """Record, edit and convert commentary without leaving Quick Edit."""
+        if not self.media or not self.trim or self.exporter.busy or self.closing:
+            return
+        if self.commentary_studio is not None and self.commentary_studio.winfo_exists():
+            self.commentary_studio.deiconify()
+            self.commentary_studio.lift()
+            return
+        from .commentary_ui import CommentaryStudio
+        self.commentary_studio = CommentaryStudio(self)
 
     def open_voiceover_studio(self):
         """Open the standalone narration generator without changing video edit state."""
@@ -874,6 +888,11 @@ class EditorWindow(tk.Toplevel):
             for c in (*self.edits.sounds, *self.edits.overlays))
         self.timeline.output_duration = timeline_duration(self) if self.media and self.trim else 0
         self.timeline.clip_blocks = tuple(timeline_blocks(self)) if self.media and self.trim else ()
+        if (self.commentary_studio is not None and
+                self.commentary_studio.winfo_exists() and
+                self._commentary_synced != self.edits.commentary_clips):
+            self._commentary_synced = self.edits.commentary_clips
+            self.commentary_studio.refresh()
         self.timeline.draw()
         self.clock.configure(text=f'{format_time(self.position)} / {format_time(self.media.duration)}')
         self.refresh_crop_guide()
@@ -1189,6 +1208,12 @@ class EditorWindow(tk.Toplevel):
             self.request_frame()
 
     def export(self):
+        if (self.commentary_studio is not None and
+                self.commentary_studio.recorder.active):
+            self.note.configure(
+                text='Stop and save commentary before exporting.',
+                fg=t.RED)
+            return
         if not self.overlay_tools.privacy_committed() or not self.commit_entries():
             return
         self.stop_play()
@@ -1346,6 +1371,8 @@ class EditorWindow(tk.Toplevel):
             child.close()
         if self.auto_dialog and not self.auto_dialog.closed:
             self.auto_dialog.close()
+        if self.commentary_studio is not None and self.commentary_studio.winfo_exists():
+            self.commentary_studio.close()
         if self.exporter.busy:
             self.cancel_export()
         elif not self.auto_children and not (self.auto_dialog and not self.auto_dialog.closed):
