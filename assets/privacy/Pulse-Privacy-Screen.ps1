@@ -1,5 +1,5 @@
-﻿# Pulse Capture Privacy Screen v1.4.4 - desktop-layer close button is part of the background window.
-# Windows PowerShell 5.1: powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File .\Pulse-Privacy-Screen-v1.4.4.ps1
+﻿# Pulse Capture Privacy Screen v1.4.5 - pinned shortcuts now live on the background and full cover.
+# Windows PowerShell 5.1: powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File .\Pulse-Privacy-Screen-v1.4.5.ps1
 # Fullscreen always has a native CLOSE button (plus Escape / Alt+F4); no hotkeys are required for exit.
 # A safe FULL COVER test never changes the desktop icons or taskbar.
 [CmdletBinding()]
@@ -183,6 +183,40 @@ namespace PulsePrivacy {
                 backgroundClose.Visible = visible;
                 if (visible) backgroundClose.BringToFront();
             }
+        }
+        // Background mode is a real desktop layer, not merely a wallpaper.
+        // Use the same native shortcut tiles as FullCover; the icon list is still
+        // hidden independently and the underlying Windows shortcuts are untouched.
+        private readonly List<ShortcutTile> backgroundTiles = new List<ShortcutTile>();
+        public event EventHandler BackgroundShortcutPositionsChanged;
+        public void SetBackgroundShortcuts(string first, string second, int x1, int y1, int x2, int y2) {
+            foreach (ShortcutTile tile in backgroundTiles) { Controls.Remove(tile); tile.Dispose(); }
+            backgroundTiles.Clear();
+            AddBackgroundTile(1, first, new Point(x1, y1));
+            AddBackgroundTile(2, second, new Point(x2, y2));
+            // Always keep the verified Restore Desktop x accessible above tiles.
+            if (backgroundClose != null) backgroundClose.BringToFront();
+        }
+        private void AddBackgroundTile(int slot, string path, Point location) {
+            if (string.IsNullOrEmpty(path) || !File.Exists(path)) return;
+            string ext = Path.GetExtension(path).ToLowerInvariant();
+            if (ext != ".lnk" && ext != ".url" && ext != ".exe") return;
+            Point safeLocation = new Point(
+                Math.Max(5, Math.Min(Math.Max(5, ClientSize.Width - 127), location.X)),
+                Math.Max(65, Math.Min(Math.Max(65, ClientSize.Height - 109), location.Y)));
+            ShortcutTile tile = new ShortcutTile(slot, path, safeLocation);
+            tile.PositionCommitted += delegate(object sender, EventArgs e) {
+                if (BackgroundShortcutPositionsChanged != null)
+                    BackgroundShortcutPositionsChanged(this, EventArgs.Empty);
+            };
+            backgroundTiles.Add(tile);
+            Controls.Add(tile);
+            tile.BringToFront();
+        }
+        public Point GetBackgroundShortcutPosition(int slot) {
+            foreach (ShortcutTile tile in backgroundTiles)
+                if (tile.Slot == slot) return tile.Location;
+            return Point.Empty;
         }
         private void PositionBackgroundClose() {
             if (backgroundClose != null) backgroundClose.Location =
@@ -456,7 +490,34 @@ namespace PulsePrivacy {
 }
 
 if ($ValidateOnly) {
-    Write-Host 'Privacy v1.4.4 PowerShell and Windows Forms type compilation passed.' -ForegroundColor Green
+    # Safe in-memory smoke test: no wallpaper, Explorer, hotkeys, or user
+    # desktop settings are touched. A disposable .url file exercises both
+    # shortcut surfaces without launching anything.
+    $probe = Join-Path ([System.IO.Path]::GetTempPath()) ('pulse-privacy-probe-' + [guid]::NewGuid().ToString('N') + '.url')
+    $testBackground = $null
+    $testCover = $null
+    try {
+        [System.IO.File]::WriteAllText($probe, "[InternetShortcut]`r`nURL=https://example.invalid`r`n")
+        $testBackground = [PulsePrivacy.Canvas]::new()
+        $testBackground.ClientSize = [System.Drawing.Size]::new(800, 600)
+        $testBackground.EnableBackgroundRestore()
+        $testBackground.SetBackgroundShortcuts($probe, '', 32, 86, 32, 200)
+        $point = $testBackground.GetBackgroundShortcutPosition(1)
+        if ($point.X -ne 32 -or $point.Y -ne 86) { throw 'Background shortcut smoke check failed.' }
+        if ($testBackground.Controls.Find('RestorePrivacyBackground', $true).Count -ne 1) {
+            throw 'Background restore button smoke check failed.'
+        }
+        $testCover = [PulsePrivacy.FullCover]::new()
+        $testCover.ClientSize = [System.Drawing.Size]::new(800, 600)
+        $testCover.SetShortcuts($probe, '', 32, 86, 32, 200)
+        $point2 = $testCover.GetShortcutPosition(1)
+        if ($point2.X -ne 32 -or $point2.Y -ne 86) { throw 'Full Cover shortcut smoke check failed.' }
+    } finally {
+        if ($testCover) { $testCover.Dispose() }
+        if ($testBackground) { $testBackground.Dispose() }
+        Remove-Item -LiteralPath $probe -Force -ErrorAction SilentlyContinue
+    }
+    Write-Host 'Privacy v1.4.5 Windows Forms and both shortcut surfaces passed smoke checks.' -ForegroundColor Green
     exit 0
 }
 
@@ -626,7 +687,7 @@ $script:chooseButton = Add-Button 'Choose image...' 289 215 166 32
 $script:imagePathLabel = Add-Label 'No image selected' 22 258 442 40
 $script:imagePathLabel.ForeColor = [System.Drawing.Color]::FromArgb(180,198,210)
 
-[void](Add-Label 'PINNED SHORTCUTS (launch apps over cover / drag to move)' 22 296 453 25)
+[void](Add-Label 'PINNED SHORTCUTS (background + full cover; drag to move)' 22 296 453 25)
 $script:shortcut1Label = Add-Label '1. (none)' 24 328 260 29
 $script:pickShortcut1 = Add-Button 'Choose...' 302 327 83 29
 $script:clearShortcut1 = Add-Button 'Clear' 393 327 64 29
@@ -705,15 +766,27 @@ function Update-ShortcutLabels {
     }
 }
 function Set-PinnedShortcuts {
+    # Each surface owns its own tiles. Both use the same validated shortcuts
+    # and saved screen positions; the background also keeps its own restore x.
+    $script:backgroundForm.SetBackgroundShortcuts(
+        [string]$script:settings.Shortcut1Path, [string]$script:settings.Shortcut2Path,
+        [int]$script:settings.Shortcut1X, [int]$script:settings.Shortcut1Y,
+        [int]$script:settings.Shortcut2X, [int]$script:settings.Shortcut2Y
+    )
     $script:coverForm.SetShortcuts(
         [string]$script:settings.Shortcut1Path, [string]$script:settings.Shortcut2Path,
         [int]$script:settings.Shortcut1X, [int]$script:settings.Shortcut1Y,
         [int]$script:settings.Shortcut2X, [int]$script:settings.Shortcut2Y
     )
 }
-function Save-ShortcutPositions {
+function Save-ShortcutPositions([string]$source) {
+    if ($source -notin @('background', 'cover')) { return }
     foreach ($slot in 1..2) {
-        $point = $script:coverForm.GetShortcutPosition([int]$slot)
+        $point = if ($source -eq 'background') {
+            $script:backgroundForm.GetBackgroundShortcutPosition([int]$slot)
+        } else {
+            $script:coverForm.GetShortcutPosition([int]$slot)
+        }
         if (-not $point.IsEmpty) {
             if ($slot -eq 1) {
                 $script:settings.Shortcut1X = [int]$point.X
@@ -723,6 +796,20 @@ function Save-ShortcutPositions {
                 $script:settings.Shortcut2Y = [int]$point.Y
             }
         }
+    }
+    # Sync the *other* surface without rebuilding the tile being dragged.
+    if ($source -eq 'background') {
+        $script:coverForm.SetShortcuts(
+            [string]$script:settings.Shortcut1Path, [string]$script:settings.Shortcut2Path,
+            [int]$script:settings.Shortcut1X, [int]$script:settings.Shortcut1Y,
+            [int]$script:settings.Shortcut2X, [int]$script:settings.Shortcut2Y
+        )
+    } else {
+        $script:backgroundForm.SetBackgroundShortcuts(
+            [string]$script:settings.Shortcut1Path, [string]$script:settings.Shortcut2Path,
+            [int]$script:settings.Shortcut1X, [int]$script:settings.Shortcut1Y,
+            [int]$script:settings.Shortcut2X, [int]$script:settings.Shortcut2Y
+        )
     }
     Save-Settings
 }
@@ -795,6 +882,9 @@ function Activate-Privacy {
         Start-Process -FilePath $powershellExe -ArgumentList $watchArgs -WindowStyle Hidden | Out-Null
 
         $script:backgroundForm.Bounds = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
+        # Load the pinned tiles before showing the desktop surface, so icons
+        # are already visible when the Capture window is minimised.
+        Set-PinnedShortcuts
         $script:backgroundForm.Show()
         $worker = [PulsePrivacy.Native]::FindWallpaperWorker()
         if ($worker -ne [IntPtr]::Zero) {
@@ -844,7 +934,8 @@ $script:pickShortcut1.Add_Click({ Choose-PinnedShortcut 1 })
 $script:pickShortcut2.Add_Click({ Choose-PinnedShortcut 2 })
 $script:clearShortcut1.Add_Click({ $script:settings.Shortcut1Path = ''; Update-ShortcutLabels; Set-PinnedShortcuts; Save-Settings })
 $script:clearShortcut2.Add_Click({ $script:settings.Shortcut2Path = ''; Update-ShortcutLabels; Set-PinnedShortcuts; Save-Settings })
-$script:coverForm.Add_ShortcutPositionsChanged({ Save-ShortcutPositions })
+$script:coverForm.Add_ShortcutPositionsChanged({ Save-ShortcutPositions 'cover' })
+$script:backgroundForm.Add_BackgroundShortcutPositionsChanged({ Save-ShortcutPositions 'background' })
 $script:chooseButton.Add_Click({
     $dialog = [System.Windows.Forms.OpenFileDialog]::new()
     $dialog.Title = 'Choose your privacy image'
