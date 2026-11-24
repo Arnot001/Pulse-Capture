@@ -19,6 +19,7 @@ from .voice_catalogue import Catalogue
 from .voice_conversion import available, convert_voice, MODEL_URL
 from .voice_recording import MicrophoneRecorder, microphones
 from .commentary_playback import TakePlayback
+from .commentary_effects import EFFECTS, validate_effect, render_effect_audition
 
 
 class CommentaryStudio(tk.Toplevel):
@@ -56,6 +57,10 @@ class CommentaryStudio(tk.Toplevel):
         self.background_var = tk.DoubleVar(value=.5)
         self.video_var = tk.DoubleVar(value=editor.edits.music.original_volume)
         self.duck_var = tk.BooleanVar(value=True)
+        self.effect_var = tk.StringVar(value='None')
+        self.effect_strength_var = tk.DoubleVar(value=.5)
+        self._fx_rendering = False
+        self._fx_files = set()
         self.fadein_var = tk.StringVar(value='.025')
         self.fadeout_var = tk.StringVar(value='.045')
         self.voice_var = tk.StringVar(value='')
@@ -172,7 +177,7 @@ class CommentaryStudio(tk.Toplevel):
             transport, '0:00 / 0:00', 12, t.TEXT, True)
         self.playback_clock.pack(side='right', padx=(8, 2))
         t.label(self.content,
-                'These buttons play the selected voice only. Use PLAY in the video editor to hear the full mix.',
+                'Play Take auditions your voice/effects. Quick Edit PLAY previews the full audio mix.',
                 9, t.MUTED).pack(anchor='w', padx=20, pady=(0, 7))
 
         t.label(self.content, 'EDIT POSITION · SECONDS', 10, t.CYAN, True).pack(
@@ -206,6 +211,27 @@ class CommentaryStudio(tk.Toplevel):
         self.duck_slider = self._volume_slider(
             mixer, 'BACKGROUND DURING COMMENTARY', self.background_var,
             0, 1, .01, 'Only while speaking; 25% makes game/music much quieter')
+        t.label(self.content, 'VOICE EFFECTS', 11, t.CYAN, True).pack(
+            anchor='w', padx=19, pady=(11, 4))
+        fx_panel = tk.Frame(self.content, bg=t.PANEL)
+        fx_panel.pack(fill='x', padx=18)
+        fx_head = tk.Frame(fx_panel, bg=t.PANEL)
+        fx_head.pack(fill='x', padx=12, pady=(9, 3))
+        t.label(fx_head, 'EFFECT', 10, t.TEXT, True).pack(side='left', padx=(0, 8))
+        self.effect_picker = ttk.Combobox(
+            fx_head, values=EFFECTS, textvariable=self.effect_var,
+            state='readonly', width=22)
+        self.effect_picker.pack(side='left', padx=(0, 10))
+        self.effect_picker.bind('<<ComboboxSelected>>', self._effect_changed)
+        self.effect_hint = t.label(
+            fx_head, 'No effect · original audio stays safe', 9, t.MUTED)
+        self.effect_hint.pack(side='left', fill='x', expand=True)
+        self.effect_slider = self._volume_slider(
+            fx_panel, 'EFFECT STRENGTH', self.effect_strength_var,
+            0, 1, .05, 'Selected take only · 0% = clean voice')
+        t.label(self.content,
+                'PLAY TAKE auditions your effect. APPLY CHANGES saves it for video playback and export.',
+                9, t.MUTED).pack(anchor='w', padx=19, pady=(5, 1))
         fades = tk.Frame(self.content, bg=t.BG)
         fades.pack(fill='x', padx=16, pady=(8, 0))
         self._field(fades, 0, 0, 'FADE IN (SEC)', self.fadein_var)
@@ -298,6 +324,22 @@ class CommentaryStudio(tk.Toplevel):
     def _toggle_duck(self):
         self._sync_mix_controls()
 
+    def _effect_changed(self, _event=None):
+        if self.player.active or self._fx_rendering:
+            self.stop_take()
+        has_take = self.chosen() is not None
+        selected = self.effect_var.get()
+        enabled = has_take and selected != 'None'
+        self.effect_picker.configure(state='readonly' if has_take else 'disabled')
+        self.effect_slider.configure(state='normal' if enabled else 'disabled')
+        meanings = {
+            'None': 'Clean, natural microphone sound',
+            'Echo': 'Distinct repeats · dramatic announcements',
+            'Reverb': 'Room reflections · big cinematic spaces',
+            'Chorus': 'Doubled voice · silly character effects'}
+        self.effect_hint.configure(text=meanings.get(selected, 'Choose an effect'))
+        self._sync_preview_buttons()
+
     def _sync_mix_controls(self):
         # Global video volume works even without a take. Per-take voice and
         # ducking controls must not appear usable until a take is selected.
@@ -309,14 +351,18 @@ class CommentaryStudio(tk.Toplevel):
         self.duck_slider.configure(
             state='normal' if has_take and self.duck_var.get()
             else 'disabled')
+        self._effect_changed()
 
     def _sync_preview_buttons(self):
         take = self.chosen() is not None
         usable = take and not self.recorder.active and not self._busy
         playing = self.player.active
         paused = self.player.paused
+        fx_active = (self.effect_var.get() != 'None' and
+                     self.effect_strength_var.get() > 0)
         self.play_take_button.configure(
-            state='normal' if usable and (not playing or paused) else 'disabled')
+            state='normal' if usable and (not playing or paused) else 'disabled',
+            text='▶  PLAY TAKE + FX' if fx_active else '▶  PLAY TAKE')
         self.pause_take_button.configure(
             state='normal' if usable and playing else 'disabled',
             text='▶  RESUME' if paused else '⏸  PAUSE')
@@ -458,6 +504,8 @@ class CommentaryStudio(tk.Toplevel):
         self.volume_var.set(cue.volume)
         self.background_var.set(cue.background_gain)
         self.duck_var.set(cue.auto_duck)
+        self.effect_var.set(cue.effect)
+        self.effect_strength_var.set(cue.effect_strength)
         self.video_var.set(self.editor.edits.music.original_volume)
         self._toggle_duck()
         self.draw_wave()
@@ -646,6 +694,8 @@ class CommentaryStudio(tk.Toplevel):
                     volume=float(self.volume_var.get()),
                     background_gain=float(self.background_var.get()),
                     auto_duck=bool(self.duck_var.get()),
+                    effect=str(self.effect_var.get()),
+                    effect_strength=float(self.effect_strength_var.get()),
                     fade_in=float(self.fadein_var.get()),fade_out=float(self.fadeout_var.get()))
             self._commit(cues,idx,video_gain=float(self.video_var.get()))
             self.message(
