@@ -86,6 +86,18 @@ class CanvasMediaInteractionTests(unittest.TestCase):
         c.window.timeline_history.end()
         self.assertEqual(len(c.window.timeline_history.past), 1)
 
+    def test_reselecting_same_media_during_inspector_update_keeps_drag_active(self):
+        c = self.canvas
+        clip = c.window.edits.media_clips[0]
+        box = media_bounds(clip, 640, 360)
+        self.assertTrue(c.begin_media(self.event(box.x+20, box.y+20)))
+        gesture = c.media_drag
+        c.select_media(0, notify=False)
+        self.assertIs(c.media_drag, gesture)
+        c.move_media(self.event(box.x-30, box.y+80))
+        self.assertIs(c.media_drag, gesture)
+        self.assertGreater(c.window.edits.media_clips[0].y, clip.y)
+
     def test_corner_drag_resizes_with_locked_aspect_ratio(self):
         c = self.canvas
         clip = c.window.edits.media_clips[0]
