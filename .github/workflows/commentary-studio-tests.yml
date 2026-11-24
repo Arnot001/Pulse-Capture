@@ -6,6 +6,7 @@ on:
       - feature/commentary-record-edit-convert-20261124
       - fix/commentary-mic-detection-20261124
       - fix/commentary-host-error-9999-20261124
+      - feature/commentary-readable-controls-20261124
   pull_request:
     paths:
       - 'editor/commentary*'
@@ -37,7 +38,7 @@ jobs:
         shell: pwsh
         env:
           PULSE_RUN_UI_TESTS: '1'
-        run: python -m unittest tests.test_commentary_ui tests.test_commentary tests.test_commentary_recording -v
+        run: python -m unittest tests.test_commentary_ui tests.test_commentary tests.test_commentary_playback tests.test_commentary_recording -v
       - name: Full Windows regression suite
         shell: pwsh
         run: python -m unittest discover -q
@@ -60,4 +61,4 @@ jobs:
           ffmpeg -version | head -n 1
       - name: Real MP4 and seeked audio commentary render
         shell: bash
-        run: python -m unittest tests.test_commentary tests.test_commentary_render tests.test_commentary_recording -v
+        run: python -m unittest tests.test_commentary tests.test_commentary_playback tests.test_commentary_render tests.test_commentary_recording -v
