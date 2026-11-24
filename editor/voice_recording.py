@@ -2,6 +2,7 @@
 from array import array
 from queue import Queue
 import threading
+import time
 import wave
 
 from .voice_assets import MAX_SECONDS, metadata, new_path
@@ -35,6 +36,7 @@ class MicrophoneRecorder:
         self.frames = 0
         self.rate = 48000
         self.path = None
+        self.started_at = None
 
     @property
     def active(self):
@@ -46,6 +48,7 @@ class MicrophoneRecorder:
         self.stop_event.clear()
         self.paused.clear()
         self.frames = 0
+        self.started_at = None
         self.path = new_path('recording', self.root)
         self.worker = threading.Thread(target=self._record, args=(device_index,), daemon=True)
         self.worker.start()
@@ -74,6 +77,8 @@ class MicrophoneRecorder:
                 writer.setnchannels(1)
                 writer.setsampwidth(2)
                 writer.setframerate(self.rate)
+                self.started_at = time.monotonic()
+                self.events.put(('started', self.path))
                 while not self.stop_event.is_set() and self.frames < self.rate * MAX_SECONDS:
                     block = stream.read(1024, exception_on_overflow=True)
                     samples = array('h', block)
