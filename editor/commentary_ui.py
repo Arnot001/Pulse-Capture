@@ -57,6 +57,18 @@ class CommentaryStudio(tk.Toplevel):
         self.pitch_var = tk.DoubleVar(value=0.)
         self.speed_var = tk.DoubleVar(value=1.)
         self.mix_var = tk.DoubleVar(value=1.)
+        # Scroll the studio vertically on smaller Windows laptops; never
+        # clip the bottom Convert/Cancel controls behind an oversized dialog.
+        self.view = tk.Canvas(self, bg=t.BG, bd=0, highlightthickness=0)
+        self.view.pack(side='left', fill='both', expand=True)
+        self.view_scroll = ttk.Scrollbar(self, orient='vertical', command=self.view.yview)
+        self.view_scroll.pack(side='right', fill='y')
+        self.view.configure(yscrollcommand=self.view_scroll.set)
+        self.content = tk.Frame(self.view, bg=t.BG)
+        self._content_id = self.view.create_window(0, 0, window=self.content, anchor='nw')
+        self.content.bind('<Configure>', self._content_resized)
+        self.view.bind('<Configure>', self._viewport_resized)
+        self.bind('<MouseWheel>', self._wheel)
         self._build()
         self.load_voices()
         self.refresh()
@@ -70,14 +82,24 @@ class CommentaryStudio(tk.Toplevel):
         widget.pack(side='left', padx=(0, 5))
         return widget
 
+    def _content_resized(self, _event=None):
+        self.view.configure(scrollregion=self.view.bbox('all'))
+
+    def _viewport_resized(self, event):
+        self.view.itemconfigure(self._content_id, width=max(1, event.width))
+
+    def _wheel(self, event):
+        if not self._closing:
+            self.view.yview_scroll(-1 if event.delta > 0 else 1,'units')
+
     def _build(self):
-        heading = tk.Frame(self, bg=t.BG)
+        heading = tk.Frame(self.content, bg=t.BG)
         heading.pack(fill='x', padx=16, pady=(12, 6))
         t.label(heading, '🎙  COMMENTARY STUDIO', 17, t.CYAN, True).pack(side='left')
         self.record_hint = t.label(
             heading, 'Record locally · originals never overwritten', 9, t.MUTED)
         self.record_hint.pack(side='right')
-        record = tk.Frame(self, bg=t.PANEL)
+        record = tk.Frame(self.content, bg=t.PANEL)
         record.pack(fill='x', padx=16, pady=4)
         t.label(record, 'MIC', 9, t.MUTED, True).pack(side='left', padx=7)
         self.device_picker = ttk.Combobox(
@@ -87,16 +109,16 @@ class CommentaryStudio(tk.Toplevel):
         self.stop_button = self._button(record, '■ STOP & SAVE', self.stop)
         self.stop_button.configure(state='disabled')
         self.reload_mics_button = self._button(record, '↻', self.reload_mics)
-        self.level_meter = ttk.Progressbar(self, maximum=1.0)
+        self.level_meter = ttk.Progressbar(self.content, maximum=1.0)
         self.level_meter.pack(fill='x', padx=20, pady=(1, 6))
-        t.label(self, 'Use headphones to avoid recording gameplay sound through the mic. The video starts when microphone capture is ready.',
+        t.label(self.content, 'Use headphones to avoid recording gameplay sound through the mic. The video starts when microphone capture is ready.',
                 9, t.MUTED).pack(anchor='w', padx=18)
 
-        clip_head = tk.Frame(self, bg=t.BG)
+        clip_head = tk.Frame(self.content, bg=t.BG)
         clip_head.pack(fill='x', padx=18, pady=(11, 3))
         t.label(clip_head, 'VOICE TIMELINE · RECORDINGS', 10, t.CYAN, True).pack(side='left')
         t.label(clip_head, 'Select a take to edit, split or convert', 9, t.MUTED).pack(side='right')
-        holder = tk.Frame(self, bg=t.BG)
+        holder = tk.Frame(self.content, bg=t.BG)
         holder.pack(fill='x', padx=18)
         self.clips = tk.Listbox(
             holder, height=4, bg=t.CONTROL, fg=t.TEXT,
@@ -108,10 +130,10 @@ class CommentaryStudio(tk.Toplevel):
         scroll.pack(side='right', fill='y')
         self.clips.configure(yscrollcommand=scroll.set)
 
-        self.wave = tk.Canvas(self, height=63, bg=t.PANEL, highlightthickness=0)
+        self.wave = tk.Canvas(self.content, height=63, bg=t.PANEL, highlightthickness=0)
         self.wave.pack(fill='x', padx=18, pady=(5, 5))
         self.wave.bind('<Configure>', lambda _: self.draw_wave())
-        fields = tk.Frame(self, bg=t.BG)
+        fields = tk.Frame(self.content, bg=t.BG)
         fields.pack(fill='x', padx=16, pady=(2, 5))
         values = [('START',self.start_var),('END',self.end_var),
                   ('SOURCE IN',self.source_var),('VOICE LEVEL',self.volume_var),
@@ -124,7 +146,7 @@ class CommentaryStudio(tk.Toplevel):
             t.label(group, label, 8, t.MUTED, True).pack(anchor='w')
             tk.Entry(group, textvariable=var, width=8, bg=t.CONTROL, fg=t.TEXT,
                      insertbackground=t.CYAN, relief='flat').pack(fill='x', ipady=4)
-        edit = tk.Frame(self, bg=t.BG)
+        edit = tk.Frame(self.content, bg=t.BG)
         edit.pack(fill='x', padx=18, pady=(3, 8))
         self.apply_button = self._button(edit,'APPLY EDIT',self.apply)
         self.split_button = self._button(edit,'SPLIT AT PLAYHEAD',self.split)
@@ -132,14 +154,14 @@ class CommentaryStudio(tk.Toplevel):
         self.delete_button = self._button(edit,'DELETE FROM VIDEO',self.remove)
         self.original_button = self._button(edit,'USE ORIGINAL VOICE',self.use_original)
 
-        convert_header = tk.Frame(self, bg=t.BG)
+        convert_header = tk.Frame(self.content, bg=t.BG)
         convert_header.pack(fill='x', padx=18, pady=(2, 5))
         t.label(convert_header, 'VOICE ALTERNATOR · LOCAL', 10, t.CYAN, True).pack(side='left')
         self.voice_picker = ttk.Combobox(
             convert_header, textvariable=self.voice_var, state='readonly',
             values=(), width=27)
         self.voice_picker.pack(side='right')
-        knobs = tk.Frame(self, bg=t.PANEL)
+        knobs = tk.Frame(self.content, bg=t.PANEL)
         knobs.pack(fill='x', padx=18)
         for index, (title, var, low, high, step) in enumerate(
                 (('PITCH',self.pitch_var,-12,12,.5),
@@ -153,7 +175,7 @@ class CommentaryStudio(tk.Toplevel):
                      orient='horizontal',bg=t.PANEL,fg=t.TEXT,
                      troughcolor=t.CONTROL,highlightthickness=0,
                      length=175).pack(fill='x')
-        controls = tk.Frame(self, bg=t.BG)
+        controls = tk.Frame(self.content, bg=t.BG)
         controls.pack(fill='x', padx=18, pady=(7, 2))
         self.convert_button = self._button(controls,'CONVERT · OPENVOICE',self.convert,True)
         self.process_button = self._button(controls,'PITCH / SPEED ONLY',self.process)
@@ -161,7 +183,7 @@ class CommentaryStudio(tk.Toplevel):
         self.listen_result_button = self._button(controls,'▶ CURRENT',lambda:self.listen('current'))
         self.cancel_button = self._button(controls,'CANCEL PROCESS',self._cancel.set)
         self.status = t.label(
-            self, 'Preparing microphone…', 9, t.MUTED,
+            self.content, 'Preparing microphone…', 9, t.MUTED,
             anchor='w', justify='left', wraplength=770)
         self.status.pack(fill='x', padx=18, pady=(5, 6))
 
