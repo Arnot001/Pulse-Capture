@@ -46,6 +46,8 @@ def blocks(state, plan=None, library=None):
     for index,cue in enumerate(edits.overlays):
         values.append(TimelineBlock('overlay',index,3,cue.start,cue.end,cue.asset_id))
     library=library or ReactionLibrary()
+    for index,cue in enumerate(edits.commentary_clips):
+        values.append(TimelineBlock('commentary',index,5,cue.start,cue.end,'🎙 '+cue.title[:32]))
     for index,cue in enumerate(edits.sounds):
         voice=getattr(cue,'track','sfx')=='voice'
         values.append(TimelineBlock('sound',index,5 if voice else 4,cue.at,min(total,cue.at+cue.length(library)),cue.asset_id))
@@ -92,6 +94,12 @@ def change_timing(state, key, start, end, media):
         from .imported_media import validate_clips
         validate_clips(cues,total)
         edits=replace(edits,media_clips=tuple(cues))
+    elif kind=='commentary':
+        from .commentary import adjust_timing, validate_commentary
+        cues=list(edits.commentary_clips)
+        cues[index]=adjust_timing(cues[index],start,end)
+        validate_commentary(cues,total)
+        edits=replace(edits,commentary_clips=tuple(cues))
     elif kind=='sound':
         cues=list(edits.sounds);cue=cues[index]
         cues[index]=replace(cue,at=start,duration=end-start)
@@ -116,6 +124,7 @@ def remove_blocks(state, keys, media):
                | {('sound', i) for i in range(len(edits.sounds))}
                | {('overlay', i) for i in range(len(edits.overlays))}
                | {('media', i) for i in range(len(edits.media_clips))}
+               | {('commentary', i) for i in range(len(edits.commentary_clips))}
                | {('crop_key', i) for i in range(len(edits.crop_motion.keyframes))})
     if edits.music.enabled:
         allowed.add(('music', 0))
@@ -129,6 +138,8 @@ def remove_blocks(state, keys, media):
         text=replace(edits.text, captions=tuple(
             c for i, c in enumerate(edits.text.captions) if ('caption', i) not in keys)),
         sounds=tuple(c for i, c in enumerate(edits.sounds) if ('sound', i) not in keys),
+        commentary_clips=tuple(c for i, c in enumerate(edits.commentary_clips)
+                               if ('commentary', i) not in keys),
         overlays=tuple(c for i, c in enumerate(edits.overlays) if ('overlay', i) not in keys),
         media_clips=tuple(c for i, c in enumerate(edits.media_clips) if ('media', i) not in keys),
         crop_motion=replace(edits.crop_motion, keyframes=tuple(

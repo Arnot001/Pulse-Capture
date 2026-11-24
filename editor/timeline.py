@@ -7,8 +7,8 @@ from .models import TrimRange, format_time
 class Timeline(tk.Canvas):
     """Source-clock trim row and output-clock draggable visual/audio tracks."""
 
-    MOVEABLE = frozenset(('caption', 'overlay', 'sound', 'media'))
-    DELETABLE = frozenset(('caption', 'overlay', 'sound', 'media', 'music', 'crop_key', 'zoom'))
+    MOVEABLE = frozenset(('caption', 'overlay', 'sound', 'media', 'commentary'))
+    DELETABLE = frozenset(('caption', 'overlay', 'sound', 'media', 'commentary', 'music', 'crop_key', 'zoom'))
     TRACK_TOP = 68
     TRACK_HEIGHT = 24
     TRACK_LABELS = ('VIDEO', 'MEDIA', 'CAPTIONS', 'EMOJIS / GIFS', 'SFX', 'VOICE', 'MUSIC', 'MOTION')

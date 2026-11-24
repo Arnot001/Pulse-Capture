@@ -64,6 +64,52 @@ fades. The built-ins are synthesized locally from Pulse-owned recipes and use no
 third-party audio samples. The workflow below describes this development branch.
 See `V06_PRIVACY_VERIFICATION.md` for Privacy verification and limits.
 
+## Commentary Studio — microphone and local Voice Alternator (development)
+
+In Quick Edit, select **+ ADD → Record Commentary**. Select an actual
+microphone (not a loopback), and choose **RECORD + PLAY**. Pulse begins capturing
+PCM WAV before starting the video preview. Use headphones so playback does not
+bleed into the recording. **STOP & SAVE** finishes a new immutable original in
+`%LOCALAPPDATA%\\Pulse Capture\\voiceovers` and places a VOICE block at the
+output playhead. If the video cannot play, the original WAV is still retained.
+Requires the optional `PyAudioWPatch` installation (`py -3.13 -m pip install
+-r requirements-audio.txt`); recording never uses a paid API. Every retake
+creates a different file.
+
+- Click the recorded take in Commentary Studio to view its waveform and adjust
+  **start/end**, **source in**, **voice level**, **game/background gain**, and
+  **fade in/out**. Choose **APPLY EDIT**. The original file stays unchanged.
+- Put the editor playhead inside the take and click **SPLIT AT PLAYHEAD** for two
+  independently editable clips. VOICE blocks also support timeline dragging,
+  edge trimming, right-click Delete and Ctrl+Z/Ctrl+Y undo. Deleting removes
+  only the timeline reference, not your WAV.
+- Use **ORIGINAL** / **CURRENT** to listen to the two voice variants. **USE
+  ORIGINAL VOICE** switches back without deleting the converted audio.
+- **PITCH / SPEED ONLY** runs a local FFmpeg voice effect (requires a build with
+  the `rubberband` audio filter for pitch/tempo changes). This is not neural
+  voice identity conversion.
+- **CONVERT · OPENVOICE** uses the existing *optional, local* OpenVoice V2
+  converter and saved authorised speaker catalogue. Install it separately and
+  explicitly with `py -3.13 setup-voice-studio.py` if necessary. That setup
+  downloads free models and a separate CPU runtime, which can be large/slow;
+  nothing downloads from the editor itself. Conversion runs locally with no
+  OpenAI API charge and depends on a completed pinned runtime. The model's
+  speaker labels do not guarantee any accent or expressive result.
+- The edited commentary is mixed into audible preview and exported MP4s on the
+  output clock after trims/cuts/speed. Game audio is ducked while you speak;
+  other AI narration and SFX still work independently. Source-file edits,
+  playback speed changes *after* recording, and audio-device latency should be
+  manually checked for sync before publishing; real device timing varies.
+- No automatic transcript, word-level editing or voice-cloning import panel is
+  included in this first pass. The original recording and converted WAVs remain
+  separately available in the Pulse voiceover library. Keep that library when
+  moving between computers; Git does not transfer private voice recordings.
+
+Focused tests: `python -m unittest tests.test_commentary tests.test_commentary_recording
+-v`. The optional Windows Tk test is `$env:PULSE_RUN_UI_TESTS = '1';
+py -3.13 -m unittest tests.test_commentary_ui -v`. FFmpeg render checks use
+`python -m unittest tests.test_commentary_render -v`.
+
 ## Photo and video Media track (Phase A)
 
 Quick Edit now has a **PHOTOS / VIDEO** button and a dedicated **MEDIA**

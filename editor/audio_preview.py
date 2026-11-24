@@ -29,7 +29,7 @@ def audio_preview_command(ffmpeg, media, source_position, trim, cuts=None,
     trim.validate(media)
     cuts.validate_selection(media, trim)
     edits.validate(media)
-    if not media.has_audio and not edits.music.enabled and not edits.sounds and not edits.narration:
+    if not media.has_audio and not edits.music.enabled and not edits.sounds and not edits.narration and not edits.commentary_clips:
         return None
     start = cuts.snap_position(source_position, trim)
     remaining = tuple((max(start, part.start), part.end)
@@ -89,6 +89,9 @@ def audio_preview_command(ffmpeg, media, source_position, trim, cuts=None,
     if edits.narration:
         from .narration import add_narration
         result = add_narration(args, graph, result, edits.narration, duration, output_offset)
+    if edits.commentary_clips:
+        from .commentary import add_commentary
+        result = add_commentary(args, graph, result, edits.commentary_clips, duration, output_offset)
     if result is None:
         return None
     args += ['-filter_complex', ';'.join(graph), '-map', f'[{result}]',
@@ -140,7 +143,7 @@ class AudioPlayback:
             self._audio_failed = False
             self._play_requested_at = time.monotonic()
             self._pending = (position, trim, cuts, edits) if (
-                self.media.has_audio or edits.music.enabled or edits.sounds or edits.narration) else None
+                self.media.has_audio or edits.music.enabled or edits.sounds or edits.narration or edits.commentary_clips) else None
             if self._pending and (self._worker is None or not self._worker.is_alive()):
                 self._worker = threading.Thread(
                     target=self._run, daemon=True, name='Pulse edit audio output')
