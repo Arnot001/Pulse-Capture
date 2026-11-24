@@ -95,6 +95,56 @@ class CommentaryUITests(unittest.TestCase):
             self.root.update()
             self.assertTrue(studio.winfo_ismapped())
 
+    def test_transport_controls_are_large_and_clear_and_status_is_visible(self):
+        studio=self.make_studio()
+        self.root.update()
+        self.assertGreater(studio.play_take_button.winfo_height(), 30)
+        self.assertGreater(studio.pause_take_button.winfo_height(), 30)
+        self.assertGreater(studio.stop_take_button.winfo_height(), 30)
+        self.assertIn('PLAY TAKE', studio.play_take_button.cget('text'))
+        self.assertIn('PAUSE', studio.pause_take_button.cget('text'))
+        self.assertEqual(studio.play_take_button.cget('state'), 'disabled')
+        self.assertEqual(studio.pause_take_button.cget('state'), 'disabled')
+        self.assertEqual(studio.stop_take_button.cget('state'), 'disabled')
+        self.assertTrue(studio.status.winfo_ismapped())
+        self.assertIs(studio.status.master, studio.status_bar)
+
+    def test_selected_take_transport_uses_only_edited_source_range(self):
+        studio=self.make_studio()
+        with patch.dict(os.environ, {'LOCALAPPDATA':self.temp.name}):
+            original=self.make_take(studio)
+            cue=self.window.edits.commentary_clips[0]
+            self.assertEqual(studio.play_take_button.cget('state'), 'normal')
+            with patch.object(studio.player, 'play', return_value='started') as play:
+                studio.play_take()
+                args=play.call_args.args
+                self.assertEqual(Path(args[0]).resolve(),original.resolve())
+                self.assertAlmostEqual(args[1],cue.source_in)
+                self.assertAlmostEqual(args[2],cue.duration)
+                studio.audition_var.set('original')
+                studio.on_audition_change()
+                studio.play_take()
+                play.assert_called()
+            studio.playback_clock.configure(text='0:03 / 0:06')
+            studio.stop_take()
+            self.assertIn('0:00',studio.playback_clock.cget('text'))
+            self.assertTrue(original.is_file())
+
+    def test_pause_and_stop_are_distinct_audio_actions(self):
+        studio=self.make_studio()
+        with patch.dict(os.environ, {'LOCALAPPDATA':self.temp.name}):
+            self.make_take(studio)
+            with patch.object(type(studio.player),'active',
+                              new_callable=lambda:property(lambda _player:True)):
+                with patch.object(studio.player,'pause',return_value=True) as pause:
+                    studio.pause_take()
+                    pause.assert_called_once()
+                    self.assertIn('paused',studio.status.cget('text'))
+                with patch.object(studio.player,'stop') as stop:
+                    studio.stop_take()
+                    stop.assert_called_once()
+            self.assertIn('PLAY TAKE',studio.play_take_button.cget('text'))
+
     def test_record_take_edit_split_undo_and_revert_audio(self):
         studio=self.make_studio()
         with patch.dict(os.environ,{'LOCALAPPDATA':self.temp.name}):
