@@ -149,6 +149,75 @@ class QuickEditWorkspaceUITests(unittest.TestCase):
         self.assertGreater(w.video.winfo_height(), 120)
         self.assertGreaterEqual(w.timeline.winfo_height(), 65)
 
+    def test_right_dock_keeps_video_and_timeline_visible_at_same_height(self):
+        w = self.window
+        self.root.update()
+        original_width = w.video.winfo_width()
+        original_height = w.video.winfo_height()
+        w.select_tool('TRIM')
+        self.root.update()
+        self.assertEqual(w.work_panes.panes()[-1], str(w.inspector))
+        self.assertEqual(w.inspector.winfo_manager(), 'panedwindow')
+        self.assertLess(w.video.winfo_width(), original_width - 180)
+        self.assertAlmostEqual(w.video.winfo_height(), original_height, delta=30)
+        self.assertGreater(w.timeline.winfo_height(), 65)
+        w.hide_inspector()
+        self.root.update()
+        self.assertNotIn(str(w.inspector), w.work_panes.panes())
+        self.assertGreater(w.video.winfo_width(), original_width - 50)
+
+    def test_horizontal_sash_is_draggable_and_remembers_inspector_width(self):
+        w = self.window
+        w.geometry('1450x800')
+        self.root.update()
+        w.select_tool('FORMAT')
+        self.root.update()
+        original_width = w.inspector.winfo_width()
+        x, y = w.work_panes.sash_coord(0)
+        w.work_panes.sash_place(0, x - 80, y)
+        self.root.update()
+        wider = w.inspector.winfo_width()
+        self.assertGreater(wider, original_width + 35)
+        self.assertGreater(w.video.winfo_width(), 280)
+        w.hide_inspector()
+        self.root.update()
+        self.assertGreater(w.inspector_width, original_width + 35)
+        w.select_tool('FORMAT')
+        self.root.update()
+        self.assertAlmostEqual(w.inspector.winfo_width(), wider, delta=30)
+
+    def test_oversized_tool_controls_can_scroll_in_right_inspector(self):
+        w = self.window
+        w.geometry('1050x700')
+        self.root.update()
+        w.select_tool('CROP')
+        self.root.update()
+        self.assertGreater(w.tool_canvas.winfo_width(), 200)
+        self.assertGreater(w.panel_area.winfo_reqwidth(), w.tool_canvas.winfo_width())
+        left, right = w.tool_canvas.xview()
+        self.assertAlmostEqual(left, 0, delta=.01)
+        self.assertLess(right, 1)
+        w.tool_canvas.xview_moveto(1)
+        self.root.update()
+        self.assertGreater(w.tool_canvas.xview()[0], 0)
+        w.select_tool('PRIVACY')
+        self.root.update()
+        self.assertTrue(w.panels['PRIVACY'].winfo_ismapped())
+        self.assertGreater(w.video.winfo_height(), 150)
+
+    def test_right_dock_stays_usable_at_minimum_window_width(self):
+        w = self.window
+        w.geometry('840x650')
+        self.root.update()
+        for name in ('TRIM', 'FORMAT', 'CROP', 'MUSIC', 'PRIVACY', 'MOTION'):
+            w.select_tool(name)
+            self.root.update()
+            self.assertTrue(w.inspector.winfo_ismapped(), name)
+            self.assertGreaterEqual(w.video.winfo_width(), 270, name)
+            self.assertGreater(w.video.winfo_height(), 140, name)
+            self.assertGreaterEqual(w.timeline.winfo_height(), 65, name)
+        self.assertEqual(self.errors, [])
+
     def test_dropdowns_keep_media_voice_and_edit_modes(self):
         w = self.window
         titles = [w.workspace_actions.entrycget(i, 'label')
