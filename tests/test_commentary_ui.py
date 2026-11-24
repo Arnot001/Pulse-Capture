@@ -93,9 +93,9 @@ class CommentaryUITests(unittest.TestCase):
                 with patch('editor.commentary_ui.convert_voice',return_value=changed):
                     studio.convert()
                     self.pump_until(lambda: not studio._busy)
-            self.assertEqual(self.window.edits.commentary_clips[0].file,str(changed))
+            self.assertEqual(Path(self.window.edits.commentary_clips[0].file).resolve(),changed.resolve())
             studio.use_original()
-            self.assertEqual(self.window.edits.commentary_clips[0].file,str(original))
+            self.assertEqual(Path(self.window.edits.commentary_clips[0].file).resolve(),original.resolve())
             self.assertTrue(changed.is_file())
             self.assertTrue(original.is_file())
 
