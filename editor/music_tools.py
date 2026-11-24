@@ -121,8 +121,8 @@ class MusicTools:
         if not text.endswith('%'):
             raise ValueError('Choose a valid music volume.')
         value = float(text[:-1]) / 100
-        if value not in VOLUME_LEVELS:
-            raise ValueError('Choose one of the available volume levels.')
+        if not 0 <= value <= 1:
+            raise ValueError('Choose a volume from 0% to 100%.')
         return value
 
     def _state(self):
