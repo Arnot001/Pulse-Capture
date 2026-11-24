@@ -59,6 +59,7 @@ class CommentaryUITests(unittest.TestCase):
 
     def test_recording_floats_stop_controls_and_leaves_video_visible(self):
         studio=self.make_studio()
+        self.pump_until(lambda:not studio._busy)
         studio.devices=[dict(index=0,name='Test microphone')]
         studio.device_picker.configure(values=('Test microphone',))
         studio.device_picker.current(0)
