@@ -395,6 +395,7 @@ class EditorWindow(tk.Toplevel):
         self.panels[self.tool.get()].pack(fill='both', expand=True, padx=12, pady=10)
         self.video.active = self.tool.get() == 'CROP'
         self.video.drag = None
+        self.video.media_drag = None
         self.video.zoom_drag = False
         self.cut_tools.refresh()
         self.overlay_tools.refresh()
