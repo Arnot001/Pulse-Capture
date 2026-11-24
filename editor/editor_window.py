@@ -32,8 +32,8 @@ class EditorWindow(tk.Toplevel):
         super().__init__(parent)
         self.title('PULSE // CAPTURE — QUICK EDIT')
         self.configure(bg=t.BG)
-        self.geometry(f'980x{min(850, self.winfo_screenheight()-100)}')
-        self.minsize(760, 700)
+        self.geometry(f'1180x{min(900, self.winfo_screenheight()-80)}')
+        self.minsize(840, 650)
         self.path, self.backend, self.on_close = Path(path), backend, on_close
         self.media = self.trim = self.preview = self.audio_player = None
         self.playback = None
@@ -43,6 +43,8 @@ class EditorWindow(tk.Toplevel):
         self.auto_dialog = None
         self.auto_children = set()
         self.media_dialog = None
+        self.commentary_studio = None
+        self._commentary_synced = None
         self.exporter = ExportJob(backend, verify_short=auto_candidate is not None)
         self.metadata = Queue()
         self.closed = self.closing = self.playing = False
@@ -83,92 +85,183 @@ class EditorWindow(tk.Toplevel):
         threading.Thread(target=load, daemon=True).start()
 
     def _build(self):
-        tk.Frame(self, height=3, bg=t.CYAN).pack(fill='x')
+        # Workspace-first shell: compact header, collapsible tools, real video space.
+        tk.Frame(self, height=2, bg=t.CYAN).pack(fill='x')
         header = tk.Frame(self, bg=t.BG)
-        header.pack(fill='x', padx=28, pady=(14, 6))
-        t.label(header, 'PULSE', 21, bold=True).pack(side='left')
-        t.label(header, ' // CAPTURE', 15, t.CYAN).pack(side='left')
-        t.label(header, 'QUICK EDIT', 10, t.MUTED, True).pack(side='right')
-        self.auto_button = t.button(header, 'AUTO EDIT', self.open_auto_edit)
-        self.auto_button.configure(pady=5, state='disabled')
-        self.auto_button.pack(side='right', padx=12)
-        self.controls.append(self.auto_button)
-        self.voiceover_button = t.button(header, 'AI VOICEOVER', self.open_voiceover_studio)
-        self.voiceover_button.configure(pady=5, state='disabled')
-        self.voiceover_button.pack(side='right', padx=4)
-        self.controls.append(self.voiceover_button)
-        self.roast_button = t.button(header, 'ROAST STUDIO · JSON', self.open_roast_studio)
-        self.roast_button.configure(pady=5, state='disabled')
-        self.roast_button.pack(side='right', padx=4)
-        self.controls.append(self.roast_button)
+        header.pack(fill='x', padx=18, pady=(8, 2))
+        t.label(header, 'PULSE', 19, bold=True).pack(side='left')
+        t.label(header, ' // CAPTURE', 13, t.CYAN).pack(side='left')
+        self.workspace_menu = tk.Menubutton(
+            header, text='WORKSPACES  ▾', bg=t.CONTROL, fg=t.TEXT,
+            activebackground=t.LINE, activeforeground=t.TEXT,
+            relief='flat', borderwidth=0, padx=12, pady=7,
+            font=(t.FONT, -10, 'bold'), cursor='hand2')
+        self.workspace_actions = tk.Menu(
+            self.workspace_menu, tearoff=0, bg=t.PANEL, fg=t.TEXT,
+            activebackground=t.CYAN, activeforeground=t.BG)
+        for caption, action in (
+            ('Quick Edit', None),
+            ('Auto Edit', self.open_auto_edit),
+            ('AI Voiceover', self.open_voiceover_studio),
+            ('Roast Studio', self.open_roast_studio)):
+            self.workspace_actions.add_command(
+                label=caption, command=action,
+                state='disabled' if action is None else 'normal')
         if self.pulse_candidate:
-            recipe_button = t.button(header, 'EDIT PULSE PLAN', self.open_pulse_plan)
-            recipe_button.pack(side='right', padx=4)
-            self.controls.append(recipe_button)
-        intro = tk.Frame(self, bg=t.BG)
-        intro.pack(fill='x', padx=28, pady=(0, 12))
-        self.source_label = t.label(intro, self.path.name, 9, t.MUTED, anchor='w')
-        reaction_row = tk.Frame(intro, bg=t.BG)
-        reaction_row.pack(side='right')
-        media_button = t.button(reaction_row, 'PHOTOS / VIDEO', self.open_imported_media)
-        media_button.configure(padx=7, pady=4, font=(t.FONT, -9, 'bold'))
-        media_button.pack(side='left', padx=2)
-        self.controls.append(media_button)
-        for label, kind in (('REACTION AUDIO', 'sfx'), ('EMOJIS', 'emoji'), ('GIFS / REACTIONS', 'gif'), ('EFFECTS', 'effects')):
-            button = t.button(reaction_row, label, lambda k=kind: self.open_reactions(k))
-            button.configure(padx=6, pady=4, font=(t.FONT, -9, 'bold'))
-            button.pack(side='left', padx=2)
-            self.controls.append(button)
-        self.source_label.pack(side='left', fill='x', expand=True, pady=(4, 0))
+            self.workspace_actions.add_separator()
+            self.workspace_actions.add_command(label='Edit Pulse Plan',
+                                               command=self.open_pulse_plan)
+        self.workspace_menu.configure(menu=self.workspace_actions)
+        self.workspace_menu.pack(side='right')
+        self.controls.append(self.workspace_menu)
+        self.source_label = t.label(
+            self, self.path.name, 9, t.MUTED, anchor='w')
+        self.source_label.pack(fill='x', padx=18, pady=(0, 2))
 
-        # Bottom controls stay reachable when the window is resized.
+        # The save controls no longer take an entire oversized bottom section.
         bottom = tk.Frame(self, bg=t.BG)
-        bottom.pack(side='bottom', fill='x', padx=28, pady=(0, 18))
-        self.note = t.label(bottom, 'Opening your video…', 10, t.MUTED, anchor='w', justify='left', wraplength=850)
-        self.note.pack(fill='x', pady=(8, 6))
-        ttk.Style(self).configure('Pulse.Horizontal.TProgressbar', background=t.CYAN,
-                                 troughcolor=t.CONTROL, bordercolor=t.CONTROL,
-                                 lightcolor=t.CYAN, darkcolor=t.CYAN, thickness=5)
-        self.progress = ttk.Progressbar(bottom, mode='determinate', maximum=1,
-                                        style='Pulse.Horizontal.TProgressbar')
-        self.progress.pack(fill='x', pady=(0, 10))
-        actions = tk.Frame(bottom, bg=t.BG)
-        actions.pack(fill='x')
-        self.export_button = t.button(actions, 'EXPORT VIDEO  ↗', self.export, accent=True,
-                                       font=(t.FONT, -16, 'bold'))
-        self.export_button.configure(pady=12, state='disabled')
-        self.export_button.pack(side='left', fill='x', expand=True)
-        self.cancel_button = t.button(actions, 'CANCEL EXPORT', self.cancel_export)
+        self.footer = bottom
+        bottom.pack(side='bottom', fill='x', padx=18, pady=(2, 7))
+        footer = tk.Frame(bottom, bg=t.BG)
+        footer.pack(fill='x')
+        messages = tk.Frame(footer, bg=t.BG)
+        messages.pack(side='left', fill='x', expand=True)
+        self.note = t.label(
+            messages, 'Opening your video…', 9, t.MUTED, anchor='w',
+            justify='left', wraplength=480)
+        self.note.pack(fill='x')
+        self.destination = t.label(
+            messages, 'Export creates a new copy · original is untouched',
+            8, t.MUTED, anchor='w')
+        self.destination.pack(fill='x')
+        actions = tk.Frame(footer, bg=t.BG)
+        actions.pack(side='right', padx=(10, 0))
+        self.export_button = t.button(
+            actions, 'EXPORT  ↗', self.export, accent=True,
+            font=(t.FONT, -12, 'bold'))
+        self.export_button.configure(padx=18, pady=9, state='disabled')
+        self.export_button.pack(side='right')
+        self.cancel_button = t.button(actions, 'CANCEL', self.cancel_export)
         self.open_button = t.button(actions, 'OPEN FOLDER', self.open_folder)
-        self.open_button.pack(side='right', padx=(10, 0))
-        destination = tk.Frame(bottom, bg=t.BG)
-        destination.pack(fill='x', pady=(7, 0))
-        self.destination = t.label(destination, 'New copy beside your original · Original stays untouched', 9, t.MUTED)
-        self.destination.pack(side='left')
-        self.change_folder_button = t.button(destination, 'CHANGE FOLDER', self.change_folder)
-        self.change_folder_button.configure(pady=2, font=(t.FONT, -10, 'bold'))
-        self.change_folder_button.pack(side='right')
+        self.open_button.configure(padx=8, pady=8, font=(t.FONT, -9))
+        self.open_button.pack(side='right', padx=(7, 0))
+        self.change_folder_button = t.button(
+            actions, 'SAVE TO…', self.change_folder)
+        self.change_folder_button.configure(
+            padx=8, pady=8, font=(t.FONT, -9))
+        self.change_folder_button.pack(side='right', padx=(0, 5))
         self.controls.append(self.change_folder_button)
+        ttk.Style(self).configure(
+            'Pulse.Horizontal.TProgressbar', background=t.CYAN,
+            troughcolor=t.CONTROL, bordercolor=t.CONTROL,
+            lightcolor=t.CYAN, darkcolor=t.CYAN, thickness=4)
+        self.progress = ttk.Progressbar(
+            bottom, mode='determinate', maximum=1,
+            style='Pulse.Horizontal.TProgressbar')
+        self.progress.pack(fill='x', pady=(4, 0))
 
-        tool_area = tk.Frame(bottom, bg=t.BG)
-        tool_area.pack(side='top', fill='x', before=self.note, pady=(8, 0))
-        tabs = t.Segments(tool_area, self.tool, [(v, v) for v in ('TRIM', 'CUT', 'FORMAT', 'CROP', 'BRAND', 'TEXT', 'PRIVACY', 'MOTION', 'MUSIC', 'FINISH')], self.show_tool)
-        tabs.pack(fill='x', pady=(0, 8))
-        for _, button in tabs.buttons:
-            button.configure(padx=4, pady=5, font=(t.FONT, -8, 'bold'))
-        self.controls.extend(b for _, b in tabs.buttons)
-        # A fixed, compact tool area keeps the preview stable when switching tools.
-        panel_area = tk.Frame(tool_area, bg=t.PANEL, height=126)
-        panel_area.pack(fill='x')
-        panel_area.pack_propagate(False)
+        workspace = tk.Frame(self, bg=t.BG)
+        workspace.pack(fill='both', expand=True, padx=16, pady=(5, 4))
+
+        # Tools move down a narrow vertical rail; clicking one opens its
+        # dedicated inspector. No panel takes preview height by default.
+        rail = tk.Frame(workspace, bg=t.PANEL, width=116)
+        rail.pack(side='left', fill='y', padx=(0, 10))
+        rail.pack_propagate(False)
+        t.label(rail, 'TOOLS', 10, t.CYAN, True).pack(anchor='w', padx=10, pady=(7, 4))
+        self.add_menu = tk.Menubutton(
+            rail, text='+  ADD  ▾', bg=t.CYAN, fg=t.BG,
+            activebackground=t.LINE, activeforeground=t.TEXT,
+            relief='flat', borderwidth=0, padx=7, pady=8,
+            font=(t.FONT, -10, 'bold'), cursor='hand2')
+        add_actions = tk.Menu(
+            self.add_menu, tearoff=0, bg=t.PANEL, fg=t.TEXT,
+            activebackground=t.CYAN, activeforeground=t.BG)
+        add_actions.add_command(label='Photo / Video', command=self.open_imported_media)
+        add_actions.add_command(label='Emoji', command=lambda: self.open_reactions('emoji'))
+        add_actions.add_command(label='GIF / Reaction', command=lambda: self.open_reactions('gif'))
+        add_actions.add_command(label='Sound Effect', command=lambda: self.open_reactions('sfx'))
+        add_actions.add_command(label='🎙 Record Commentary', command=self.open_commentary_studio)
+        add_actions.add_command(label='Effects', command=lambda: self.open_reactions('effects'))
+        self.add_menu.configure(menu=add_actions, state='disabled')
+        self.add_menu.pack(fill='x', padx=8, pady=(0, 5))
+        self.controls.append(self.add_menu)
+        self.tool_buttons = {}
+        self.tool_titles = {
+            'TRIM': 'Trim', 'CUT': 'Cut', 'FORMAT': 'Canvas',
+            'CROP': 'Crop', 'BRAND': 'Watermark', 'TEXT': 'Text',
+            'PRIVACY': 'Privacy', 'MOTION': 'Motion',
+            'MUSIC': 'Music', 'FINISH': 'Export'}
+        for name, caption in self.tool_titles.items():
+            button = t.button(
+                rail, caption, lambda tool=name: self.toggle_tool(tool))
+            button.configure(
+                padx=5, pady=2, font=(t.FONT, -10, 'bold'),
+                state='disabled')
+            button.pack(fill='x', padx=8, pady=1)
+            self.tool_buttons[name] = button
+            self.controls.append(button)
+
+        self.work_panes = tk.PanedWindow(
+            workspace, orient='horizontal', bg=t.BG, sashwidth=9,
+            sashrelief='flat', showhandle=True, handlesize=13,
+            relief='flat', bd=0)
+        self.work_panes.pack(side='left', fill='both', expand=True)
+        self.work_panes.bind('<ButtonRelease-1>', self._remember_inspector_width)
+
+        # Existing tool panels use the same models/handlers but now dock to
+        # the right of the preview, not beneath it.
+        self.inspector = tk.Frame(
+            self.work_panes, bg=t.PANEL, width=440,
+            highlightbackground=t.LINE, highlightthickness=1)
+        self.inspector.pack_propagate(False)
+        self.inspector_width = 440
+        self.inspector_visible = False
+        inspector_head = tk.Frame(self.inspector, bg=t.PANEL)
+        inspector_head.pack(fill='x', padx=10, pady=(6, 0))
+        self.inspector_title = t.label(
+            inspector_head, 'TRIM', 10, t.CYAN, True)
+        self.inspector_title.pack(side='left')
+        self.inspector_close = t.button(
+            inspector_head, '✕  CLOSE TOOLS', self.hide_inspector)
+        self.inspector_close.configure(
+            font=(t.FONT, -9, 'bold'), padx=9, pady=3)
+        self.inspector_close.pack(side='right')
+        # Embed the existing wide/long legacy tool controls in an inspector
+        # viewport. This prevents their natural requested size from squeezing
+        # the video; both scroll axes remain available when a tool is wider.
+        tool_area = tk.Frame(self.inspector, bg=t.PANEL)
+        tool_area.pack(fill='both', expand=True, padx=(7, 3), pady=(4, 6))
+        self.tool_scroll_x = ttk.Scrollbar(
+            tool_area, orient='horizontal', command=self.tool_canvas_xview)
+        self.tool_scroll_x.pack(side='bottom', fill='x')
+        content = tk.Frame(tool_area, bg=t.PANEL)
+        content.pack(fill='both', expand=True)
+        self.tool_scroll_y = ttk.Scrollbar(
+            content, orient='vertical')
+        self.tool_scroll_y.pack(side='right', fill='y')
+        self.tool_canvas = tk.Canvas(
+            content, bg=t.PANEL, bd=0, highlightthickness=0,
+            xscrollcommand=self.tool_scroll_x.set,
+            yscrollcommand=self.tool_scroll_y.set)
+        self.tool_canvas.pack(side='left', fill='both', expand=True)
+        self.tool_scroll_y.configure(command=self.tool_canvas.yview)
+        self.panel_area = tk.Frame(self.tool_canvas, bg=t.PANEL)
+        self.tool_canvas_item = self.tool_canvas.create_window(
+            0, 0, window=self.panel_area, anchor='nw')
+        self.tool_canvas.bind('<Configure>', self._inspector_canvas_resized)
+        self.panel_area.bind('<Configure>', self._inspector_content_resized)
+        self.tool_canvas.bind('<MouseWheel>', self._inspector_wheel)
+        panel_area = self.panel_area
         for name in ('TRIM', 'CUT', 'FORMAT', 'CROP', 'BRAND', 'TEXT', 'PRIVACY', 'MOTION', 'MUSIC', 'FINISH'):
             self.panels[name] = tk.Frame(panel_area, bg=t.PANEL)
         row = self.panels['TRIM']
         row.pack(fill='both', expand=True, padx=12, pady=10)
-        for column, (title, variable, bound) in enumerate((('Start', self.start_text, 'start'), ('End', self.end_text, 'end'))):
+        row.columnconfigure(0, weight=1)
+        for column, (title, variable, bound) in enumerate(
+                (('Start', self.start_text, 'start'), ('End', self.end_text, 'end'))):
             group = tk.Frame(row, bg=t.PANEL)
-            group.grid(row=0, column=column, sticky='ew', padx=(0, 18))
-            row.columnconfigure(column, weight=1)
+            group.grid(row=column, column=0, sticky='ew', pady=(0, 9))
             t.label(group, title, 10, bold=True).pack(anchor='w')
             inner = tk.Frame(group, bg=t.PANEL)
             inner.pack(fill='x', pady=(5, 0))
@@ -182,10 +275,10 @@ class EditorWindow(tk.Toplevel):
             button.pack(side='left', padx=(8, 0))
             self.controls.extend((entry, button))
         self.reset_button = t.button(row, 'RESET', self.reset_trim)
-        self.reset_button.grid(row=0, column=2, sticky='se')
+        self.reset_button.grid(row=2, column=0, sticky='w')
         self.controls.append(self.reset_button)
         self.selection_label = t.label(row, 'Drag the cyan handles or enter Start and End.', 9, t.MUTED)
-        self.selection_label.grid(row=1, column=0, columnspan=3, sticky='w', pady=(8, 0))
+        self.selection_label.grid(row=3, column=0, sticky='w', pady=(8, 0))
         self.build_tools()
         self.cut_tools = CutTools(self)
         self.overlay_tools = OverlayTools(self)
@@ -194,49 +287,81 @@ class EditorWindow(tk.Toplevel):
         for widget in self.controls:
             widget.configure(state='disabled')
 
-        preview_area = tk.Frame(self, bg=t.BG)
-        preview_area.pack(fill='both', expand=True, padx=28)
-        self.video = ReactionPreview(preview_area, self.crop_changed, self.overlay_tools.mask_changed,
-                                    self.polish_tools.focus_changed, window=self, bg='#060a10',
-                                    highlightbackground=t.LINE, highlightthickness=1, height=260)
-        preview_area.rowconfigure(0, weight=1)
-        preview_area.columnconfigure(0, weight=1)
-        self.video.grid(row=0, column=0, sticky='nsew')
+        preview_area = tk.Frame(self.work_panes, bg=t.BG)
+        self.work_panes.add(preview_area, minsize=300, stretch='always')
+        self.preview_split = tk.PanedWindow(
+            preview_area, orient='vertical', bg=t.BG,
+            sashwidth=8, sashrelief='flat',
+            relief='flat', bd=0, showhandle=True,
+            handlesize=12, handlepad=8)
+        self.preview_split.pack(fill='both', expand=True)
+        self.video = ReactionPreview(
+            self.preview_split, self.crop_changed,
+            self.overlay_tools.mask_changed,
+            self.polish_tools.focus_changed,
+            window=self, bg='#060a10',
+            highlightbackground=t.LINE, highlightthickness=1,
+            height=350)
+        self.preview_split.add(self.video, minsize=160, stretch='always')
         self.video.bind('<Configure>', self.resize_preview)
-        self.video.create_text(350, 120, text='Opening your video…', fill=t.MUTED, tags='placeholder')
-        transport = tk.Frame(preview_area, bg=t.BG)
-        transport.grid(row=1, column=0, sticky='ew', pady=(8, 0))
+        self.video.create_text(
+            350, 120, text='Opening your video…',
+            fill=t.MUTED, tags='placeholder')
+        timeline_space = tk.Frame(self.preview_split, bg=t.BG)
+        self.preview_split.add(
+            timeline_space, minsize=115, stretch='never')
+        transport = tk.Frame(timeline_space, bg=t.BG)
+        transport.pack(fill='x', pady=(2, 2))
         self.play_button = t.button(transport, '▶  PLAY', self.play_preview)
         self.pause_button = t.button(transport, '⏸  PAUSE', self.pause_preview)
         self.stop_button = t.button(transport, '■  STOP', self.stop_preview)
         for button in (self.play_button, self.pause_button, self.stop_button):
-            button.configure(state='disabled')
+            button.configure(state='disabled', padx=10, pady=6)
         self.play_button.pack(side='left')
-        self.pause_button.pack(side='left', padx=(8, 0))
-        self.stop_button.pack(side='left', padx=(8, 0))
-        self.clock = t.label(transport, '0:00.000 / 0:00.000', 11, t.TEXT)
-        self.clock.pack(side='left', padx=16)
-        self.preview_note = t.label(transport, 'Preparing audio preview…', 9, t.MUTED)
-        self.preview_note.pack(side='right')
-        self.quality_picker = ttk.Combobox(transport,textvariable=self.preview_quality,
-            values=('360p','480p','720p'),state='readonly',width=5)
-        self.quality_picker.pack(side='right',padx=6)
-        self.quality_picker.bind('<<ComboboxSelected>>',self.quality_changed)
+        self.pause_button.pack(side='left', padx=(5, 0))
+        self.stop_button.pack(side='left', padx=(5, 0))
+        self.clock = t.label(
+            transport, '0:00.000 / 0:00.000', 10, t.TEXT)
+        self.clock.pack(side='left', padx=12)
+        # Audio status remains available to diagnostics, but the transport bar
+        # shows only playback controls; the old explanatory note crowded small PCs.
+        self.preview_note = t.label(
+            transport, 'Preparing audio preview…', 9, t.MUTED)
+        self.quality_picker = ttk.Combobox(
+            transport, textvariable=self.preview_quality,
+            values=('360p', '480p', '720p'),
+            state='readonly', width=5)
+        self.quality_picker.pack(side='right', padx=5)
+        self.quality_picker.bind(
+            '<<ComboboxSelected>>', self.quality_changed)
         self.audio_toggle = tk.Checkbutton(
             transport, text='SOUND ON', variable=self.audio_on,
             command=self.toggle_audio, bg=t.BG, fg=t.CYAN,
             selectcolor=t.CONTROL, activebackground=t.BG,
-            activeforeground=t.TEXT, disabledforeground=t.MUTED, bd=0)
-        self.audio_toggle.pack(side='right', padx=(0, 10))
-        self.timeline = Timeline(preview_area, self.seek, self.drag_trim,
-                                 self.begin_clip_drag,self.change_clip_drag,self.end_clip_drag,
-                                 self.delete_timeline_item)
+            activeforeground=t.TEXT, disabledforeground=t.MUTED,
+            bd=0)
+        self.audio_toggle.pack(side='right', padx=(0, 7))
+        self.timeline = Timeline(
+            timeline_space, self.seek, self.drag_trim,
+            self.begin_clip_drag, self.change_clip_drag,
+            self.end_clip_drag, self.delete_timeline_item)
         self.timeline.on_output_seek = self.seek_output_time
-        self.timeline.grid(row=2, column=0, sticky='ew')
+        self.timeline.pack(fill='x')
+        self.paint_tool_buttons()
 
     def add_segments(self, parent, variable, choices, command):
         segments = t.Segments(parent, variable, choices, command)
         segments.pack(fill='x', pady=(0, 6))
+        if len(choices) >= 4:
+            # Five landscape format choices become a tidy two-column list
+            # when presented in the compact right-side inspector.
+            for index, (_, button) in enumerate(segments.buttons):
+                button.grid_configure(
+                    row=index // 2, column=index % 2,
+                    padx=(0 if index % 2 == 0 else 5, 0),
+                    pady=(0, 4))
+            for col in range(len(choices)):
+                segments.columnconfigure(col, weight=1 if col < 2 else 0)
         self.controls.extend(b for _, b in segments.buttons)
         return segments
 
@@ -249,6 +374,21 @@ class EditorWindow(tk.Toplevel):
             return
         from .imported_media_ui import ImportedMediaDialog
         self.media_dialog = ImportedMediaDialog(self)
+
+    def open_commentary_studio(self):
+        """Record, edit and convert commentary without leaving Quick Edit."""
+        if not self.media or not self.trim or self.exporter.busy or self.closing:
+            return
+        if self.commentary_studio is not None and self.commentary_studio.winfo_exists():
+            hud = self.commentary_studio._hud
+            if hud is not None and hud.winfo_exists():
+                hud.lift()  # Keep the full preview visible while recording.
+            else:
+                self.commentary_studio.deiconify()
+                self.commentary_studio.lift()
+            return
+        from .commentary_ui import CommentaryStudio
+        self.commentary_studio = CommentaryStudio(self)
 
     def open_voiceover_studio(self):
         """Open the standalone narration generator without changing video edit state."""
@@ -385,15 +525,106 @@ class EditorWindow(tk.Toplevel):
         t.label(panel, 'Adds a new logo. A logo already in the recording cannot be removed.',
                 9, t.MUTED).pack(anchor='w')
 
+    def tool_canvas_xview(self, *args):
+        self.tool_canvas.xview(*args)
+
+    def _inspector_canvas_resized(self, event=None):
+        """Let narrow panels fill the right dock while wider tools can scroll."""
+        if not hasattr(self, 'tool_canvas_item'):
+            return
+        viewport = event.width if event is not None else self.tool_canvas.winfo_width()
+        requested = self.panel_area.winfo_reqwidth()
+        self.tool_canvas.itemconfigure(
+            self.tool_canvas_item, width=max(1, viewport, requested))
+        self._inspector_content_resized()
+
+    def _inspector_content_resized(self, _event=None):
+        self.tool_canvas.configure(scrollregion=self.tool_canvas.bbox('all'))
+
+    def _inspector_wheel(self, event):
+        if not self.inspector_visible:
+            return
+        if event.state & 0x1:
+            self.tool_canvas.xview_scroll(-1 if event.delta > 0 else 1, 'units')
+        else:
+            self.tool_canvas.yview_scroll(-1 if event.delta > 0 else 1, 'units')
+        return 'break'
+
+    def _remember_inspector_width(self, _event=None):
+        if self.inspector_visible:
+            width = self.inspector.winfo_width()
+            if width > 250:
+                self.inspector_width = width
+
+    def _refresh_inspector_view(self):
+        """Recompute scroll bounds for every newly selected tool."""
+        if not self.inspector_visible or self.closed or self.closing:
+            return
+        self._inspector_canvas_resized()
+        self.tool_canvas.configure(scrollregion=self.tool_canvas.bbox('all'))
+
+    def paint_tool_buttons(self):
+        """Keep the current tool discoverable without filling the header."""
+        for name, button in self.tool_buttons.items():
+            active = self.inspector_visible and self.tool.get() == name
+            button.configure(
+                bg=t.CYAN if active else t.CONTROL,
+                fg=t.BG if active else t.TEXT)
+
+    def toggle_tool(self, name):
+        if self.inspector_visible and self.tool.get() == name:
+            self.hide_inspector()
+        else:
+            self.select_tool(name)
+
     def select_tool(self, name):
+        if name not in self.panels:
+            raise ValueError('Unknown editor tool.')
         self.tool.set(name)
         self.show_tool()
+
+    def hide_inspector(self):
+        if not self.inspector_visible:
+            return
+        self.stop_play()
+        self._remember_inspector_width()
+        self.work_panes.forget(self.inspector)
+        self.inspector_visible = False
+        # When no tool is open, show the actual edited picture rather than
+        # lingering source crop/privacy guides from the previous panel.
+        self.tool.set('TRIM')
+        self.video.active = False
+        self.video.drag = None
+        self.video.media_drag = None
+        self.video.zoom_drag = False
+        self.cut_tools.refresh()
+        self.overlay_tools.refresh()
+        self.music_tools.refresh()
+        self.polish_tools.refresh()
+        self.paint_tool_buttons()
+        if self.media and self.trim:
+            self.update_timeline()
+        self.request_frame()
 
     def show_tool(self):
         self.stop_play()
         for panel in self.panels.values():
             panel.pack_forget()
-        self.panels[self.tool.get()].pack(fill='both', expand=True, padx=12, pady=10)
+        self.panels[self.tool.get()].pack(
+            fill='both', expand=True, padx=12, pady=8)
+        self.inspector_title.configure(
+            text=self.tool_titles[self.tool.get()].upper() + '  //  SETTINGS')
+        if not self.inspector_visible:
+            self.work_panes.add(
+                self.inspector, minsize=280, width=self.inspector_width,
+                stretch='never')
+            self.inspector_visible = True
+        # Existing inspector entries may be much wider than the dock; their
+        # scrollbars make them usable without forcing video out of sight.
+        self.tool_canvas.xview_moveto(0)
+        self.tool_canvas.yview_moveto(0)
+        self.after_idle(self._refresh_inspector_view)
+        self.paint_tool_buttons()
         self.video.active = self.tool.get() == 'CROP'
         self.video.drag = None
         self.video.media_drag = None
@@ -661,6 +892,11 @@ class EditorWindow(tk.Toplevel):
             for c in (*self.edits.sounds, *self.edits.overlays))
         self.timeline.output_duration = timeline_duration(self) if self.media and self.trim else 0
         self.timeline.clip_blocks = tuple(timeline_blocks(self)) if self.media and self.trim else ()
+        if (self.commentary_studio is not None and
+                self.commentary_studio.winfo_exists() and
+                self._commentary_synced != self.edits.commentary_clips):
+            self._commentary_synced = self.edits.commentary_clips
+            self.commentary_studio.refresh()
         self.timeline.draw()
         self.clock.configure(text=f'{format_time(self.position)} / {format_time(self.media.duration)}')
         self.refresh_crop_guide()
@@ -976,6 +1212,12 @@ class EditorWindow(tk.Toplevel):
             self.request_frame()
 
     def export(self):
+        if (self.commentary_studio is not None and
+                self.commentary_studio.recorder.active):
+            self.note.configure(
+                text='Stop and save commentary before exporting.',
+                fg=t.RED)
+            return
         if not self.overlay_tools.privacy_committed() or not self.commit_entries():
             return
         self.stop_play()
@@ -1133,6 +1375,8 @@ class EditorWindow(tk.Toplevel):
             child.close()
         if self.auto_dialog and not self.auto_dialog.closed:
             self.auto_dialog.close()
+        if self.commentary_studio is not None and self.commentary_studio.winfo_exists():
+            self.commentary_studio.close()
         if self.exporter.busy:
             self.cancel_export()
         elif not self.auto_children and not (self.auto_dialog and not self.auto_dialog.closed):

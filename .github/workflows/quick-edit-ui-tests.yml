@@ -1,0 +1,39 @@
+name: Quick Edit workspace layout
+
+on:
+  push:
+    branches:
+      - feature/quick-edit-workspace-ui-20261124
+      - feature/quick-edit-right-inspector-20261124
+  pull_request:
+    paths:
+      - 'editor/editor_window.py'
+      - 'tests/test_quick_edit_workspace_ui.py'
+      - '.github/workflows/quick-edit-ui-tests.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: quick-edit-layout-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  windows-ui:
+    runs-on: windows-latest
+    timeout-minutes: 18
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Syntax checks
+        shell: pwsh
+        run: |
+          python -m py_compile editor/editor_window.py tests/test_quick_edit_workspace_ui.py
+      - name: Real Tk workspace and interaction geometry
+        shell: pwsh
+        env:
+          PULSE_RUN_UI_TESTS: '1'
+        run: python -m unittest tests.test_quick_edit_workspace_ui -v
+      - name: Full Python regression suite
+        shell: pwsh
+        run: python -m unittest discover -q

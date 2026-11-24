@@ -30,3 +30,16 @@ https://github.com/s0d3s/PyAudioWPatch
 FFmpeg licensing: https://ffmpeg.org/legal.html
 PyInstaller license: https://pyinstaller.org/en/stable/license.html
 Python license: https://docs.python.org/3/license.html
+
+## Optional local Voice Alternator (Commentary Studio)
+
+The optional Voice Studio V2 conversion adapter uses MyShell OpenVoice V2,
+whose published implementation and speaker assets are available under the MIT
+licence. The preserved licence is `assets/licenses/LICENSE_OPENVOICE`.
+OpenVoice source and checkpoints are not bundled into this repository or
+installed when Pulse Capture opens. The explicit setup script retrieves
+pinned revisions into a private, separately managed runtime only with user
+action. PyTorch and NumPy are dependencies of that optional installed runtime,
+with their own licences. The microphone-only recorder does not require them.
+https://github.com/myshell-ai/OpenVoice
+https://huggingface.co/myshell-ai/OpenVoiceV2

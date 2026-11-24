@@ -64,6 +64,63 @@ fades. The built-ins are synthesized locally from Pulse-owned recipes and use no
 third-party audio samples. The workflow below describes this development branch.
 See `V06_PRIVACY_VERIFICATION.md` for Privacy verification and limits.
 
+## Commentary Studio — microphone and local Voice Alternator (development)
+
+In Quick Edit, select **+ ADD → Record Commentary**. Select an actual
+microphone (not a loopback), and choose **RECORD + PLAY**. Pulse begins capturing
+PCM WAV before starting the video preview. Use headphones so playback does not
+bleed into the recording. **STOP & SAVE** finishes a new immutable original in
+`%LOCALAPPDATA%\\Pulse Capture\\voiceovers` and places a VOICE block at the
+output playhead. If the video cannot play, the original WAV is still retained.
+Requires the optional `PyAudioWPatch` installation (`py -3.13 -m pip install
+-r requirements-audio.txt`); recording never uses a paid API. Every retake
+creates a different file.
+
+- Click the recorded take to view its waveform and adjust **start/end**,
+  **source in** and **fade in/out**. The Audio Mixer provides separate percentage
+  sliders for **Commentary Volume** (0–200%; selected take only) and
+  **Original Video Audio** (0–100%; entire video, including when Music is off).
+  Enable **Auto Duck While I Speak** to reduce the existing background mix only
+  during the selected take; its separate Background During Commentary slider
+  sets that level (0–100%). Leave Auto Duck off for steady gameplay sound.
+  Click **APPLY CHANGES** to update both playback and exported MP4s. Changes are
+  undoable; all original recordings remain unchanged.
+- Put the editor playhead inside the take and click **SPLIT AT PLAYHEAD** for two
+  independently editable clips. VOICE blocks also support timeline dragging,
+  edge trimming, right-click Delete and Ctrl+Z/Ctrl+Y undo. Deleting removes
+  only the timeline reference, not your WAV.
+- Use **CURRENT VOICE** / **ORIGINAL VOICE** and the large
+  **PLAY TAKE / PAUSE / STOP** buttons to audition only your selected recording.
+  **RESTORE ORIGINAL** changes which voice is used in the final video without
+  deleting either saved WAV.
+- **PITCH / SPEED ONLY** runs a local FFmpeg voice effect (requires a build with
+  the `rubberband` audio filter for pitch/tempo changes). This is not neural
+  voice identity conversion.
+- **CONVERT · OPENVOICE** uses the existing *optional, local* OpenVoice V2
+  converter and saved authorised speaker catalogue. Install it separately and
+  explicitly with `py -3.13 setup-voice-studio.py` if necessary. That setup
+  downloads free models and a separate CPU runtime, which can be large/slow;
+  nothing downloads from the editor itself. Conversion runs locally with no
+  OpenAI API charge and depends on a completed pinned runtime. The model's
+  speaker labels do not guarantee any accent or expressive result.
+- Edited commentary is mixed into audible preview and exported MP4s on the
+  output clock after trims/cuts/speed. Optional Auto Duck attenuates the
+  background mix (game audio, music and other bed sounds) only while the
+  selected take plays; it does not modify the original video file. The global
+  video-audio slider is shared with the Music panel's **ORIGINAL** level, so
+  either screen uses the same volume setting. Source-file edits,
+  playback speed changes *after* recording, and audio-device latency should be
+  manually checked for sync before publishing; real device timing varies.
+- No automatic transcript, word-level editing or voice-cloning import panel is
+  included in this first pass. The original recording and converted WAVs remain
+  separately available in the Pulse voiceover library. Keep that library when
+  moving between computers; Git does not transfer private voice recordings.
+
+Focused tests: `python -m unittest tests.test_commentary tests.test_commentary_recording
+-v`. The optional Windows Tk test is `$env:PULSE_RUN_UI_TESTS = '1';
+py -3.13 -m unittest tests.test_commentary_ui -v`. FFmpeg render checks use
+`python -m unittest tests.test_commentary_render -v`.
+
 ## Photo and video Media track (Phase A)
 
 Quick Edit now has a **PHOTOS / VIDEO** button and a dedicated **MEDIA**
