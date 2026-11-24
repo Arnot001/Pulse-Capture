@@ -42,6 +42,9 @@ class CommentaryStudio(tk.Toplevel):
         self._closing = False
         self._cancel = threading.Event()
         self._poll_id = None
+        self._hud = None
+        self._hud_level = None
+        self._hud_status = None
         self.mic = tk.StringVar(value='')
         self.start_var = tk.StringVar(value='0')
         self.end_var = tk.StringVar(value='0')
@@ -285,6 +288,44 @@ class CommentaryStudio(tk.Toplevel):
         editor.note.configure(text='Commentary updated. Original WAV preserved.',fg=t.GREEN)
         self.refresh(select)
 
+    def _show_recording_hud(self):
+        """Keep gameplay visible while the microphone records in the background."""
+        if self._hud is not None and self._hud.winfo_exists():
+            return
+        hud = tk.Toplevel(self.editor)
+        hud.title('PULSE · RECORDING')
+        hud.configure(bg=t.PANEL)
+        hud.resizable(False, False)
+        x = max(0, min(hud.winfo_screenwidth()-340,
+                       self.editor.winfo_rootx()+self.editor.winfo_width()-360))
+        y = max(0, min(hud.winfo_screenheight()-160,
+                       self.editor.winfo_rooty()+55))
+        hud.geometry(f'325x135+{x}+{y}')
+        hud.transient(self.editor)
+        t.label(hud, '🎙  RECORDING COMMENTARY', 11, t.CYAN, True).pack(
+            anchor='w', padx=12, pady=(9,3))
+        self._hud_status = t.label(
+            hud, 'Starting microphone…', 9, t.MUTED)
+        self._hud_status.pack(anchor='w', padx=12)
+        self._hud_level = ttk.Progressbar(hud, maximum=1.0)
+        self._hud_level.pack(fill='x', padx=12, pady=5)
+        stop = t.button(hud, '■  STOP & SAVE', self.stop, accent=True)
+        stop.configure(padx=10, pady=5, font=(t.FONT,-10,'bold'))
+        stop.pack(fill='x', padx=12)
+        hud.protocol('WM_DELETE_WINDOW',self.stop)
+        self._hud = hud
+        self.withdraw()
+
+    def _hide_recording_hud(self):
+        hud, self._hud = self._hud, None
+        self._hud_level = None
+        self._hud_status = None
+        if hud is not None and hud.winfo_exists():
+            hud.destroy()
+        if not self._closing and self.winfo_exists():
+            self.deiconify()
+            self.lift()
+
     def record(self):
         editor = self.editor
         if self._busy or self.recorder.active:
@@ -306,6 +347,7 @@ class CommentaryStudio(tk.Toplevel):
             self._recording_playhead = at
             self._video_started = False
             self.recorder.start(self.devices[pos]['index'])
+            self._show_recording_hud()
             self.record_button.configure(state='disabled')
             self.stop_button.configure(state='normal')
             self.message('Opening microphone… video starts when recording is ready.')
@@ -316,6 +358,8 @@ class CommentaryStudio(tk.Toplevel):
         if self.recorder.active:
             self.recorder.stop()
             self.message('Finishing WAV… original will be kept.')
+            if self._hud_status is not None:
+                self._hud_status.configure(text='Saving original WAV…',fg=t.CYAN)
         if self._video_started:
             self.editor.stop_play()
 
@@ -518,6 +562,8 @@ class CommentaryStudio(tk.Toplevel):
             kind=result[0]
             if kind=='started':
                 try:
+                    if self._hud_status is not None:
+                        self._hud_status.configure(text='Speak while your video plays',fg=t.CYAN)
                     self.editor.play_preview()
                     self._video_started=bool(self.editor.playing)
                     self.message('Recording microphone and playing video. Press STOP & SAVE to finish.')
@@ -526,19 +572,27 @@ class CommentaryStudio(tk.Toplevel):
                     self.message(f'Microphone started but video could not play: {exc}',True)
             elif kind=='saved':
                 self.editor.stop_play()
+                self._hide_recording_hud()
                 self._record_saved(result[1])
             elif kind=='error':
+                self._hide_recording_hud()
                 self.record_button.configure(state='normal')
                 self.stop_button.configure(state='disabled')
                 self.editor.stop_play()
                 self.message(result[1],True)
         self.level_meter['value']=self.recorder.level if self.recorder.active else 0.
+        if self._hud_level is not None:
+            self._hud_level['value']=self.recorder.level if self.recorder.active else 0.
         self._poll_id=self.after(80,self.poll)
 
     def close(self):
         self._closing=True
         self._cancel.set()
         self.recorder.stop()
+        if self.recorder.worker and self.recorder.worker.is_alive():
+            self.recorder.worker.join(timeout=2)
+        if self._hud is not None:
+            self._hide_recording_hud()
         if self._video_started:
             self.editor.stop_play()
         if self._poll_id:
