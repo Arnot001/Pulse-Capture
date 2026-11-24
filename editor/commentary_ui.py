@@ -265,6 +265,7 @@ class CommentaryStudio(tk.Toplevel):
             anchor='w', justify='left', wraplength=790)
         self.status.pack(fill='x', padx=2)
         self._sync_preview_buttons()
+        self._sync_mix_controls()
 
     def _field(self, parent, row, column, title, variable):
         group = tk.Frame(parent, bg=t.BG)
@@ -295,8 +296,19 @@ class CommentaryStudio(tk.Toplevel):
         return scale
 
     def _toggle_duck(self):
+        self._sync_mix_controls()
+
+    def _sync_mix_controls(self):
+        # Global video volume works even without a take. Per-take voice and
+        # ducking controls must not appear usable until a take is selected.
+        has_take = self.chosen() is not None
+        self.voice_slider.configure(
+            state='normal' if has_take else 'disabled')
+        self.duck_switch.configure(
+            state='normal' if has_take else 'disabled')
         self.duck_slider.configure(
-            state='normal' if self.duck_var.get() else 'disabled')
+            state='normal' if has_take and self.duck_var.get()
+            else 'disabled')
 
     def _sync_preview_buttons(self):
         take = self.chosen() is not None
@@ -425,6 +437,7 @@ class CommentaryStudio(tk.Toplevel):
             self.video_var.set(self.editor.edits.music.original_volume)
             self.draw_wave()
             self._sync_preview_buttons()
+            self._sync_mix_controls()
 
     def on_select(self, _event=None):
         index = self.clips.curselection()
