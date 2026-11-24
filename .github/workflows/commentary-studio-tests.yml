@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - feature/commentary-record-edit-convert-20261124
+      - fix/commentary-mic-detection-20261124
   pull_request:
     paths:
       - 'editor/commentary*'

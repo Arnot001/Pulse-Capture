@@ -7,7 +7,7 @@ import sys
 import time
 import unittest
 
-from editor.voice_recording import MicrophoneRecorder, is_microphone
+from editor.voice_recording import MicrophoneRecorder, is_microphone, microphones
 from editor.voice_assets import digest, wav_info
 
 
@@ -17,6 +17,30 @@ class MicrophoneTests(unittest.TestCase):
         self.assertFalse(is_microphone({'maxInputChannels':2,'name':'Stereo Mix'}))
         self.assertFalse(is_microphone({'maxInputChannels':1,'name':'Mic',
                                         'isLoopbackDevice':True}))
+
+    def test_windows_generic_default_input_is_not_filtered_as_loopback(self):
+        for name in ('Microsoft Sound Mapper - Input', 'Primary Sound Capture Driver'):
+            self.assertTrue(is_microphone({
+                'maxInputChannels': 2, 'name': name,
+                'isLoopbackDevice': False}), name)
+        for name in ('Stereo Mix (Realtek Audio)', 'What U Hear',
+                     'Virtual-Audio-Capturer', 'Speakers Loopback'):
+            self.assertFalse(is_microphone({'maxInputChannels': 2, 'name': name}), name)
+
+    def test_discovers_default_mapper_when_named_microphone_unavailable(self):
+        entries = (
+            {'index':0,'name':'Speakers Loopback','maxInputChannels':2,'isLoopbackDevice':True},
+            {'index':1,'name':'Microsoft Sound Mapper - Input','maxInputChannels':2},
+            {'index':2,'name':'Primary Sound Capture Driver','maxInputChannels':2},
+        )
+        class Manager:
+            closed = False
+            def get_device_count(self): return len(entries)
+            def get_device_info_by_index(self,index): return entries[index]
+            def terminate(self): self.closed = True
+        with patch.dict(sys.modules, {'pyaudiowpatch': SimpleNamespace(PyAudio=Manager)}):
+            found = microphones()
+        self.assertEqual([d['index'] for d in found], [1,2])
 
     def test_started_event_precedes_saved_wav_and_retakes_preserve_source(self):
         with TemporaryDirectory() as folder:

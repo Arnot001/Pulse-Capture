@@ -106,9 +106,10 @@ class CommentaryStudio(tk.Toplevel):
             record, values=(), textvariable=self.mic, state='readonly', width=27)
         self.device_picker.pack(side='left', padx=4, pady=7)
         self.record_button = self._button(record, '● RECORD + PLAY', self.record, True)
+        self.record_button.configure(state='disabled')  # Enable only after input discovery.
         self.stop_button = self._button(record, '■ STOP & SAVE', self.stop)
         self.stop_button.configure(state='disabled')
-        self.reload_mics_button = self._button(record, '↻', self.reload_mics)
+        self.reload_mics_button = self._button(record, '↻ REFRESH', self.reload_mics)
         self.level_meter = ttk.Progressbar(self.content, maximum=1.0)
         self.level_meter.pack(fill='x', padx=20, pady=(1, 6))
         t.label(self.content, 'Use headphones to avoid recording gameplay sound through the mic. The video starts when microphone capture is ready.',
@@ -211,7 +212,8 @@ class CommentaryStudio(tk.Toplevel):
 
     def reload_mics(self):
         if not self.recorder.active:
-            self._task(self._load_mics, 'Looking for microphones…')
+            if self._task(self._load_mics, 'Looking for microphones…'):
+                self.record_button.configure(state='disabled')
 
     def load_voices(self):
         self.voices = self.catalogue.search()
@@ -357,7 +359,10 @@ class CommentaryStudio(tk.Toplevel):
             return
         pos = self.device_picker.current()
         if pos < 0 or pos >= len(self.devices):
-            self.message('Select a microphone. If none is listed, install requirements-audio.txt.',True)
+            self.message(
+                'No recording input selected. Check Windows Settings → System → Sound → Input; '
+                'connect a microphone and press REFRESH. If Windows lists a mic but Pulse does not, '
+                'check that PyAudioWPatch is installed.', True)
             return
         at = editor.cuts.source_elapsed(editor.position,editor.trim)/editor.edits.speed
         total = editor.edits.output_duration(editor.cuts.kept_duration(editor.trim))
@@ -553,6 +558,8 @@ class CommentaryStudio(tk.Toplevel):
             if kind=='task':
                 self._busy=False
                 self._set_processing_buttons(False)
+                self.record_button.configure(
+                    state='normal' if self.devices else 'disabled')
                 if error:
                     hint = ('Microphone support is not installed. Run '
                             'py -3.13 -m pip install -r requirements-audio.txt '
@@ -563,8 +570,24 @@ class CommentaryStudio(tk.Toplevel):
                     self.devices=value[1]
                     self.device_picker.configure(values=[
                         f"{d['name'][:38]}  #{d['index']}" for d in self.devices])
-                    if self.devices:self.device_picker.current(0)
-                    else:self.message('No microphone found. Connect one and choose ↻.',True)
+                    if self.devices:
+                        self.device_picker.current(0)
+                        self.record_button.configure(state='normal')
+                        # Windows' generic mapping uses the user's DEFAULT
+                        # input device and may be the only exposed microphone.
+                        names = tuple(d['name'].casefold() for d in self.devices)
+                        if all(('sound mapper' in n or
+                                'primary sound capture' in n) for n in names):
+                            self.message(
+                                'Windows default recording input found. In Windows Sound → Input, '
+                                'make sure the default device is your microphone.', False)
+                        else:
+                            self.message(f'{len(self.devices)} recording input(s) found. Choose one and press RECORD.', False)
+                    else:
+                        self.record_button.configure(state='disabled')
+                        self.message(
+                            'No microphone input detected. Check Windows Settings → System → Sound → Input, '
+                            'microphone privacy permissions and physical connection, then press REFRESH.', True)
                 elif value[0]=='altered':
                     _,idx,old,path,voice_id=value
                     try:

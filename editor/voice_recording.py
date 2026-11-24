@@ -9,8 +9,19 @@ from .voice_assets import MAX_SECONDS, metadata, new_path
 
 
 def is_microphone(device):
-    excluded = ('stereo mix', 'loopback', 'what u hear', 'sound mapper', 'primary sound capture')
-    return (device['maxInputChannels'] > 0 and not device.get('isLoopbackDevice', False)
+    """Allow Windows' generic *input* routes while excluding audio loopback.
+
+    PortAudio sometimes exposes an actual headset microphone only through
+    'Microsoft Sound Mapper - Input' / 'Primary Sound Capture Driver'.
+    Filtering those generic input aliases made the Commentary dropdown empty
+    even though Windows could record audio. They refer to the user's selected
+    Windows default recording device, not an automatically chosen microphone.
+    """
+    excluded = ('stereo mix', 'stereomix', 'loopback', 'what u hear',
+                'what you hear', 'wave out mix', 'waveout mix',
+                'virtual-audio-capturer')
+    return (device.get('maxInputChannels', 0) > 0
+            and not device.get('isLoopbackDevice', False)
             and not any(word in device.get('name', '').lower() for word in excluded))
 
 
@@ -18,9 +29,15 @@ def microphones():
     import pyaudiowpatch as audio
     manager = audio.PyAudio()
     try:
-        return [device for device in (manager.get_device_info_by_index(i)
-                for i in range(manager.get_device_count()))
-                if is_microphone(device)]
+        devices = [device for device in (manager.get_device_info_by_index(i)
+                   for i in range(manager.get_device_count()))
+                   if is_microphone(device)]
+        # Put individually named microphones before Windows default aliases;
+        # the latter remain selectable if they're the only input route.
+        defaults = ('sound mapper', 'primary sound capture')
+        return sorted(devices, key=lambda d: (
+            any(x in d.get('name', '').lower() for x in defaults),
+            d.get('name', '').lower()))
     finally:
         manager.terminate()
 
