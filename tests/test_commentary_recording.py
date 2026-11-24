@@ -7,7 +7,7 @@ import sys
 import time
 import unittest
 
-from editor.voice_recording import MicrophoneRecorder, is_microphone, microphones
+from editor.voice_recording import MicrophoneRecorder, is_microphone, microphones, microphone_formats
 from editor.voice_assets import digest, wav_info
 
 
@@ -80,6 +80,73 @@ class MicrophoneTests(unittest.TestCase):
                 recorder.worker.join(2)
                 self.assertNotEqual(Path(recorder.path),first)
                 self.assertEqual(digest(first),original)
+
+    def test_format_selection_stays_on_explicit_microphone(self):
+        self.assertEqual(microphone_formats({'maxInputChannels':2,'defaultSampleRate':48000}),
+                         [(48000,1),(48000,2),(44100,1),(44100,2)])
+        self.assertEqual(microphone_formats({'maxInputChannels':1,'defaultSampleRate':16000}),
+                         [(16000,1),(48000,1),(44100,1)])
+        with self.assertRaises(ValueError):
+            microphone_formats({'maxInputChannels':0})
+
+    def test_stereo_fallback_creates_valid_pcm_and_preserves_frame_count(self):
+        with TemporaryDirectory() as folder:
+            openings=[]
+            class Stream:
+                def read(self,count,**kwargs):
+                    time.sleep(.005)
+                    return b'\x10\x00\x10\x00' * count
+                def stop_stream(self):pass
+                def close(self):pass
+            class Manager:
+                def get_device_info_by_index(self,index):
+                    self.index=index
+                    return {'name':'Primary Sound Capture Driver',
+                            'maxInputChannels':2,'defaultSampleRate':48000}
+                def open(self,**kwargs):
+                    openings.append(kwargs)
+                    if kwargs['channels'] == 1:
+                        raise OSError(-9999,'Unanticipated host error')
+                    return Stream()
+                def terminate(self):pass
+            audio=SimpleNamespace(PyAudio=Manager,paInt16=8)
+            with patch.dict(sys.modules,{'pyaudiowpatch':audio}):
+                rec=MicrophoneRecorder(folder)
+                rec.start(4)
+                time.sleep(.065)
+                rec.stop()
+                rec.worker.join(3)
+                results=[]
+                while not rec.events.empty():
+                    results.append(rec.events.get_nowait())
+                self.assertEqual([e[0] for e in results], ['started','saved'])
+                self.assertTrue(all(x['input_device_index']==4 for x in openings))
+                self.assertEqual([x['channels'] for x in openings],[1,2])
+                info=wav_info(rec.path)
+                self.assertEqual((info['channels'],info['rate']),(2,48000))
+                self.assertAlmostEqual(info['duration'],rec.frames/48000)
+                self.assertGreater(rec.frames,0)
+
+    def test_failed_device_open_is_actionable_and_creates_no_fake_take(self):
+        with TemporaryDirectory() as folder:
+            class Manager:
+                def get_device_info_by_index(self,index):
+                    return {'name':'Microsoft Sound Mapper - Input',
+                            'maxInputChannels':2,'defaultSampleRate':48000}
+                def open(self,**kwargs):
+                    raise OSError(-9999,'Unanticipated host error')
+                def terminate(self):pass
+            with patch.dict(sys.modules,{
+                    'pyaudiowpatch': SimpleNamespace(PyAudio=Manager,paInt16=8)}):
+                rec=MicrophoneRecorder(folder)
+                rec.start(0)
+                rec.worker.join(3)
+                kind,message=rec.events.get_nowait()
+                self.assertEqual(kind,'error')
+                self.assertIn('Windows Settings',message)
+                self.assertIn('Microphone',message)
+                self.assertIn('No audio file was created',message)
+                self.assertFalse(rec.path.exists())
 
     def test_loopback_rejected_without_starting_recording(self):
         with TemporaryDirectory() as folder:
