@@ -167,7 +167,7 @@ class MusicTools:
                     message = f"{music.track} · {recipe['mood']} · {recipe['bpm']} BPM"
                 w.note.configure(text=message, fg=t.MUTED)
             else:
-                w.note.configure(text='Music off · source audio is unchanged.', fg=t.MUTED)
+                w.note.configure(text=f'Music off · original video audio {round(music.original_volume*100)}%.', fg=t.MUTED)
         except (ValueError, TypeError) as exc:
             self.sync()
             w.note.configure(text=str(exc), fg=t.RED)
@@ -221,7 +221,8 @@ class MusicTools:
         self.browse_button.configure(state='normal' if ready else 'disabled')
         self.details_button.configure(state='normal' if ready else 'disabled')
         self.music_volume_combo.configure(state='readonly' if enabled else 'disabled')
-        self.original_volume_combo.configure(state='readonly' if enabled else 'disabled')
+        # Source audio gain now also applies without an added music track.
+        self.original_volume_combo.configure(state='readonly' if ready else 'disabled')
         for check in self.option_checks:
             check.configure(state='normal' if enabled else 'disabled')
         music = w.edits.music
