@@ -590,6 +590,7 @@ class EditorWindow(tk.Toplevel):
         self.video.drag = None
         self.video.zoom_drag = False
         self.video.gesture = self.video.candidate = None
+        self.video.media_drag = None
         self.video.draw_overlay()
         if self.preview and not self.playing:
             self.request_frame()
@@ -948,6 +949,7 @@ class EditorWindow(tk.Toplevel):
         self.video.drag = None
         self.video.zoom_drag = False
         self.video.gesture = self.video.candidate = None
+        self.video.media_drag = None
         self.update_brand_controls()
         self.cut_tools.refresh()
         self.overlay_tools.refresh()
