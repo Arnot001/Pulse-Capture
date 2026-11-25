@@ -6,7 +6,10 @@ import textwrap
 from .reactions import finite
 
 FONT_DIR = Path(__file__).resolve().parent.parent/'assets'/'fonts'
-THEMES = ('Comedy Bold', 'Cinematic', 'Meme / Reaction', 'Clean News')
+THEMES = ('Comedy Bold', 'Cinematic', 'Meme / Reaction', 'Clean News',
+          'Classic', 'Pulse Neon', 'Gaming', 'YouTube Shorts', 'Minimal')
+# Only known system/bundled families may appear in an ASS style.
+FONT_FAMILIES = ('DejaVu Sans', 'Arial', 'Segoe UI', 'Verdana', 'Impact', 'Georgia', 'Tahoma')
 
 
 @dataclass(frozen=True)
@@ -22,6 +25,13 @@ class CaptionStyle:
     animation: str = 'pop'
     band_width: float = 1
     band_y: float = .5
+    font_family: str = 'DejaVu Sans'
+    bold: bool = True
+    background_enabled: bool = False
+    background_colour: str = '#000000'
+    background_opacity: float = .65
+    x_offset: float = 0.0
+    y_offset: float = 0.0
 
     def validate(self):
         if self.theme not in THEMES or self.alignment not in ('left', 'centre', 'right') or self.animation not in ('none','fade','pop','shake'):
@@ -30,13 +40,18 @@ class CaptionStyle:
             if type(value) is not int:
                 raise ValueError('Caption sizes must use whole pixels.')
             finite(value,low,high,'Caption size')
-        for colour in (self.colour, self.highlight_colour):
+        if self.font_family not in FONT_FAMILIES or type(self.bold) is not bool or type(self.background_enabled) is not bool:
+            raise ValueError('Unsupported caption font or background setting.')
+        for colour in (self.colour, self.highlight_colour, self.background_colour):
             if type(colour) is not str or not re.fullmatch('#[0-9a-fA-F]{6}',colour):
                 raise ValueError('Caption colours must be #RRGGBB.')
         if type(self.highlight) is not str or len(self.highlight)>80 or any(ord(c)<32 or c in '{}\\' for c in self.highlight):
             raise ValueError('Highlight must be a plain phrase of at most 80 characters.')
         finite(self.band_width, .3, 1, 'Caption band width')
         finite(self.band_y, 0, 1, 'Caption position within band')
+        finite(self.background_opacity, 0, 1, 'Caption background opacity')
+        finite(self.x_offset, -.4, .4, 'Caption horizontal offset')
+        finite(self.y_offset, -.4, .4, 'Caption vertical offset')
 
 
 def theme_style(theme):
@@ -46,11 +61,32 @@ def theme_style(theme):
         return CaptionStyle(theme,76,3,2,animation='none')
     if theme == 'Meme / Reaction':
         return CaptionStyle(theme,96,6,3,animation='shake')
+    if theme == 'Classic':
+        return CaptionStyle(theme=theme, font_family='Arial', font_size=76,
+                            outline=3, shadow=2, animation='none')
+    if theme == 'Pulse Neon':
+        return CaptionStyle(theme=theme, font_family='Segoe UI', font_size=96,
+                            outline=5, shadow=3, colour='#27DEF5', animation='pop')
+    if theme == 'Gaming':
+        return CaptionStyle(theme=theme, font_family='Impact', font_size=106,
+                            outline=7, shadow=3, colour='#FFFFFF', animation='pop')
+    if theme == 'YouTube Shorts':
+        return CaptionStyle(theme=theme, font_family='Arial', font_size=96,
+                            outline=6, shadow=2, colour='#FFFFFF', animation='pop')
+    if theme == 'Minimal':
+        return CaptionStyle(theme=theme, font_family='Segoe UI', font_size=68,
+                            outline=1, shadow=0, animation='none')
     return CaptionStyle()
 
 
 def ass_colour(colour):
     return '&H'+colour[5:7]+colour[3:5]+colour[1:3]+'&'
+
+
+def ass_background_colour(colour, opacity):
+    """ASS AABBGGRR; alpha 0 is opaque and 255 is transparent."""
+    alpha = round((1-opacity)*255)
+    return f'&H{alpha:02X}{colour[5:7]}{colour[3:5]}{colour[1:3]}&'
 
 
 def ass_time(value):
@@ -98,6 +134,9 @@ def styled_filter(width, height, caption, style, resources, intervals, sample_ti
     x = {'left':width*.11,'centre':width*.5,'right':width*.89}[style.alignment]
     y = height*.12 if caption.position=='Top' else height*.78 if caption.position=='Bottom' else height*.5
     anchor = align+6 if caption.position=='Top' else align if caption.position=='Bottom' else align+3
+    # Offsets use frame fractions, so preview and export produce the same placement.
+    x = max(width*.07, min(width*.93, x+width*style.x_offset))
+    y = max(height*.07, min(height*.93, y+height*style.y_offset))
     clip = ''
     if bands:
         from .comedy_layout import fit_caption
@@ -113,6 +152,9 @@ def styled_filter(width, height, caption, style, resources, intervals, sample_ti
         y = band.y+padding+(band.height-2*padding-block_h)*style.band_y+block_h/2
         anchor = align+3
         clip = f'\\clip({band.x},{band.y},{band.x+band.width},{band.y+band.height})'
+    back_colour = ass_background_colour(style.background_colour, style.background_opacity)
+    border_style = 3 if style.background_enabled else 1
+    weight = -1 if style.bold else 0
     header = f'''[Script Info]
 ScriptType: v4.00+
 PlayResX: {width}
@@ -121,7 +163,7 @@ WrapStyle: 2
 ScaledBorderAndShadow: yes
 [V4+ Styles]
 Format: Name,Fontname,Fontsize,PrimaryColour,SecondaryColour,OutlineColour,BackColour,Bold,Italic,Underline,StrikeOut,ScaleX,ScaleY,Spacing,Angle,BorderStyle,Outline,Shadow,Alignment,MarginL,MarginR,MarginV,Encoding
-Style: Pulse,DejaVu Sans,{size},{ass_colour(style.colour)},&H00FFFFFF,&H00000000,&H80000000,-1,0,0,0,{90 if style.theme in ('Cinematic','Clean News') else 100},100,0,0,1,{style.outline*factor},{style.shadow*factor},{anchor},0,0,0,1
+Style: Pulse,{style.font_family},{size},{ass_colour(style.colour)},&H00FFFFFF,&H00000000,{back_colour},{weight},0,0,0,{90 if style.theme in ('Cinematic','Clean News','Minimal') else 100},100,0,0,{border_style},{style.outline*factor},{style.shadow*factor},{anchor},0,0,0,1
 [Events]
 Format: Layer,Start,End,Style,Name,MarginL,MarginR,MarginV,Effect,Text
 '''
