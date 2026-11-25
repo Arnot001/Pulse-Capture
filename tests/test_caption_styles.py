@@ -65,7 +65,7 @@ def test_style_is_consistent_for_preview_and_export(tmp_path):
     parts = style_row.split(',')
     assert parts[1] == 'Arial'
     assert parts[7] == '0'    # Non-bold text
-    assert parts[16] == '3'   # Opaque-box border style, alpha is in BackColour
+    assert parts[15] == '3'   # Opaque-box border style, alpha is in BackColour
     assert '&H' in parts[6]  # Background colour is encoded for ASS
     assert 'Dialogue: 0,' in export
 
