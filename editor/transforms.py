@@ -182,7 +182,7 @@ class EditOptions:
                     (media.width,media.height) == SHORTS_RESOLUTION):
                 raise ValueError('Comedy Layout requires Full Frame Shorts or an assembled portrait plan.')
             entries = [(c.text,c.position,c.style) for c in self.text.captions]
-            if self.text.enabled:entries.append((self.text.text,self.text.position,None))
+            if self.text.enabled:entries.append((self.text.text,self.text.position,self.text.style))
             for value,position,style in entries:
                 if position not in ('Top','Bottom'):
                     raise ValueError('Use Top or Bottom captions with Comedy Layout.')

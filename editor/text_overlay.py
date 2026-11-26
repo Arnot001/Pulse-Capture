@@ -40,6 +40,7 @@ class TextOverlay:
     position: str = 'Bottom'
     captions: tuple[Caption, ...] = ()
     safe_area: bool = False
+    style: object = None
 
     @property
     def visible(self):
@@ -48,6 +49,10 @@ class TextOverlay:
     def validate(self):
         if type(self.safe_area) is not bool or len(self.captions) > 160:
             raise ValueError('Invalid caption settings or too many captions.')
+        if self.style is not None:
+            from .typography import CaptionStyle
+            if not isinstance(self.style, CaptionStyle):raise ValueError('Invalid text style.')
+            self.style.validate()
         for caption in self.captions:
             if not isinstance(caption, Caption):
                 raise ValueError('Invalid timed caption.')
@@ -64,6 +69,9 @@ class TextOverlay:
             raise ValueError('Keep your text to 160 characters and three lines.')
         if any(unicodedata.category(c) in ('Cc', 'Cs') and c != '\n' for c in self.text):
             raise ValueError('Remove unsupported control characters from your text.')
+        if self.style is not None:
+            from .typography import caption_layout
+            caption_layout(1080,1920,self.text,self.style)
 
 
 def text_geometry(width, height, text):
@@ -158,10 +166,10 @@ def caption_intervals(caption, trim, cuts):
 def text_filter(width, height, text, resources, trim=None, cuts=None, source_position=None, bands=None):
     filters = []
     if text.enabled:
-        if bands:
+        if bands or text.style is not None:
             from .typography import styled_filter, CaptionStyle
             filters.append(styled_filter(width,height,Caption(0,86400,text.text,text.position),
-                           CaptionStyle(font_size=104,animation='none'),resources,[(0,86400)],source_position,bands))
+                           text.style or CaptionStyle(font_size=104,animation='none'),resources,[(0,86400)],source_position,bands))
         else:
             filters.append(_drawtext(width, height, text, resources, resources.path))
     if text.captions and (resources is None or len(resources.caption_paths) != len(text.captions)):

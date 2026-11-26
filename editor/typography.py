@@ -44,7 +44,7 @@ class CaptionStyle:
     def validate(self):
         if self.theme not in THEMES or self.alignment not in ('left', 'centre', 'right') or self.animation not in ('none','fade','pop','shake'):
             raise ValueError('Unsupported caption theme, alignment or animation.')
-        for value, low, high in ((self.font_size,40,120),(self.outline,0,10),(self.shadow,0,10)):
+        for value, low, high in ((self.font_size,16,240),(self.outline,0,10),(self.shadow,0,10)):
             if type(value) is not int:
                 raise ValueError('Caption sizes must use whole pixels.')
             finite(value,low,high,'Caption size')

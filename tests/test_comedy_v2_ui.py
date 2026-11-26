@@ -13,7 +13,11 @@ from editor.pulse_plan import starter_plan, source_identity
 
 @unittest.skipUnless(os.environ.get('PULSE_RUN_UI_TESTS')=='1','Opt-in Windows Tk integration')
 class ComedyUITests(unittest.TestCase):
-    setUp=fixture.PulsePlanUITests.setUp
+    def setUp(self):
+        fixture.PulsePlanUITests.setUp(self)
+        # Persisted style choices from another case must not change this fixture.
+        preferences=patch.dict(os.environ,LOCALAPPDATA=str(self.folder/'settings'))
+        preferences.start();self.addCleanup(preferences.stop)
     cleanup=fixture.PulsePlanUITests.cleanup
     pump=fixture.PulsePlanUITests.pump
 

@@ -26,7 +26,7 @@ class OverlayTools(PrivacyTools):
                              (self.text_position, [(v, v) for v in TEXT_POSITIONS])):
             group = tk.Frame(row, bg=t.PANEL)
             group.pack(side='left', fill='x', expand=True, padx=(0, 6))
-            segments = window.add_segments(group, var, choices, self.text_changed)
+            segments = window.add_segments(group, var, choices, self.size_changed if var is self.text_size else self.text_changed)
             for _, button in segments.buttons:
                 button.configure(padx=7, pady=4)
         footer = tk.Frame(panel, bg=t.PANEL)
@@ -36,7 +36,24 @@ class OverlayTools(PrivacyTools):
         self.caption_button.configure(pady=1, font=(t.FONT, -9, 'bold'))
         self.caption_button.pack(side='right')
         window.controls.append(self.caption_button)
+        self.style_button = t.button(footer, 'FONT & STYLE', self.edit_style)
+        self.style_button.configure(pady=1,font=(t.FONT,-9,'bold'))
+        self.style_button.pack(side='right',padx=8);window.controls.append(self.style_button)
         super().__init__(window)
+
+    def edit_style(self):
+        from .text_style_dialog import TextStyleDialog
+        if self.window.media and not self.window.exporter.busy:
+            for child in self.window.winfo_children():
+                if isinstance(child,TextStyleDialog):child.lift();return
+            TextStyleDialog(self.window)
+
+    def size_changed(self):
+        text=self.window.edits.text
+        if text.style is not None:
+            text=replace(text,style=replace(text.style,font_size=round(TEXT_SIZES[self.text_size.get()]*1080)))
+            self.window.edits=replace(self.window.edits,text=text)
+        self.text_changed()
 
     def text_modified(self, _=None):
         if self.input.edit_modified():
