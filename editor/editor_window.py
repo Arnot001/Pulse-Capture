@@ -177,6 +177,7 @@ class EditorWindow(tk.Toplevel):
         add_actions = tk.Menu(
             self.add_menu, tearoff=0, bg=t.PANEL, fg=t.TEXT,
             activebackground=t.CYAN, activeforeground=t.BG)
+        add_actions.add_command(label='Add Clip', command=lambda: self.sequence_ui.add())
         add_actions.add_command(label='Photo / Video', command=self.open_imported_media)
         add_actions.add_command(label='Emoji', command=lambda: self.open_reactions('emoji'))
         add_actions.add_command(label='GIF / Reaction', command=lambda: self.open_reactions('gif'))
@@ -347,6 +348,8 @@ class EditorWindow(tk.Toplevel):
             self.end_clip_drag, self.delete_timeline_item)
         self.timeline.on_output_seek = self.seek_output_time
         self.timeline.pack(fill='x')
+        from .sequence_ui import SequenceControls
+        self.sequence_ui = SequenceControls(self, timeline_space)
         self.paint_tool_buttons()
 
     def add_segments(self, parent, variable, choices, command):
@@ -897,6 +900,7 @@ class EditorWindow(tk.Toplevel):
                 self._commentary_synced != self.edits.commentary_clips):
             self._commentary_synced = self.edits.commentary_clips
             self.commentary_studio.refresh()
+        self.sequence_ui.decorate()
         self.timeline.draw()
         self.clock.configure(text=f'{format_time(self.position)} / {format_time(self.media.duration)}')
         self.refresh_crop_guide()
@@ -906,6 +910,8 @@ class EditorWindow(tk.Toplevel):
         self.seek(self.cuts.source_from_elapsed(at*self.edits.speed,self.trim))
 
     def begin_clip_drag(self, key):
+        if key[0]=='source':
+            self.stop_play();self.sequence_ui.begin_drag(key);return
         if not self.media or self.exporter.busy or self.closing:return
         self.stop_play()
         state=EditSnapshot(self.trim,self.cuts,self.edits)
@@ -917,6 +923,8 @@ class EditorWindow(tk.Toplevel):
         self._timing_drag_key=key
 
     def change_clip_drag(self, key, start, end):
+        if key[0]=='source':
+            self.sequence_ui.change_drag(key,start,end);return
         if self._timing_drag_key!=key or not self.media or self.exporter.busy:return
         try:
             state=EditSnapshot(self.trim,self.cuts,self.edits)
@@ -931,6 +939,8 @@ class EditorWindow(tk.Toplevel):
             self.note.configure(text=str(exc),fg=t.RED)
 
     def end_clip_drag(self):
+        if self.sequence_ui.drag is not None:
+            self.sequence_ui.end_drag();return
         if self.timeline_history:self.timeline_history.end()
         if self._timing_drag_key is None:return
         self._timing_drag_key=None
@@ -943,6 +953,8 @@ class EditorWindow(tk.Toplevel):
         """One undoable operation for right-click and Delete key on a timeline block."""
         if not self.media or self.exporter.busy or self.closing:
             return
+        if key[0]=='source':
+            self.sequence_ui.remove();return
         if key not in {block.key for block in self.timeline.clip_blocks
                        if block.kind in self.timeline.DELETABLE}:
             return
@@ -984,6 +996,10 @@ class EditorWindow(tk.Toplevel):
         self.stop_play()
         restored=self.timeline_history.undo()
         self.edits=restored.edits
+        self.trim,self.cuts=restored.trim,restored.cuts
+        self.sequence_ui.restore_media()
+        self.start_text.set(format_time(self.trim.start))
+        self.end_text.set(format_time(self.trim.end))
         self.timeline.selected_key = None
         self.video.select_media(None, notify=False)
         self.video.select_visual(None)
@@ -1001,6 +1017,10 @@ class EditorWindow(tk.Toplevel):
         self.stop_play()
         restored=self.timeline_history.redo()
         self.edits=restored.edits
+        self.trim,self.cuts=restored.trim,restored.cuts
+        self.sequence_ui.restore_media()
+        self.start_text.set(format_time(self.trim.start))
+        self.end_text.set(format_time(self.trim.end))
         self.timeline.selected_key = None
         self.video.select_media(None, notify=False)
         self.video.select_visual(None)
@@ -1386,6 +1406,7 @@ class EditorWindow(tk.Toplevel):
         if self.closed:
             return
         self.closed = True
+        self.sequence_ui.close()
         if self.preview:
             self.preview.close()
         if self.playback:self.playback.close()

@@ -7,8 +7,8 @@ from .models import TrimRange, format_time
 class Timeline(tk.Canvas):
     """Source-clock trim row and output-clock draggable visual/audio tracks."""
 
-    MOVEABLE = frozenset(('caption', 'overlay', 'sound', 'media', 'commentary'))
-    DELETABLE = frozenset(('caption', 'overlay', 'sound', 'media', 'commentary', 'music', 'crop_key', 'zoom'))
+    MOVEABLE = frozenset(('source', 'caption', 'overlay', 'sound', 'media', 'commentary'))
+    DELETABLE = frozenset(('source', 'caption', 'overlay', 'sound', 'media', 'commentary', 'music', 'crop_key', 'zoom'))
     TRACK_TOP = 68
     TRACK_HEIGHT = 24
     TRACK_LABELS = ('VIDEO', 'MEDIA', 'CAPTIONS', 'EMOJIS / GIFS', 'SFX', 'VOICE', 'MUSIC', 'MOTION')
@@ -76,6 +76,7 @@ class Timeline(tk.Canvas):
         self.view_start=max(0,min(self.output_duration-updated,centre-ratio*updated))
         self.view_span=updated
         self.draw()
+        if hasattr(self,'on_select'):self.on_select()
         return 'break' 
 
     def block_at(self, x, y, allowed=None):
@@ -250,6 +251,7 @@ class Timeline(tk.Canvas):
         if selected is not None:
             self.focus_set()
         self.draw()
+        if hasattr(self,'on_select'):self.on_select()
         hit=self.block_hit(event.x,event.y)
         if hit is not None:
             block, mode=hit
