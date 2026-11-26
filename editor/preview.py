@@ -77,7 +77,8 @@ def preview_command(ffmpeg, media, position, width, height, edits=None, source_v
                      filters + f';[v]{scale}[preview]', '-map', '[preview]']
         else:
             args += ['-map', '0:v:0', '-vf', filters + ',' + scale]
-    return args + ['-frames:v', '1', '-an', '-c:v', 'ppm', '-f', 'image2pipe', 'pipe:1']
+    from .sequence_ffmpeg import sequence_command
+    return sequence_command(args + ['-frames:v', '1', '-an', '-c:v', 'ppm', '-f', 'image2pipe', 'pipe:1'], media, edits, still=True)
 
 
 class Preview:

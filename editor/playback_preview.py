@@ -42,9 +42,11 @@ def playback_command(ffmpeg, media, start, end, trim, cuts, edits, width, height
     current=add_media(args,graph,'v',edits.media_clips,out_w,out_h,offset=offset/edits.speed)
     current=add_visuals(args,graph,current,edits.overlays,out_w,out_h,bands=edits.bands(media))
     graph.append(f'[{current}]setpts=PTS-STARTPTS,format=yuv420p,scale={width}:{height}:flags=bilinear,setsar=1[playback]')
-    return args+['-filter_complex_threads','1','-filter_complex',';'.join(graph),
+    command = args+['-filter_complex_threads','1','-filter_complex',';'.join(graph),
         '-map','[playback]','-an','-t',f'{(end-start)/edits.speed:.9f}',
         '-r',str(FPS),'-fps_mode','cfr','-pix_fmt','rgb24','-c:v','rawvideo','-f','rawvideo','pipe:1']
+    from .sequence_ffmpeg import sequence_command
+    return sequence_command(command,media,edits)
 
 
 @dataclass(frozen=True)

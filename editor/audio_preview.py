@@ -97,7 +97,8 @@ def audio_preview_command(ffmpeg, media, source_position, trim, cuts=None,
     args += ['-filter_complex', ';'.join(graph), '-map', f'[{result}]',
              '-t', f'{duration:.9f}', '-ac', '2', '-ar', str(SAMPLE_RATE),
              '-c:a', 'pcm_s16le', '-f', 's16le', 'pipe:1']
-    return args
+    from .sequence_ffmpeg import sequence_command
+    return sequence_command(args,media,edits)
 
 
 class AudioPlayback:
