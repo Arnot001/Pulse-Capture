@@ -75,6 +75,8 @@ def build_export_command(ffmpeg, media, trim, output, edits=None, asset=None,
     if Path(output).resolve() == media.path.resolve():
         raise ValueError('An export must use a different filename from the original.')
 
+    from .sequence_ffmpeg import sequence_command, protect_sources
+    protect_sources(output,edits)
     asset = watermark_path() if asset is None else asset
     active_cuts = bool(cuts.visible_ranges(trim))
     kept_duration = cuts.kept_duration(trim)
@@ -191,7 +193,10 @@ def build_export_command(ffmpeg, media, trim, output, edits=None, asset=None,
     from .imported_media import validate_clips
     validate_clips(edits.media_clips, out_duration)
     width, height = edits.encoded_size(media)
-    return augment_export(args, edits, out_duration, width, height, edits.bands(media))
+    command = augment_export(args, edits, out_duration, width, height, edits.bands(media))
+    if edits.sequence:
+        command[-1:-1] = ['-t',f'{out_duration:.9f}','-r','30','-fps_mode','cfr']
+    return sequence_command(command,media,edits)
 
 
 def build_plan_segment_command(ffmpeg, media, item, output, framing, text_resources=None):
