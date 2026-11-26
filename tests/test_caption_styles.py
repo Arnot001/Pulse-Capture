@@ -65,7 +65,11 @@ def test_style_is_consistent_for_preview_and_export(tmp_path):
     parts = style_row.split(',')
     assert parts[1] == 'Arial'
     assert parts[7] == '0'    # Non-bold text
-    assert parts[15] == '3'   # Opaque-box border style, alpha is in BackColour
+    assert parts[15] == '1'   # Outline remains independent from the background
+    box = next(line for line in export.splitlines() if line.startswith('Style: PulseBox,')).split(',')
+    assert box[15] == '3'
+    assert box[6] == ass_background_colour('#113355', .5)
+    assert 'Dialogue: -1,' in export
     assert '&H' in parts[6]  # Background colour is encoded for ASS
     assert 'Dialogue: 0,' in export
 
@@ -79,3 +83,36 @@ def test_style_preferences_roundtrip_and_invalid_file_recovery(monkeypatch, tmp_
     assert load_caption_preference() == style
     path.write_text('{"background_enabled":"not-bool"}', encoding='utf-8')
     assert load_caption_preference() == CaptionStyle()
+
+
+def test_local_font_discovery_and_fallback(tmp_path):
+    from editor.caption_fonts import installed_fonts, resolve_family, stage_family
+    fonts = installed_fonts()
+    assert 'DejaVu Sans' in fonts
+    assert resolve_family('Unavailable font from another PC') == 'DejaVu Sans'
+    family, folder = stage_family('DejaVu Sans', tmp_path)
+    assert family == 'DejaVu Sans' and list(folder.glob('*.ttf'))
+
+
+def test_independent_outline_shadow_and_text_decoration(tmp_path):
+    style = CaptionStyle(italic=True, underline=True, outline_colour='#123456',
+                         shadow_colour='#987654', shadow_opacity=.25, shadow_x=-6,
+                         shadow_y=8, background_enabled=True)
+    resources = SimpleNamespace(temp=SimpleNamespace(name=str(tmp_path)))
+    styled_filter(1080,1920,Caption(0,2,'Caption',style=style),style,resources,[(0,2)])
+    text = next(tmp_path.glob('*.ass')).read_text(encoding='utf-8')
+    fields = next(line for line in text.splitlines() if line.startswith('Style: Pulse,')).split(',')
+    assert fields[8:10] == ['-1','-1']
+    assert fields[5] == '&H563412&'
+    assert fields[6] == ass_background_colour('#987654',.25)
+    box_event = next(line for line in text.splitlines() if line.startswith('Dialogue: -1,'))
+    assert 'xshad' not in box_event and 'yshad' not in box_event
+
+
+def test_custom_preset_library_roundtrip(monkeypatch, tmp_path):
+    from dataclasses import asdict
+    from editor.caption_tools import load_style_library, save_style_library
+    monkeypatch.setenv('LOCALAPPDATA',str(tmp_path))
+    data = {'presets': {'My caption': asdict(CaptionStyle(italic=True))}, 'recent':['#ABCDEF']}
+    save_style_library(data)
+    assert load_style_library() == data
