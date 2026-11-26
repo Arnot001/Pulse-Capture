@@ -146,8 +146,15 @@ class EditOptions:
     comedy_bands: tuple | None = None
     media_clips: tuple = ()
     commentary_clips: tuple = ()
+    sequence: tuple = ()
+    overlay_anchor: str = 'clips'
 
     def validate(self, media):
+        if self.sequence:
+            from .sequence import validate_sequence
+            validate_sequence(self.sequence)
+        if self.overlay_anchor not in ('clips','project'):
+            raise ValueError('Choose clip-attached or project-time overlays.')
         from .reactions import validate_cues
         validate_cues(self.sounds, self.overlays)
         from .imported_media import validate_clips
