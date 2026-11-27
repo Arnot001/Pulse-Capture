@@ -108,6 +108,8 @@ class CaptureApp(tk.Tk):
         t.label(footer, 'PULSE UTILITIES  /  v0.5.0', 8, t.MUTED).pack(side='right')
 
     def _wheel(self, event):
+        if not isinstance(event.widget, tk.Misc):
+            return
         if event.widget.winfo_toplevel() == self and not isinstance(event.widget, ttk.Combobox):
             self.canvas.yview_scroll(-int(event.delta / 120), 'units')
 
